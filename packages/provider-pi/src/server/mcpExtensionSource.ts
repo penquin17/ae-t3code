@@ -11,6 +11,9 @@ export const T3_PI_MCP_EXTENSION_PATH_ENV = "T3_PI_MCP_EXTENSION_PATH";
 // These tools trigger file-change approvals, bypassed by Auto-accept edits.
 export const PI_FILE_CHANGE_TOOLS = ["edit", "write"] as const;
 
+// AETHERIA-IP:IP-4 Pi flag that makes T3's orchestration prompt section optional (default false).
+const AETHERIA_DISABLE_T3_ORCHESTRATION_FLAG = "aetheria-disable-t3-orchestration";
+
 export const PI_T3_MCP_EXTENSION_SOURCE = `\
 import { stripFrontmatter, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as NodeFSP from "node:fs/promises";
@@ -241,6 +244,19 @@ function createMcpClient(endpoint: string, token: string) {
 }
 
 export default async function t3McpExtension(pi: ExtensionAPI) {
+  // AETHERIA-IP:IP-4 Optional orchestration section. Registered before any await so Pi knows the
+  // flag while loading extensions. Default false keeps T3's behavior; true drops only the section.
+  if (typeof pi.registerFlag === "function") {
+    pi.registerFlag(${JSON.stringify(AETHERIA_DISABLE_T3_ORCHESTRATION_FLAG)}, {
+      description: "Do not add T3's orchestration guidance to the system prompt.",
+      type: "boolean",
+      default: false,
+    });
+  }
+  // Read per turn: Pi applies command-line flag values after the extension has loaded.
+  const orchestrationDisabled = () =>
+    typeof pi.getFlag === "function" && pi.getFlag(${JSON.stringify(AETHERIA_DISABLE_T3_ORCHESTRATION_FLAG)}) === true;
+
   // RPC has no trust prompt, so Pi skips an untrusted folder's protected resources. Session
   // replacement reruns this factory without project_trust, and T3 drops notices outside a turn,
   // so check each session's first turn. An explicit --no-approve is deliberate and stays quiet.
@@ -465,6 +481,8 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // Keep guidance in the system prompt so leading slash commands still expand.
   pi.on("before_agent_start", (event, ctx) => {
     reconcileDiscovery(ctx);
+    // AETHERIA-IP:IP-4 Both paths below add the orchestration section; the flag skips both.
+    if (orchestrationDisabled()) return undefined;
     const sections = event.systemPromptOptions?.sections;
     if (sections && typeof sections === "object" && event.systemPromptOptions?.forceSystemPrompt === undefined) {
       // A full prompt override bypasses Pi's later section rendering.
