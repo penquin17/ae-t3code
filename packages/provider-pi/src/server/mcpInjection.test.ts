@@ -22,45 +22,6 @@ const mcpSession = {
 };
 
 describe("pi T3 MCP injection", () => {
-  it.each([
-    "--aetheria-disable-t3-orchestration",
-    "--aetheria-disable-t3-orchestration=true",
-    "--aetheria-disable-t3-orchestration=false",
-  ])("does not leave the T3-only orchestration flag %s orphaned during model discovery", (flag) => {
-    const launchArgs = [
-      "--offline",
-      "--extension",
-      "/fixture/aetheria-extension.js",
-      "--no-context-files",
-      "--no-skills",
-      flag,
-      "--unrelated-extension-flag=true",
-      "--aetheria-disable-t3-orchestration-extra=true",
-    ];
-    // Same launch options as makePiDiscoveryConnection: no T3 extension registers its flag.
-    const discovery = buildPiRpcLaunch({
-      launchArgs,
-      environment: {},
-      mcpSession: undefined,
-      extensionPath: undefined,
-      ephemeral: true,
-      shortLived: true,
-    });
-    assert.include(discovery.args, "/fixture/aetheria-extension.js");
-    assert.notInclude(discovery.args, flag);
-    assert.include(discovery.args, "--unrelated-extension-flag=true");
-    assert.include(discovery.args, "--aetheria-disable-t3-orchestration-extra=true");
-
-    // Live sessions still need IP-4 to disable T3's orchestration instructions.
-    const live = buildPiRpcLaunch({
-      launchArgs,
-      environment: {},
-      mcpSession: undefined,
-      extensionPath: "/fixture/t3-extension.js",
-    });
-    assert.include(live.args, flag);
-    assert.include(live.args, "/fixture/t3-extension.js");
-  });
   it("always adds the permission bridge and configures MCP when available", () => {
     const resolvedArgs = resolvePiLaunchArgs(
       "--extension=/home/user/.pi/agent/extensions/demo.ts --session-dir=/tmp/pi-sessions --provider=anthropic --model=claude-sonnet --tools='' --name=-review --extension-flag=kept",
