@@ -270,7 +270,15 @@ export function buildPiRpcLaunch(input: {
       : input.sessionPath !== undefined
         ? ["--session", input.sessionPath]
         : []),
-    ...launchArgs,
+    // AETHERIA-IP:IP-5: discovery omits the T3 extension, so its private flag
+    // must not reach Pi without the extension that registers it. Live sessions retain it.
+    ...(input.ephemeral === true && input.shortLived === true && !hasT3Extension
+      ? launchArgs.filter(
+          (arg) =>
+            arg !== "--aetheria-disable-t3-orchestration" &&
+            !arg.startsWith("--aetheria-disable-t3-orchestration="),
+        )
+      : launchArgs),
     ...(input.shortLived === true && !launchArgs.includes("--offline") ? ["--offline"] : []),
     // Restrictions must follow launch args so user flags cannot re-enable unattended tools/extensions.
     ...(input.disableExtensions === true ? ["--no-extensions"] : []),
