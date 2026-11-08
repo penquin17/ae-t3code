@@ -1,3 +1,5 @@
+// AETHERIA-IP:IP-14 the Aetheria RPC method names, for the aggregate entry below
+import { AETHERIA_WS_METHODS } from "@t3tools/aetheria-contracts";
 import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -221,6 +223,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeServerConfig]: "server",
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",
+  // AETHERIA-IP:IP-14 span-aggregate label for the Aetheria status method; this map is exhaustive over the joined group
+  [AETHERIA_WS_METHODS.compositionStatus]: "aetheria",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

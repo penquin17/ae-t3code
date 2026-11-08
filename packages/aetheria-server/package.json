@@ -1,0 +1,30 @@
+{
+  "name": "@t3tools/aetheria-server",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@aetheria/awareness": "file:./artifacts/aetheria-awareness-0.1.0.tgz",
+    "@t3tools/aetheria-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "aetheriaArtifacts": {
+    "@aetheria/awareness": {
+      "archive": "artifacts/aetheria-awareness-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:0f58d3a6b70faf0423451f71db53b54ad8cd46c7d16e21d19f59e5abf31f2c01"
+    }
+  }
+}

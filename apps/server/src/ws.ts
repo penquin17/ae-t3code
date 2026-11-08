@@ -2,6 +2,13 @@ import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
+// AETHERIA-IP:IP-9 pre-upgrade Backend-digest gate and the optional Backend composition service
+import { AetheriaBackendComposition } from "./aetheria/backendComposition.ts";
+// AETHERIA-IP:IP-11 the Backend service and the status method's handler, for the handler-map entry
+import { AETHERIA_WS_METHODS } from "@t3tools/aetheria-contracts";
+import { AetheriaBackend } from "./aetheria/aetheriaBackend.ts";
+import { compositionStatus as aetheriaCompositionStatus } from "./aetheria/aetheriaRpc.ts";
+import { backendDigestRefusal } from "./aetheria/connectionGate.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 
@@ -1465,6 +1472,8 @@ export const layerWsRpc = (
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+      // AETHERIA-IP:IP-11 optional: absent on a T3 without the Aetheria Backend, so the status method answers unavailable
+      const aetheriaBackend = yield* Effect.serviceOption(AetheriaBackend);
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -3397,6 +3406,9 @@ export const layerWsRpc = (
               Stream.concat(Stream.make(latest), changes),
             ),
           ),
+        // AETHERIA-IP:IP-11 the read-only Aetheria composition status method: the Backend's safe status, or the typed unavailable error
+        [AETHERIA_WS_METHODS.compositionStatus]: (_input) =>
+          aetheriaCompositionStatus(aetheriaBackend),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =
@@ -3424,6 +3436,10 @@ export const layer = Layer.unwrap(
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const sql = yield* SqlClient.SqlClient;
+    // AETHERIA-IP:IP-9 optional: absent on a T3 without the Aetheria Backend, so /ws behaves as before
+    const aetheriaComposition = yield* Effect.serviceOption(AetheriaBackendComposition);
+    // AETHERIA-IP:IP-11 the running Backend service, captured here (server lifetime) and handed to each connection's handler layer below
+    const aetheriaService = yield* Effect.serviceOption(AetheriaBackend);
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3439,6 +3455,13 @@ export const layer = Layer.unwrap(
             },
             { status: 426 },
           );
+        }
+        // AETHERIA-IP:IP-9 a client that declares the Backend digest it expects is refused before auth and session work unless ours is present and equal
+        const aetheriaRefusal = backendDigestRefusal(url.value, aetheriaComposition);
+        if (aetheriaRefusal !== undefined) {
+          return HttpServerResponse.jsonUnsafe(aetheriaRefusal.body, {
+            status: aetheriaRefusal.status,
+          });
         }
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
         const sessions = yield* SessionStore.SessionStore;
@@ -3500,6 +3523,12 @@ export const layer = Layer.unwrap(
               Layer.provide(AgentSessionScanner.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(NpmRelease.NpmRelease, npmRelease)),
+              // AETHERIA-IP:IP-11 the Backend service for the status method's handler; nothing is provided when no Backend is registered
+              Layer.provide(
+                Option.isSome(aetheriaService)
+                  ? Layer.succeed(AetheriaBackend, aetheriaService.value)
+                  : Layer.empty,
+              ),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
               // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),

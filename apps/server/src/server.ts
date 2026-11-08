@@ -71,6 +71,10 @@ import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceR
 import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
+// AETHERIA-IP:IP-6 private Agent-to-Backend (XC-6) request/reply route, sibling of /mcp; not an MCP tool
+import * as Xc6Route from "./aetheria/xc6Route.ts";
+// AETHERIA-IP:IP-1 the Aetheria Backend layers registered below
+import * as AetheriaBackendLive from "./aetheria/aetheriaBackend.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
@@ -780,6 +784,8 @@ const layerMakeRoutes = Layer.mergeAll(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
+  // AETHERIA-IP:IP-6 private Agent-to-Backend (XC-6) request/reply route, sibling of /mcp; not an MCP tool
+  Xc6Route.layer,
   // Follows delegated tasks running in linked environments, including after a restart.
   Layer.effectDiscard(
     RemoteDelegation.RemoteDelegation.pipe(Effect.flatMap((remote) => remote.start())),
@@ -813,6 +819,9 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),
+  // AETHERIA-IP:IP-1 the one Backend registration: starts at server start, fed from the unfiltered event stream, drained at teardown; present only when AETHERIA_STATE_ROOT is set
+  // The event sink is the runtime's own instance: layers memoize by reference, so this is the stream every other reader of the log uses.
+  Layer.provideMerge(AetheriaBackendLive.layer.pipe(Layer.provide(RuntimeLayer.layerEventSink))),
 );
 
 const layerMakeServer = Layer.unwrap(
@@ -1179,6 +1188,8 @@ const layerMakeServer = Layer.unwrap(
           Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
         ),
       ),
+      // AETHERIA-IP:IP-1 the validated Backend composition (its digest) for every ServerEnvironment and the /ws gate; present only when AETHERIA_STATE_ROOT is set
+      Layer.provideMerge(AetheriaBackendLive.compositionLayer),
       Layer.provide(layerActivation),
       Layer.provideMerge(
         RelayTracing.layerServerRelayBroker.pipe(Layer.provide(ManagedPolicy.layer)),

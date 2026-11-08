@@ -10,10 +10,13 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import packageJson from "../../package.json" with { type: "json" };
+// AETHERIA-IP:IP-8 the Aetheria Backend composition service (optional; see below)
+import { AetheriaBackendComposition } from "../aetheria/backendComposition.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { resolveServerInstallation } from "../cli/invocation.ts";
 import { readAgentActivityPublishingActive } from "../cloud/config.ts";
@@ -189,6 +192,8 @@ export const make = Effect.gen(function* () {
   const identity = yield* ServerEnvironmentIdentity;
   const hostPlatform = yield* HostProcess.Platform;
   const hostArchitecture = yield* HostProcess.Architecture;
+  // AETHERIA-IP:IP-8 optional: absent on a T3 without the Aetheria Backend, so its descriptor is unchanged
+  const aetheriaComposition = yield* Effect.serviceOption(AetheriaBackendComposition);
   const environmentId = yield* identity.getEnvironmentId;
   const cwdBaseName = path.basename(serverConfig.cwd).trim();
   const label = yield* resolveServerEnvironmentLabel({ cwdBaseName });
@@ -214,6 +219,10 @@ export const make = Effect.gen(function* () {
       ...(machine === null ? {} : { machine }),
     },
     serverVersion: packageJson.version,
+    // AETHERIA-IP:IP-8 the Backend's actual validated composition digest, only when the Aetheria Backend is provided (B5)
+    ...(Option.isSome(aetheriaComposition)
+      ? { compositionDigest: aetheriaComposition.value.digest }
+      : {}),
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     ...(databaseMigration === undefined ? {} : { databaseMigration }),
     capabilities: {

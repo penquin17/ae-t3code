@@ -376,6 +376,8 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
+// AETHERIA-IP:IP-3 the Aetheria client RPC group (@t3tools/aetheria-contracts), joined to WsRpcGroup below
+import { AetheriaRpcGroup } from "@t3tools/aetheria-contracts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
@@ -2198,4 +2200,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
-).middleware(RpcScopeAuthorization);
+  // AETHERIA-IP:IP-3 join the namespaced read-only Aetheria group (aetheria.composition.status) before the scope middleware wraps the whole group
+)
+  .merge(AetheriaRpcGroup)
+  .middleware(RpcScopeAuthorization);

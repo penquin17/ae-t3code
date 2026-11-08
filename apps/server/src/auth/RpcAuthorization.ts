@@ -30,6 +30,8 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+// AETHERIA-IP:IP-12 the Aetheria RPC method names, for the scope entry below
+import { AETHERIA_WS_METHODS } from "@t3tools/aetheria-contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
@@ -209,6 +211,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.subscribeServerConfig]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeServerLifecycle]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,
+  // AETHERIA-IP:IP-12 explicit scope for the read-only Aetheria composition status method (read-only, so the orchestration read scope)
+  [AETHERIA_WS_METHODS.compositionStatus]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

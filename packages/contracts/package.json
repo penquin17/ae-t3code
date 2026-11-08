@@ -25,10 +25,12 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
+    "@t3tools/aetheria-contracts": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "vite-plus": "catalog:"
-  }
+  },
+  "aetheriaIp": "AETHERIA-IP:IP-10 the Aetheria client RPC group (@t3tools/aetheria-contracts) is a workspace dependency of the contracts package (joined at IP-3)"
 }

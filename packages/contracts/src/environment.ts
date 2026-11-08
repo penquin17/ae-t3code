@@ -171,11 +171,20 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
+// AETHERIA-IP:IP-7 composition digest beside serverVersion (B5): the digest of the Aetheria composition this server validated. Digest v1.
+const AetheriaCompositionDigest = Schema.Struct({
+  version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  algorithm: Schema.Literal("sha256"),
+  value: Schema.String.check(Schema.isPattern(/^sha256:[0-9a-f]{64}$/)),
+});
+
 export const ExecutionEnvironmentDescriptor = Schema.Struct({
   environmentId: EnvironmentId,
   label: TrimmedNonEmptyString,
   platform: ExecutionEnvironmentPlatform,
   serverVersion: TrimmedNonEmptyString,
+  // AETHERIA-IP:IP-7 present only on a server that runs the Aetheria Backend; a T3 without it publishes no such key.
+  compositionDigest: Schema.optionalKey(AetheriaCompositionDigest),
   orchestrationProtocolVersion: Schema.optionalKey(Schema.Int),
   /** Highest migration this server's database holds; absent on older servers. */
   databaseMigration: Schema.optionalKey(Schema.Int),

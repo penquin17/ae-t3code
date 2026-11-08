@@ -856,6 +856,12 @@ importers:
       '@napi-rs/keyring':
         specifier: ^1.3.0
         version: 1.3.0
+      '@t3tools/aetheria-contracts':
+        specifier: workspace:*
+        version: link:../../packages/aetheria-contracts
+      '@t3tools/aetheria-server':
+        specifier: workspace:*
+        version: link:../../packages/aetheria-server
       '@t3tools/provider-acp':
         specifier: workspace:*
         version: link:../../packages/provider-acp
@@ -1499,6 +1505,32 @@ importers:
         specifier: 1.4.0
         version: 1.4.0(@astrojs/compiler-rs@0.5.1)(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.60.0)(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
 
+  packages/aetheria-contracts:
+    dependencies:
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      vite-plus:
+        specifier: 1.4.0
+        version: 1.4.0(@astrojs/compiler-rs@0.5.1)(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.60.0)(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
+
+  packages/aetheria-server:
+    dependencies:
+      '@aetheria/awareness':
+        specifier: file:./artifacts/aetheria-awareness-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz
+      '@t3tools/aetheria-contracts':
+        specifier: workspace:*
+        version: link:../aetheria-contracts
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.4
+        version: 24.12.4
+      vite-plus:
+        specifier: 1.4.0
+        version: 1.4.0(@astrojs/compiler-rs@0.5.1)(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.60.0)(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
+
   packages/client-runtime:
     dependencies:
       '@pierre/diffs':
@@ -1565,6 +1597,9 @@ importers:
 
   packages/contracts:
     dependencies:
+      '@t3tools/aetheria-contracts':
+        specifier: workspace:*
+        version: link:../aetheria-contracts
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -2519,6 +2554,11 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz':
+    resolution: {integrity: sha512-xLtz+01rO5qtJifyQYzFBViDVu4oj0aO9x9KjPHvx9QUNnLiEw1d50LinQ+/LAnkbWSp0UE9pgU6FifMAIB5SQ==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
 
   '@ai-sdk/provider-utils@4.0.57':
     resolution: {integrity: sha512-89a7sPvZqXsP3PigcAQLWntu/duIVEcN/RyChAB+j6p3C7NwW767sVttvL8r0+BetTg63uAXQoYHCZZueQKBSw==}
@@ -12523,6 +12563,8 @@ snapshots:
   2g@1.0.1(@tsc-rs/typescript@0.8.0):
     optionalDependencies:
       typescript: '@tsc-rs/typescript@0.8.0'
+
+  '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz': {}
 
   '@ai-sdk/provider-utils@4.0.57(zod@4.6.5)':
     dependencies:

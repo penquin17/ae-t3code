@@ -131,6 +131,12 @@ const NOTICE_TEXT_EXTENSIONS = new Set([
   ".unlicense",
 ]);
 const FIRST_PARTY_PACKAGE_PREFIX = "@t3tools/";
+// AETHERIA-IP:IP-15 Aetheria's own packages (@aetheria/*) are first-party like @t3tools/*; the helper keeps the two call sites below to one line each.
+const AETHERIA_PACKAGE_PREFIX = "@aetheria/";
+
+function isFirstPartyPackage(name: string): boolean {
+  return name.startsWith(FIRST_PARTY_PACKAGE_PREFIX) || name.startsWith(AETHERIA_PACKAGE_PREFIX);
+}
 
 function isNoticeTextFile(fileName: string): boolean {
   return (
@@ -601,7 +607,7 @@ async function collectProductionDependencyPackages(
         typeof resolved.packageJson.name === "string" ? resolved.packageJson.name : dependencyName;
       // Type-only packages ship nothing, but what they depend on may, so the walk goes on below.
       if (
-        !name.startsWith(FIRST_PARTY_PACKAGE_PREFIX) &&
+        !isFirstPartyPackage(name) && // AETHERIA-IP:IP-15 also exempts @aetheria/*
         !(await isTypeOnlyPackage(resolved.packageJson, resolved.packageRoot))
       ) {
         const identity = packageIdentity(resolved.packageJson, resolved.packageRoot);
@@ -659,7 +665,7 @@ async function addBundledModulePackages(
       throw error;
     }
     if (!found || typeof found.packageJson.name !== "string") continue;
-    if (found.packageJson.name.startsWith(FIRST_PARTY_PACKAGE_PREFIX)) continue;
+    if (isFirstPartyPackage(found.packageJson.name)) continue; // AETHERIA-IP:IP-15 also exempts @aetheria/*
     const identity = packageIdentity(found.packageJson, found.packageRoot);
     const existing = collection.byIdentity.get(identity);
     if (existing) {
