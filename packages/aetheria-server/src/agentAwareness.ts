@@ -1,8 +1,7 @@
 // AETHERIA — the Backend half of the `agent-awareness` module: its manifest row, its build-time allowlist and its registration.
 //
 // The Agent half (readiness and guarded write/edit) lives in the Pi adapter outside the fork. This half is the Backend's seat for the
-// coordination board of sub-phase 4: it owns the operation-registration seam and the module's state, and nothing else yet. No operation
-// is registered at this step, so no board claim is made (every write still reports COORDINATION_UNAVAILABLE on the Agent side).
+// coordination board: it owns the operation-registration seam; the service registers board and awareness operations here.
 import type { Xc6Operation } from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "./adapter.ts";
@@ -41,7 +40,7 @@ export function agentAwarenessBackendModuleRow(
       failure:
         "A failed start rolls the Backend back and is reported in the disposal report; operations of a module that is not running answer unavailable, never a stale success.",
       uncertainty:
-        "No board and no operation is attached at this step, so no coordination claim is made or checked. Operations answer for module code that is trusted, not sandboxed.",
+        "Only sessions this Backend has observed since its start count as live; earlier history is unknown. Production assign (XC-10) and resolve (XC-8) answer unavailable. Operations answer for module code that is trusted, not sandboxed.",
       stateOwner: "backend-awareness-state",
     },
   };
@@ -52,7 +51,11 @@ export function agentAwarenessBackendModuleRow(
  * Drain reports what the module holds: the seam it opened (released) and nothing live.
  */
 export function createAgentAwarenessBackendRegistration(
-  options: { readonly operations?: Readonly<Record<string, Xc6Operation>> } = {},
+  options: {
+    readonly operations?: Readonly<Record<string, Xc6Operation>>;
+    /** Drains what the module owns besides the seam (the boards); what it could not finish is reported still live. */
+    readonly drainBoards?: () => Promise<{ released: string[]; stillLive: string[] }>;
+  } = {},
 ): BackendRegistration {
   let opened = false;
   return {
@@ -61,10 +64,14 @@ export function createAgentAwarenessBackendRegistration(
       start: () => {
         opened = true;
       },
-      drain: () => {
-        const released = opened ? ["backend-awareness.operation-seam"] : [];
+      drain: async () => {
+        const boards = (await options.drainBoards?.()) ?? { released: [], stillLive: [] };
+        const released = [
+          ...(opened ? ["backend-awareness.operation-seam"] : []),
+          ...boards.released,
+        ];
         opened = false;
-        return { released, stopped: [], transferred: [], stillLive: [] };
+        return { released, stopped: [], transferred: [], stillLive: boards.stillLive };
       },
     },
     ...(options.operations === undefined ? {} : { operations: options.operations }),

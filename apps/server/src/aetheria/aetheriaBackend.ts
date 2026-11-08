@@ -84,6 +84,12 @@ export const makeLayer = (stateRoot: string) =>
             Effect.ignoreCause,
           ),
       );
+      // Events up to the log's head now are history to this Backend: the board treats liveness from them as unknown. If the head cannot be
+      // read the horizon stays unset and every holder is unknown (open and visible, never a stale "active" or "free").
+      yield* sink.latestSequence().pipe(
+        Effect.tap((sequence) => Effect.sync(() => service.setReplayHorizon(sequence))),
+        Effect.ignore,
+      );
       // One unfiltered subscription from the start of the event log: replay, then live. Its end or failure is a missed observation.
       yield* sink.stream().pipe(
         Stream.runForEach((storedEvent) =>

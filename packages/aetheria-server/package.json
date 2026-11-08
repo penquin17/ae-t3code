@@ -24,7 +24,7 @@
     "@aetheria/awareness": {
       "archive": "artifacts/aetheria-awareness-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:0f58d3a6b70faf0423451f71db53b54ad8cd46c7d16e21d19f59e5abf31f2c01"
+      "stamp": "sha256:9e340266fe1aad827952f91da82f78c06549b93bed18209dcd287f2fcfb12ee7"
     }
   }
 }

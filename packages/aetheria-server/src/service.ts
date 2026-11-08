@@ -27,6 +27,13 @@ import {
   type UnknownReason,
 } from "./liveness/service.ts";
 import { createIdentityLifecycleOperation } from "./operations/identityLifecycle.ts";
+import { createGit, type GitPort } from "./board/git.ts";
+import { parseAwarenessConfig } from "./library.ts";
+import {
+  createBoardRuntime,
+  type BoardRuntime,
+  type BoardRuntimeOptions,
+} from "./board/runtime.ts";
 
 export interface AetheriaBackendServiceOptions {
   /** The Aetheria state root the Agent host also uses (`AETHERIA_STATE_ROOT`): a normalised absolute path. */
@@ -37,7 +44,12 @@ export interface AetheriaBackendServiceOptions {
   readonly now?: () => number;
   /** Test seam: another manifest to prove a mixed composition is refused. */
   readonly manifest?: AetheriaBackendOptions["manifest"];
-  /** Additional registrations are not admitted here; sub-phase 4 extends `createAgentAwarenessBackendRegistration`'s operations instead. */
+  /** The awareness evidence parameters (idleMs, summaryMaxBytes of at least 512, failOpen, enabled); omitted fields take DSH's defaults. */
+  readonly awareness?: unknown;
+  /** The Git port for the workspace and for restart reconciliation. Default: the real `git`. */
+  readonly git?: GitPort;
+  /** The owned-child status of XC-10. Absent in production (M05): `assign` is unavailable. Only a test supplies it. */
+  readonly childStatus?: BoardRuntimeOptions["childStatus"];
 }
 
 export interface AetheriaBackendService {
@@ -54,6 +66,10 @@ export interface AetheriaBackendService {
   operations(): Readonly<Record<string, Xc6Operation>>;
   /** Apply one stored T3 event (unfiltered stream order). Never throws. */
   ingest(stored: StoredEventLike): Promise<void>;
+  /** The highest event sequence that existed before the feed was subscribed: liveness from older events is unknown for the board. */
+  setReplayHorizon(sequence: number): void;
+  /** The board of each workspace and what restart reconciliation did to it; `settled` waits for the close-on-stop in flight. */
+  readonly board: Pick<BoardRuntime, "reconciled" | "settled">;
   /** The stream ended or failed: every holder becomes unknown until observed again. */
   noteFeed(reason: Extract<UnknownReason, "feed-ended" | "feed-failed">): void;
   readonly liveness: LivenessService;
@@ -82,10 +98,35 @@ export function createAetheriaBackendService(
   });
   const feed = createIdentityFeed({ index, tracker, credentialOf: options.credentialOf });
 
+  const config = parseAwarenessConfig(options.awareness);
+  if (!config.ok)
+    return {
+      outcome: "refused",
+      faults: [
+        {
+          code: "awareness-config-invalid",
+          subject: "config",
+          field: config.field,
+          message: config.message,
+        },
+      ],
+    };
+  const board = createBoardRuntime({
+    stateRoot: options.stateRoot,
+    index,
+    liveness,
+    config: config.config,
+    now: options.now ?? Date.now,
+    git: options.git ?? createGit(),
+    childStatus: options.childStatus,
+  });
+
   const registration: BackendRegistration = createAgentAwarenessBackendRegistration({
     operations: {
       [IDENTITY_LIFECYCLE_OPERATION]: createIdentityLifecycleOperation({ tracker, index }),
+      ...board.operations(),
     },
+    drainBoards: () => board.drain(),
   });
   const prepared = prepareAetheriaBackend({
     registrations: [registration],
@@ -101,7 +142,10 @@ export function createAetheriaBackendService(
     start() {
       started ??= (async () => {
         index.boot();
-        return backend.start();
+        const result = await backend.start();
+        // Sessions this Backend cannot show to be live are closed before any operation is answered for them (a failed board is retried at first use).
+        if (result.outcome === "started") await board.reconcileAtStart();
+        return result;
       })();
       return started;
     },
@@ -141,6 +185,8 @@ export function createAetheriaBackendService(
       }
     },
     noteFeed: (reason) => liveness.noteGap(reason),
+    setReplayHorizon: (sequence) => board.setReplayHorizon(sequence),
+    board,
     liveness,
     index,
     tracker,

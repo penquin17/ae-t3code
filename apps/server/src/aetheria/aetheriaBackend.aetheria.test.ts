@@ -79,6 +79,7 @@ const events = [
 
 const layerSink = (list: ReadonlyArray<unknown>) =>
   Layer.mock(EventSink.EventSinkV2)({
+    latestSequence: () => Effect.succeed(0),
     stream: () => Stream.fromIterable(list as never[]).pipe(Stream.concat(Stream.never)),
   });
 const layerCredentials = (credential: string | undefined) =>
@@ -153,6 +154,7 @@ describe("the Backend layer", () => {
       const root = makeRoot();
       const drained = yield* Deferred.make<void>();
       const sink = Layer.mock(EventSink.EventSinkV2)({
+        latestSequence: () => Effect.succeed(0),
         stream: () =>
           Stream.fromIterable(events as never[]).pipe(
             Stream.concat(Stream.drain(Stream.fromEffect(Deferred.succeed(drained, undefined)))),
@@ -195,6 +197,7 @@ describe("the Backend layer", () => {
     Effect.gen(function* () {
       const root = makeRoot();
       const ending = Layer.mock(EventSink.EventSinkV2)({
+        latestSequence: () => Effect.succeed(0),
         stream: () => Stream.fromIterable(events as never[]),
       });
       yield* Effect.scoped(

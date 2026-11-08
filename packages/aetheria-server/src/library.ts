@@ -1,37 +1,118 @@
 // AETHERIA — the one module that touches the pinned library artifact (design M02 D7/C3, Plan step 12).
 //
 // `@aetheria/awareness/backend` is the Backend-only entry of the packed archive declared in package.json. Everything the adapter takes from
-// it — the shared composition validator, the digest, the lifecycle driver and the XC-7 report — is named here, so the artifact edge has
-// exactly one import site and a test can check that. No other module imports an `@aetheria/*` package.
+// it — the shared composition validator, the digest, the lifecycle driver, the XC-7 report and (step 20) the board policy — is named here, so
+// the artifact edge has exactly one import site and a test can check that. No other module imports an `@aetheria/*` package.
 import {
+  awarenessAction,
+  boardFileFor,
+  checkWrite,
   compareFaults,
+  createBoardService,
+  createDecisionEvidence,
+  createFileBoardStorage,
   createHost,
+  createRecordedCalls,
+  createViewMemory,
   dispose,
   evaluate,
+  evidenceFromObservation,
   hostStatus,
+  nodePathFs,
+  parseAwarenessConfig,
+  parsePorcelain,
+  reconcileBoard,
+  recordEdit,
   register,
+  resolveWorkspace,
   start,
+  summarize,
+  type ActionCaller,
   type Activation,
+  type AwarenessConfig,
+  type BoardService,
+  type ChangedFiles,
+  type ChangedFilesPort,
+  type ChildStatus,
   type DigestReport,
   type DisposalReport,
+  type HolderObservation,
   type LifecycleHost,
   type ModuleStatus,
+  type ReconcileResult,
+  type SessionEvidence,
   type StartResult,
 } from "@aetheria/awareness/backend";
 
-export { compareFaults, createHost, dispose, evaluate, hostStatus, register, start };
-export type { Activation, DigestReport, DisposalReport, LifecycleHost, ModuleStatus, StartResult };
+export {
+  awarenessAction,
+  boardFileFor,
+  checkWrite,
+  compareFaults,
+  createBoardService,
+  createDecisionEvidence,
+  createFileBoardStorage,
+  createHost,
+  createRecordedCalls,
+  createViewMemory,
+  dispose,
+  evaluate,
+  evidenceFromObservation,
+  hostStatus,
+  nodePathFs,
+  parseAwarenessConfig,
+  parsePorcelain,
+  reconcileBoard,
+  recordEdit,
+  register,
+  resolveWorkspace,
+  start,
+  summarize,
+};
+export type {
+  ActionCaller,
+  Activation,
+  AwarenessConfig,
+  BoardService,
+  ChangedFiles,
+  ChangedFilesPort,
+  ChildStatus,
+  DigestReport,
+  DisposalReport,
+  HolderObservation,
+  LifecycleHost,
+  ModuleStatus,
+  ReconcileResult,
+  SessionEvidence,
+  StartResult,
+};
 
 /** A reportable problem, as the shared validator and lifecycle driver return it. */
 export type Fault = Extract<StartResult, { readonly outcome: "refused" }>["faults"][number];
 
 /** The runtime functions the adapter calls; a test checks each exists on the installed archive's Backend entry. */
 export const LIBRARY_EXPORTS = [
+  "awarenessAction",
+  "boardFileFor",
+  "checkWrite",
   "compareFaults",
+  "createBoardService",
+  "createDecisionEvidence",
+  "createFileBoardStorage",
   "createHost",
+  "createRecordedCalls",
+  "createViewMemory",
   "dispose",
   "evaluate",
+  "evidenceFromObservation",
   "hostStatus",
+  "nodePathFs",
+  "parseAwarenessConfig",
+  "parsePorcelain",
+  "reconcileBoard",
+  "recordEdit",
   "register",
+  "resolveWorkspace",
   "start",
+  "summarize",
 ] as const;
