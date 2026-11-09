@@ -67,7 +67,15 @@ export const makeLayer = (stateRoot: string) =>
                   digest: service.digest().value,
                   order: result.activationOrder,
                 })
-              : Effect.die(new Error(`The Aetheria Backend did not start: ${result.outcome}`)),
+              : Effect.die(
+                  new Error(
+                    `The Aetheria Backend did not start: ${result.outcome}${
+                      result.outcome === "refused"
+                        ? ` (${result.faults.map((fault) => fault.code).join(", ")})`
+                        : ""
+                    }`,
+                  ),
+                ),
           ),
         ),
         () =>

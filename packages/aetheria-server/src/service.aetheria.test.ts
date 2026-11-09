@@ -7,9 +7,12 @@
 // drained; the production identity port resolves a bound session with an active record and refuses a mismatched provider session, thread or
 // claimed session; the operation lists the index's sessions with the tracker's answers; a drain is clean (XC-7). It does not show T3's real
 // events, the HTTP route or the Effect layer (apps/server tests) or the Agent-side sweep (tests/awareness/s16).
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import { prepareAetheriaBackend } from "./aetheriaBackend.ts";
+import { OWNER_LOCK_FILE } from "./ownerLock.ts";
 import { createAetheriaBackendService } from "./service.ts";
 import type { StoredEventLike } from "./identity/feed.ts";
 import {
@@ -211,5 +214,104 @@ describe("liveness is fed from the same stream, unfiltered", () => {
     expect(w.service.liveness.status(THREAD)).toMatchObject({ kind: "running" });
     w.service.noteFeed("feed-failed");
     expect(w.service.liveness.status(THREAD)).toMatchObject({ kind: "unknown" });
+  });
+});
+
+describe("the state-root owner lock (user decision F1, step 29)", () => {
+  const lockOf = (root: string): string => NodePath.join(root, OWNER_LOCK_FILE);
+  const over = (stateRoot: string) => {
+    const made = createAetheriaBackendService({
+      stateRoot,
+      credentialOf: () => undefined,
+      projectRootOf: (folder) => folder,
+    });
+    if (made.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(made.faults)}`);
+    return made.service;
+  };
+  const tree = (dir: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    const walk = (current: string): void => {
+      for (const entry of NodeFS.readdirSync(current, { withFileTypes: true })) {
+        const path = NodePath.join(current, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else out[NodePath.relative(dir, path)] = NodeFS.readFileSync(path, "utf8");
+      }
+    };
+    walk(dir);
+    return out;
+  };
+
+  it("start takes an owner-only lock naming this process and the composition digest", async () => {
+    const w = make();
+    expect((await w.service.start()).outcome).toBe("started");
+    const stat = NodeFS.lstatSync(lockOf(w.stateRoot));
+    expect(stat.mode & 0o777).toBe(0o600);
+    expect(JSON.parse(NodeFS.readFileSync(lockOf(w.stateRoot), "utf8"))).toMatchObject({
+      owner: { pid: process.pid },
+      digest: w.service.digest().value,
+    });
+  });
+
+  it("a second Backend over a live Backend's root refuses with a visible fault and writes nothing", async () => {
+    const first = await started();
+    const before = tree(first.stateRoot);
+    const second = over(first.stateRoot);
+    const result = await second.start();
+    expect(result).toMatchObject({
+      outcome: "refused",
+      faults: [{ code: "state-root-owned", subject: "state-root" }],
+    });
+    if (result.outcome === "refused")
+      expect(result.faults[0]!.message).toContain(`pid ${process.pid}`);
+    expect(await second.start()).toBe(result);
+    expect(second.status().phase).not.toBe("running");
+    expect(second.identity(caller(THREAD, "cred-1"), SESSION)).toMatchObject({
+      ok: false,
+      outcome: "unavailable",
+    });
+    expect(tree(first.stateRoot)).toEqual(before);
+    // Disposing the refused one removes nothing of the first's, which still answers.
+    await second.dispose("refused one stops");
+    expect(tree(first.stateRoot)).toEqual(before);
+    expect(first.service.identity(caller(THREAD, "cred-1"), SESSION)).toMatchObject({ ok: true });
+  });
+
+  it("a corrupt lock refuses the start as unusable and is left as found", async () => {
+    const root = make().stateRoot;
+    NodeFS.writeFileSync(lockOf(root), "{broken", { mode: 0o600 });
+    const result = await over(root).start();
+    expect(result).toMatchObject({
+      outcome: "refused",
+      faults: [{ code: "state-root-lock-unusable", subject: "state-root" }],
+    });
+    expect(NodeFS.readFileSync(lockOf(root), "utf8")).toBe("{broken");
+  });
+
+  it("a clean dispose releases the lock, so the next Backend can start over the same root", async () => {
+    const first = await started();
+    expect((await first.service.dispose("switch")).ok).toBe(true);
+    expect(NodeFS.existsSync(lockOf(first.stateRoot))).toBe(false);
+    const next = over(first.stateRoot);
+    expect((await next.start()).outcome).toBe("started");
+    await next.dispose("done");
+    expect(NodeFS.existsSync(lockOf(first.stateRoot))).toBe(false);
+  });
+
+  it("a dispose before start takes no lock, and a start after it does not take one either", async () => {
+    const w = make();
+    await w.service.dispose("never started");
+    expect(NodeFS.existsSync(lockOf(w.stateRoot))).toBe(false);
+    expect((await w.service.start()).outcome).not.toBe("started");
+    expect(NodeFS.existsSync(lockOf(w.stateRoot))).toBe(false);
+  });
+
+  it("a dispose that arrives while start is in flight leaves no lock behind", async () => {
+    const w = make();
+    const starting = w.service.start();
+    const stopping = w.service.dispose("stopped during start");
+    await starting;
+    await stopping;
+    expect(NodeFS.existsSync(lockOf(w.stateRoot))).toBe(false);
+    expect(w.service.status().phase).not.toBe("running");
   });
 });

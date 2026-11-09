@@ -26,6 +26,7 @@ import {
   type LivenessService,
   type UnknownReason,
 } from "./liveness/service.ts";
+import { acquireOwnerLock, type HeldOwnerLock, type OwnerLockOptions } from "./ownerLock.ts";
 import { createIdentityLifecycleOperation } from "./operations/identityLifecycle.ts";
 import { createGit, type GitPort } from "./board/git.ts";
 import { parseAwarenessConfig } from "./library.ts";
@@ -48,14 +49,19 @@ export interface AetheriaBackendServiceOptions {
   readonly awareness?: unknown;
   /** The Git port for the workspace and for restart reconciliation. Default: the real `git`. */
   readonly git?: GitPort;
+  /** Test seam for the state-root owner lock: the process probe, this process's identity, the takeover bound. Absent in production. */
+  readonly ownerLock?: Pick<OwnerLockOptions, "probe" | "self" | "staleAfterMs">;
   /** The owned-child status of XC-10. Absent in production (M05): `assign` is unavailable. Only a test supplies it. */
   readonly childStatus?: BoardRuntimeOptions["childStatus"];
 }
 
 export interface AetheriaBackendService {
-  /** Boot the thread index, then validate-and-start the composition. A second call returns the first result. */
+  /**
+   * Take the state root's owner lock (a live or unprovable owner refuses with `state-root-owned`; an unreadable lock with `state-root-lock-unusable`),
+   * boot the thread index, then validate-and-start the composition. A second call returns the first result.
+   */
   start(): Promise<StartResult>;
-  /** Drain in reverse start order, once. A reason is required. */
+  /** Drain in reverse start order, once. A reason is required. The owner lock is released only when the drain is clean. */
   dispose(reason: string): Promise<DisposalReport>;
   status(): AetheriaCompositionStatus;
   /** The published composition digest (digest v1, host `backend`). */
@@ -137,19 +143,54 @@ export function createAetheriaBackendService(
 
   const running = (): boolean => backend.status().phase === "running";
   let started: Promise<StartResult> | undefined;
+  let held: HeldOwnerLock | undefined;
+  let disposing = false;
+  const refusal = (code: string, message: string): StartResult => ({
+    outcome: "refused",
+    faults: [{ code, subject: "state-root", message }],
+  });
 
   const service: AetheriaBackendService = {
     start() {
       started ??= (async () => {
+        // A dispose that came first closed the host: starting it again only reports that, and takes no lock.
+        if (disposing) return backend.start();
+        const taken = await acquireOwnerLock({
+          stateRoot: options.stateRoot,
+          digest: backend.status().digest.value,
+          ...(options.now === undefined ? {} : { now: options.now }),
+          ...options.ownerLock,
+        });
+        if (!taken.ok)
+          return refusal(
+            taken.code,
+            taken.code === "state-root-owned"
+              ? `the Backend state root is owned by another process: ${taken.detail}`
+              : `the Backend state root's owner lock cannot be used: ${taken.detail}`,
+          );
+        held = taken.lock;
+        if (disposing) {
+          held.release();
+          return backend.start();
+        }
         index.boot();
         const result = await backend.start();
         // Sessions this Backend cannot show to be live are closed before any operation is answered for them (a failed board is retried at first use).
         if (result.outcome === "started") await board.reconcileAtStart();
+        else held.release();
         return result;
       })();
       return started;
     },
-    dispose: (reason) => backend.dispose(reason),
+    async dispose(reason) {
+      const pending = backend.dispose(reason);
+      disposing = true;
+      const report = await pending;
+      await started?.catch(() => undefined);
+      // An unclean drain keeps the lock: this process may still hold writes, so a successor waits for the proven-dead takeover.
+      if (report.ok) held?.release();
+      return report;
+    },
     status: () => backend.status(),
     digest: () => backend.status().digest,
     identity(caller, claimedSessionId) {

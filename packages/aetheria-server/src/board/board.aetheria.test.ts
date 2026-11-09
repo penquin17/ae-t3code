@@ -15,6 +15,7 @@ import type { AetheriaBackendServiceOptions } from "../service.ts";
 import type { StoredEventLike } from "../identity/feed.ts";
 import { boardFileFor } from "../library.ts";
 import {
+  DEAD_OWNER,
   SESSION,
   SESSION_B,
   THREAD,
@@ -337,7 +338,8 @@ describe("reconciliation at start", () => {
       token: { size: 1, digest: "d" },
     });
     // The first Backend dies without draining (step 22: a clean dispose now closes its sessions itself, as `closed`; see lifecycle.aetheria.test.ts).
-    const second = make({}, first.stateRoot);
+    // Its state-root lock is left behind; the second Backend takes it over only because the probe proves that process gone (staleAfterMs 0: no clock waiting).
+    const second = make({ ownerLock: DEAD_OWNER }, first.stateRoot);
     expect((await second.service.start()).outcome).toBe("started");
     const board = JSON.parse(NodeFS.readFileSync(boardFileFor(first.stateRoot, ws), "utf8")) as {
       sessions: Record<string, { state: string }>;

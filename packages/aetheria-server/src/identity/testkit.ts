@@ -134,3 +134,9 @@ export const SESSION_B = "0197d3c0-2222-7000-8000-000000000002";
 export const FOLDER = "/work/project";
 export const sessionFileOf = (sessionId: string, dir = "/sessions"): string =>
   `${dir}/2026-11-08T08-00-00-000Z_${sessionId}.jsonl`;
+
+/** The owner-lock seam for a test that restarts over a root whose previous Backend "died": the probe proves every holder gone, and no age is waited for. */
+export const DEAD_OWNER = {
+  probe: { inspect: async () => ({ state: "gone" as const }) },
+  staleAfterMs: 0,
+};

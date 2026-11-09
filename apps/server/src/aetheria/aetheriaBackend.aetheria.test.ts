@@ -11,6 +11,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -191,6 +192,36 @@ describe("the Backend layer", () => {
       );
       expect(exit._tag).toBe("Failure");
     }),
+  );
+
+  it.live(
+    "a second layer over a live Backend's state root fails with the refusal's fault code, and the first keeps running",
+    () =>
+      Effect.gen(function* () {
+        const root = makeRoot();
+        const provided = Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials("cred-1")));
+        yield* Effect.scoped(
+          Layer.build(Live.makeLayer(root).pipe(provided)).pipe(
+            Effect.flatMap((context) => {
+              const first = Context.get(context, Live.AetheriaBackend);
+              return Effect.exit(
+                Layer.build(Live.makeLayer(root).pipe(provided)).pipe(Effect.scoped),
+              ).pipe(
+                Effect.tap((exit) =>
+                  Effect.sync(() => {
+                    expect(exit._tag).toBe("Failure");
+                    if (exit._tag === "Failure")
+                      expect(Cause.pretty(exit.cause)).toContain(
+                        "The Aetheria Backend did not start: refused (state-root-owned)",
+                      );
+                    expect(first.status().phase).toBe("running");
+                  }),
+                ),
+              );
+            }),
+          ),
+        );
+      }),
   );
 
   it.live("marks every holder unknown when the stream ends", () =>

@@ -22,6 +22,7 @@ import type { ChangedFiles } from "../library.ts";
 import { createGit } from "./git.ts";
 import { createBoardRuntime } from "./runtime.ts";
 import {
+  DEAD_OWNER,
   SESSION,
   SESSION_B,
   THREAD,
@@ -206,6 +207,24 @@ describe("corruption", () => {
     },
   );
 
+  it("an unclean drain keeps the owner lock: a successor is refused until the old process is proven gone, then takes it over", async () => {
+    const first = await live([A, B]);
+    await first.run("awareness.action", B, { action: "goal", text: "x" });
+    NodeFS.writeFileSync(first.file, "{broken");
+    const report = await first.service.dispose("unclean");
+    expect(report.ok).toBe(false);
+    const lock = NodePath.join(first.stateRoot, "backend-owner.lock");
+    const kept = NodeFS.readFileSync(lock, "utf8");
+
+    const refused = await make({}, first.stateRoot).service.start();
+    expect(refused).toMatchObject({ outcome: "refused", faults: [{ code: "state-root-owned" }] });
+    expect(NodeFS.readFileSync(lock, "utf8")).toBe(kept);
+
+    const successor = make({ ownerLock: DEAD_OWNER }, first.stateRoot);
+    expect((await successor.service.start()).outcome).toBe("started");
+    expect(JSON.parse(NodeFS.readFileSync(lock, "utf8")).nonce).not.toBe(JSON.parse(kept).nonce);
+  });
+
   it("a restart over a refused board reports the start reconcile unavailable, preserves the bytes and reconciles at first use once the board is readable", async () => {
     const ws = workspaceDir();
     const first = await live([B], {}, ws);
@@ -215,7 +234,8 @@ describe("corruption", () => {
     NodeFS.writeFileSync(first.file, "{broken");
     await first.service.dispose("restart");
 
-    const second = make({}, first.stateRoot);
+    // The refused board makes the drain unclean, so the first lock stays until the old process is proven gone (see "an unclean drain keeps the owner lock").
+    const second = make({ ownerLock: DEAD_OWNER }, first.stateRoot);
     await second.service.start();
     expect(second.service.board.reconciled()).toEqual([
       { workspace: ws, result: { status: "unavailable", detail: expect.any(String) } },
