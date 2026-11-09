@@ -6,6 +6,7 @@ import {
   createProductionAvailability,
   createProvidersOperations,
   type FxAvScript,
+  type ProductionAvailabilityOptions,
   type RouteAvailability,
 } from "@aetheria/providers/backend";
 import {
@@ -93,7 +94,7 @@ export type {
 };
 
 export { createFxAv, createProductionAvailability, createProvidersOperations };
-export type { FxAvScript, RouteAvailability };
+export type { FxAvScript, ProductionAvailabilityOptions, RouteAvailability };
 
 /** The runtime functions the providers module calls; a test checks each exists on the installed providers archive's Backend entry. */
 export const PROVIDERS_LIBRARY_EXPORTS = [

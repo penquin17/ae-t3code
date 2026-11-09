@@ -34,7 +34,7 @@ export function providersBackendModuleRow(
       failure:
         "An argument outside the strict contract, including a caller id, header, credential or account field, throws before the service runs and the carrier reports an error; a module that is not running answers unavailable, never a stale answer.",
       uncertainty:
-        "Until credential and usage adapters are attached, production answers unknown / service-unavailable for every route, usage as unavailable and capabilities as unknown; no fixture data is ever served in the production composition. A restart empties the failure memory and says since when.",
+        "Without an isolated agent directory supplied to the Backend, production answers unknown / service-unavailable for every route and usage as unavailable. With one, availability reads Pi's sign-in store (a refresh takes Pi's own lock) and the subscription quota readers; capabilities come from Pi's bundled model data for the two subscription providers and are unknown for any other route. A directory the archive refuses is reported as a warning and treated as absent. No fixture data is ever served in the production composition. A restart empties the failure memory and says since when.",
       stateOwner: "backend-providers-state",
     },
   };
