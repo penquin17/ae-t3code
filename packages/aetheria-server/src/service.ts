@@ -11,7 +11,11 @@ import { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaB
 import type { BackendAdapter, BackendRegistration } from "./adapter.ts";
 import { createAgentAwarenessBackendRegistration } from "./agentAwareness.ts";
 import { BACKEND_COMPOSITION_ID } from "./composition.ts";
-import { createProvidersBackendRegistration, type ProvidersMode } from "./providers.ts";
+import {
+  createProvidersBackendRegistration,
+  type ProvidersMode,
+  type ProvidersResearchSeams,
+} from "./providers.ts";
 import { createPiSelectionSeam, type PiSelectionSeam } from "./routeSeam.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
@@ -63,6 +67,8 @@ export interface AetheriaBackendServiceOptions {
   readonly composition?: string;
   /** The providers module's explicit mode (M09 step 4). Default: production, the honest service with no adapters yet. */
   readonly providers?: ProvidersMode;
+  /** Test seams for research (M09 step 15): the search transport and a replacement fetch work. Absent in production. */
+  readonly research?: ProvidersResearchSeams;
 }
 
 export interface AetheriaBackendService {
@@ -163,6 +169,8 @@ export function createAetheriaBackendService(
     };
   const providersRegistration = createProvidersBackendRegistration({
     composition,
+    stateRoot: options.stateRoot,
+    ...(options.research === undefined ? {} : { research: options.research }),
     ...(options.providers === undefined ? {} : { providers: options.providers }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });

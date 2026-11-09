@@ -160,7 +160,7 @@ describe("the providers module's descriptor", () => {
 });
 
 describe("production mode over the real archive", () => {
-  it("serves four gated operations, unavailable until the Backend runs and again after it drained", async () => {
+  it("serves seven gated operations (four providers, three research), unavailable until the Backend runs and again after it drained", async () => {
     const backend = prepare(BACKEND_COMPOSITION_ID, undefined);
     const names = Object.keys(backend.operations()).sort();
     expect(names).toEqual([
@@ -168,6 +168,9 @@ describe("production mode over the real archive", () => {
       "providers.route-capabilities",
       "providers.route-states",
       "providers.usage",
+      "research.cancel",
+      "research.fetch",
+      "research.search",
     ]);
     const call = backend.operations()["providers.route-states"]!;
     const args = { routes: [ROUTE], purpose: "launch" };

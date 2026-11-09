@@ -1,17 +1,24 @@
-// AETHERIA M09 — the Backend registration of route availability (XC-11), serving the four `providers.*` XC-6 operations.
+// @effect-diagnostics nodeBuiltinImport:off
+// AETHERIA M09 — the Backend registration of route availability (XC-11) and research, serving the `providers.*` and `research.*` XC-6 operations.
 // `production` answers from an explicit Pi agent directory (a Backend option, never the environment), else unknown; a refused
 // directory degrades visibly (unknown plus a path-free warning). `fixture` (FX-AV) refuses the production composition.
 // The service is created at module start, so a restart begins with empty failure memory.
+import * as NodePath from "node:path";
+
 import type { Xc6Operation } from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "./adapter.ts";
 import { BACKEND_COMPOSITION_ID } from "./compositionId.ts";
 import {
   createFxAv,
+  createPiAuthPort,
   createProductionAvailability,
+  createProductionResearch,
   createProvidersOperations,
   type FxAvScript,
+  type PiAuthPort,
   type ProductionAvailabilityOptions,
+  type ProductionResearchOptions,
   type Route,
   type RouteAvailability,
   type RouteCapabilities,
@@ -51,9 +58,20 @@ const isInvalidAgentDir = (error: unknown): boolean =>
   error.name === "ProviderAuthError" &&
   (error as Error & { code?: unknown }).code === "invalid-agent-dir";
 
+/** Test seams for research: the search transport and a replacement fetch work. Never supplied in production, never model-controlled. */
+export type ProvidersResearchSeams = Pick<ProductionResearchOptions, "fetch" | "fetchWork">;
+
+/** The three research operations this module serves beside the four `providers.*` ones. */
+const RESEARCH_OPERATIONS = ["research.search", "research.fetch", "research.cancel"] as const;
+/** Where the search records live: a private folder of this module inside the Aetheria state root. */
+const SEARCH_RECORDS_FOLDER = ["backend-providers", "search-records"] as const;
+
 export interface ProvidersRegistrationOptions {
   /** The id of the composition this registration lives in; a fixture refuses the production one. */
   readonly composition: string;
+  /** The Aetheria state root; the search records go to a private folder inside it. Absent: search is not recorded. */
+  readonly stateRoot?: string;
+  readonly research?: ProvidersResearchSeams;
   /** Default: production. */
   readonly providers?: ProvidersMode;
   readonly now?: () => number;
@@ -74,6 +92,8 @@ export function createProvidersBackendRegistration(
   const mode: ProvidersMode = options.providers ?? { mode: "production" };
   const clock = { now: options.now ?? Date.now };
   let current: RouteAvailability | undefined;
+  let research: ReturnType<typeof createProductionResearch> | undefined;
+  let researchAuth: PiAuthPort | undefined;
 
   const live = (): RouteAvailability => {
     if (current === undefined) throw new Error("providers service is not running");
@@ -90,6 +110,14 @@ export function createProvidersBackendRegistration(
   const operations: Record<string, Xc6Operation> = {};
   for (const [name, handler] of Object.entries(handlers)) {
     operations[name] = async (context) => ({ status: "done", result: await handler(context.args) });
+  }
+  // Research handlers take the carrier-verified session id and the untrusted arguments; they reach the instance that exists between start and drain.
+  for (const name of RESEARCH_OPERATIONS) {
+    operations[name] = async (context) => {
+      const handler = research?.operations[name];
+      if (handler === undefined) throw new Error("research is not running");
+      return handler({ sessionId: context.sessionId, args: context.args });
+    };
   }
 
   return {
@@ -130,13 +158,47 @@ export function createProvidersBackendRegistration(
         } else {
           current = createProductionAvailability({ clock });
         }
+        // Research search uses the same sign-in store (the same agent directory, Pi's own lock) through a port of its own; a directory the archive
+        // refuses was already reported above and leaves search without a store (credential-missing). Fetch needs no credential.
+        if (mode.mode === "production" && "agentDir" in mode) {
+          try {
+            researchAuth = createPiAuthPort({
+              agentDir: mode.agentDir,
+              warn: mode.warn,
+              ...(mode.oauth === undefined ? {} : { oauth: mode.oauth }),
+            });
+          } catch (error) {
+            if (!isInvalidAgentDir(error)) throw error;
+          }
+        }
+        research = createProductionResearch({
+          now: clock.now,
+          ...(researchAuth === undefined ? {} : { auth: researchAuth }),
+          ...(options.stateRoot === undefined
+            ? {}
+            : { recordsDir: NodePath.join(options.stateRoot, ...SEARCH_RECORDS_FOLDER) }),
+          ...(mode.mode === "production" && "warn" in mode ? { warn: mode.warn } : {}),
+          ...(options.research?.fetch === undefined ? {} : { fetch: options.research.fetch }),
+          ...(options.research?.fetchWork === undefined
+            ? {}
+            : { fetchWork: options.research.fetchWork }),
+        });
       },
       drain: async () => {
         const service = current;
+        const running = research;
+        const auth = researchAuth;
         current = undefined;
+        research = undefined;
+        researchAuth = undefined;
+        await running?.dispose();
+        await auth?.dispose();
         await service?.dispose();
         return {
-          released: service === undefined ? [] : ["backend-providers.availability"],
+          released: [
+            ...(service === undefined ? [] : ["backend-providers.availability"]),
+            ...(running === undefined ? [] : ["backend-providers.research"]),
+          ],
           stopped: [],
           transferred: [],
           stillLive: [],

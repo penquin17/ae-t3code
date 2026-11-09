@@ -30,7 +30,7 @@
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:a8956ef1bac2e1a446117fd6a073d3c4f1a97b6fde6e14e33446d7b2b510de43"
+      "stamp": "sha256:89ef80901e83628d707b3472d611939eb63e16208559c1990aebe87ee84f815c"
     }
   }
 }

@@ -3,11 +3,15 @@
 // entries of the archives declared in package.json; a test checks that no other module imports an `@aetheria/*` package.
 import {
   createFxAv,
+  createPiAuthPort,
   createProductionAvailability,
+  createProductionResearch,
   createProvidersOperations,
   effectiveRoute,
   RoutePolicyError,
   type EffectiveRouteSource,
+  type PiAuthPort,
+  type ProductionResearchOptions,
   type EffortValidation,
   type FxAvScript,
   type ProductionAvailabilityOptions,
@@ -102,7 +106,9 @@ export type {
 
 export {
   createFxAv,
+  createPiAuthPort,
   createProductionAvailability,
+  createProductionResearch,
   createProvidersOperations,
   effectiveRoute,
   RoutePolicyError,
@@ -111,7 +117,9 @@ export type {
   EffectiveRouteSource,
   EffortValidation,
   FxAvScript,
+  PiAuthPort,
   ProductionAvailabilityOptions,
+  ProductionResearchOptions,
   Route,
   RouteAvailability,
   RouteCapabilities,
@@ -121,7 +129,9 @@ export type {
 /** The runtime functions the providers module calls; a test checks each exists on the installed providers archive's Backend entry. */
 export const PROVIDERS_LIBRARY_EXPORTS = [
   "createFxAv",
+  "createPiAuthPort",
   "createProductionAvailability",
+  "createProductionResearch",
   "createProvidersOperations",
   "effectiveRoute",
   "RoutePolicyError",
