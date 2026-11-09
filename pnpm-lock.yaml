@@ -1520,6 +1520,9 @@ importers:
       '@aetheria/awareness':
         specifier: file:./artifacts/aetheria-awareness-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz
+      '@aetheria/providers':
+        specifier: file:./artifacts/aetheria-providers-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz
       '@t3tools/aetheria-contracts':
         specifier: workspace:*
         version: link:../aetheria-contracts
@@ -2559,6 +2562,16 @@ packages:
     resolution: {integrity: sha512-iJA9rwFkDHoMa6upRRu4wh4M59B+DP2S/ikpUM5UfzvYz6TBpO/0OBPfogNU3gBFDuJjQpIZXVy6sSEpbeT6nA==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
+
+  '@aetheria/providers@file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz':
+    resolution: {integrity: sha512-I5WjJxCuTggTGMCXHoYl/4HPjabKDmvk0eSDZJuQtCZw5g0d+p39hdUnhumwPZxK0PFhzJpJXlu9yx5oJuFpPA==, tarball: file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+    peerDependencies:
+      '@earendil-works/pi-coding-agent': 1.5.0
+    peerDependenciesMeta:
+      '@earendil-works/pi-coding-agent':
+        optional: true
 
   '@ai-sdk/provider-utils@4.0.57':
     resolution: {integrity: sha512-89a7sPvZqXsP3PigcAQLWntu/duIVEcN/RyChAB+j6p3C7NwW767sVttvL8r0+BetTg63uAXQoYHCZZueQKBSw==}
@@ -12565,6 +12578,8 @@ snapshots:
       typescript: '@tsc-rs/typescript@0.8.0'
 
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz': {}
+
+  '@aetheria/providers@file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz': {}
 
   '@ai-sdk/provider-utils@4.0.57(zod@4.6.5)':
     dependencies:

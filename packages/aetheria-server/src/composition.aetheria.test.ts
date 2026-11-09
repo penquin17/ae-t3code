@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { BACKEND_COMPOSITION_ID, backendManifest } from "./composition.ts";
 import { prepareAetheriaBackend } from "./aetheriaBackend.ts";
 import { AGENT_AWARENESS_BACKEND_ID, agentAwarenessBackendModuleRow } from "./agentAwareness.ts";
+import { providersBackendModuleRow } from "./providers.ts";
 import { PINNED_ARTIFACT } from "./index.ts";
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -19,16 +20,19 @@ const digestOf = (manifest: Manifest, stamp?: string) => {
 };
 
 describe("the Backend composition", () => {
-  it("is a root composition of its own selecting only the Backend agent-awareness module", () => {
+  it("is a root composition of its own selecting only the Backend agent-awareness and providers modules", () => {
     const manifest = backendManifest();
     expect(manifest.compositions).toEqual([
       expect.objectContaining({
         id: BACKEND_COMPOSITION_ID,
-        modules: [AGENT_AWARENESS_BACKEND_ID],
+        modules: [AGENT_AWARENESS_BACKEND_ID, "providers-backend"],
       }),
     ]);
     expect(manifest.compositions[0]).not.toHaveProperty("extends");
-    expect(manifest.modules).toEqual([agentAwarenessBackendModuleRow()]);
+    expect(manifest.modules).toEqual([
+      agentAwarenessBackendModuleRow(),
+      providersBackendModuleRow(),
+    ]);
     expect(BACKEND_COMPOSITION_ID).toBe("aetheria-backend");
   });
 

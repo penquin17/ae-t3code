@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "package": "@aetheria/providers",
+  "version": "0.1.0",
+  "archive": "aetheria-providers-0.1.0.tgz",
+  "sha256": "00f82c8aff92602f218b59f1f26f1393d186dd22096e1aec52eb3d8bd0c1d771",
+  "stamp": "sha256:00f82c8aff92602f218b59f1f26f1393d186dd22096e1aec52eb3d8bd0c1d771"
+}

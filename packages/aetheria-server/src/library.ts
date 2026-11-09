@@ -1,8 +1,13 @@
-// AETHERIA — the one module that touches the pinned library artifact (design M02 D7/C3, Plan step 12).
-//
-// `@aetheria/awareness/backend` is the Backend-only entry of the packed archive declared in package.json. Everything the adapter takes from
-// it — the shared composition validator, the digest, the lifecycle driver, the XC-7 report and (step 20) the board policy — is named here, so
-// the artifact edge has exactly one import site and a test can check that. No other module imports an `@aetheria/*` package.
+// AETHERIA — the one import site of the pinned library archives (design M02 D7/C3; M09 A15).
+// It names exactly two specifiers, `@aetheria/awareness/backend` and `@aetheria/providers/backend`, the Backend-only
+// entries of the archives declared in package.json; a test checks that no other module imports an `@aetheria/*` package.
+import {
+  createFxAv,
+  createProductionAvailability,
+  createProvidersOperations,
+  type FxAvScript,
+  type RouteAvailability,
+} from "@aetheria/providers/backend";
 import {
   awarenessAction,
   boardFileFor,
@@ -86,6 +91,16 @@ export type {
   SessionEvidence,
   StartResult,
 };
+
+export { createFxAv, createProductionAvailability, createProvidersOperations };
+export type { FxAvScript, RouteAvailability };
+
+/** The runtime functions the providers module calls; a test checks each exists on the installed providers archive's Backend entry. */
+export const PROVIDERS_LIBRARY_EXPORTS = [
+  "createFxAv",
+  "createProductionAvailability",
+  "createProvidersOperations",
+] as const;
 
 /** A reportable problem, as the shared validator and lifecycle driver return it. */
 export type Fault = Extract<StartResult, { readonly outcome: "refused" }>["faults"][number];

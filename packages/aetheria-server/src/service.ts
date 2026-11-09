@@ -10,6 +10,8 @@ import {
 import { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 import type { BackendAdapter, BackendRegistration } from "./adapter.ts";
 import { createAgentAwarenessBackendRegistration } from "./agentAwareness.ts";
+import { BACKEND_COMPOSITION_ID } from "./composition.ts";
+import { createProvidersBackendRegistration, type ProvidersMode } from "./providers.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
 import { createLifecycleTracker, type LifecycleTracker } from "./identity/lifecycle.ts";
@@ -53,6 +55,13 @@ export interface AetheriaBackendServiceOptions {
   readonly ownerLock?: Pick<OwnerLockOptions, "probe" | "self" | "staleAfterMs">;
   /** The owned-child status of XC-10. Absent in production (M05): `assign` is unavailable. Only a test supplies it. */
   readonly childStatus?: BoardRuntimeOptions["childStatus"];
+  /**
+   * The composition to prepare. Default: the production `aetheria-backend`. Another id is a scripted test composition built from the same rows;
+   * it is the only place a fixture may run. Ignored when `manifest` is given (the manifest names its own composition then).
+   */
+  readonly composition?: string;
+  /** The providers module's explicit mode (M09 step 4). Default: production, the honest service with no adapters yet. */
+  readonly providers?: ProvidersMode;
 }
 
 export interface AetheriaBackendService {
@@ -134,8 +143,31 @@ export function createAetheriaBackendService(
     },
     drainBoards: () => board.drain(),
   });
+  const composition = options.composition ?? BACKEND_COMPOSITION_ID;
+  // A fixture never reaches the production composition: refused here, before anything is built or started.
+  if (options.providers?.mode === "fixture" && composition === BACKEND_COMPOSITION_ID)
+    return {
+      outcome: "refused",
+      faults: [
+        {
+          code: "providers-fixture-in-production",
+          subject: "providers",
+          field: "providers",
+          message:
+            "the availability fixture (FX-AV) cannot run in the production Backend composition",
+        },
+      ],
+    };
   const prepared = prepareAetheriaBackend({
-    registrations: [registration],
+    composition,
+    registrations: [
+      registration,
+      createProvidersBackendRegistration({
+        composition,
+        ...(options.providers === undefined ? {} : { providers: options.providers }),
+        ...(options.now === undefined ? {} : { now: options.now }),
+      }),
+    ],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
   if (prepared.outcome === "refused") return { outcome: "refused", faults: prepared.faults };

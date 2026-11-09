@@ -315,3 +315,75 @@ describe("the state-root owner lock (user decision F1, step 29)", () => {
     expect(w.service.status().phase).not.toBe("running");
   });
 });
+
+// M09 Plan step 4: the providers module is selected explicitly through the service; production is the default and a fixture is refused there.
+describe("the providers module in the assembly", () => {
+  const ROUTE = { provider: "anthropic", model: "claude-sonnet-x" };
+  const PROVIDERS_OPS = [
+    "providers.report-failure",
+    "providers.route-capabilities",
+    "providers.route-states",
+    "providers.usage",
+  ];
+  const build = (options: Record<string, unknown>) =>
+    createAetheriaBackendService({
+      stateRoot: rootOf(),
+      credentialOf: () => undefined,
+      ...options,
+    });
+
+  it("registers the four operations beside identity.lifecycle by default, in production mode", async () => {
+    const w = make();
+    const names = Object.keys(w.service.operations());
+    for (const name of [...PROVIDERS_OPS, "identity.lifecycle"]) expect(names).toContain(name);
+    expect(await w.service.operations()["providers.usage"]!(context(SESSION))).toEqual({
+      status: "unavailable",
+      code: "XC6_BACKEND_NOT_RUNNING",
+    });
+    expect((await w.service.start()).outcome).toBe("started");
+    const answer = (await w.service.operations()["providers.route-states"]!({
+      ...context(SESSION),
+      args: { routes: [ROUTE], purpose: "launch" },
+    })) as { result: { states: Record<string, unknown>[] } };
+    expect(answer.result.states[0]).toMatchObject({
+      state: "unknown",
+      reasonClass: "service-unavailable",
+    });
+    expect(answer.result.states[0]).not.toHaveProperty("label");
+    await w.service.dispose("done");
+  });
+
+  it("refuses a fixture in the production composition before any start, naming the fault, and builds no service", () => {
+    const made = build({ providers: { mode: "fixture" } });
+    expect(made).toMatchObject({
+      outcome: "refused",
+      faults: [{ code: "providers-fixture-in-production" }],
+    });
+    expect("service" in made).toBe(false);
+  });
+
+  it("runs a fixture in a scripted composition with another id, labelled, and the digest differs from production", async () => {
+    const scripted = build({
+      composition: "aetheria-backend-scripted",
+      providers: {
+        mode: "fixture",
+        script: { states: () => ({ state: "out", reasonClass: "no-sign-in" }) },
+      },
+    });
+    if (scripted.outcome !== "prepared")
+      throw new Error(`refused: ${JSON.stringify(scripted.faults)}`);
+    expect((await scripted.service.start()).outcome).toBe("started");
+    const answer = (await scripted.service.operations()["providers.route-states"]!({
+      ...context(SESSION),
+      args: { routes: [ROUTE], purpose: "launch" },
+    })) as { result: { states: Record<string, unknown>[] } };
+    expect(answer.result.states[0]).toMatchObject({
+      state: "out",
+      reasonClass: "no-sign-in",
+      label: "fixture",
+    });
+    expect(scripted.service.status().composition).toBe("aetheria-backend-scripted");
+    expect(scripted.service.digest().value).not.toBe(make().service.digest().value);
+    await scripted.service.dispose("done");
+  });
+});

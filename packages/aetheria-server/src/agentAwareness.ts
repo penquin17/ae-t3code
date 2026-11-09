@@ -1,4 +1,4 @@
-// AETHERIA — the Backend half of the `agent-awareness` module: its manifest row, its build-time allowlist and its registration.
+// AETHERIA — the Backend half of the `agent-awareness` module: its manifest row and its registration.
 //
 // The Agent half (readiness and guarded write/edit) lives in the Pi adapter outside the fork. This half is the Backend's seat for the
 // coordination board: it owns the operation-registration seam; the service registers board and awareness operations here.
@@ -10,10 +10,7 @@ import { PINNED_ARTIFACT } from "./artifact.ts";
 export const AGENT_AWARENESS_BACKEND_ID = "agent-awareness-backend";
 export const AGENT_AWARENESS_BACKEND_ENTRY = "aetheria:agent-awareness-backend";
 
-/** The build-time allowlist of Backend module entries. A registration or manifest entry outside it is refused. */
-export const BACKEND_ENTRY_ALLOWLIST: readonly string[] = Object.freeze([
-  AGENT_AWARENESS_BACKEND_ENTRY,
-]);
+// The build-time allowlist of Backend module entries lives in composition.ts, where every Backend module's entry is named.
 
 /**
  * The manifest row (schema v1, raw) that selects this module on the Backend host. The outer manifest copies it into a Backend

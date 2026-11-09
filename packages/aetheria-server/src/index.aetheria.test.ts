@@ -13,12 +13,17 @@ describe("the public entry", () => {
       "BACKEND_ENTRY_ALLOWLIST",
       "OPERATION_NOT_RUNNING",
       "PINNED_ARTIFACT",
+      "PROVIDERS_BACKEND_ENTRY",
+      "PROVIDERS_BACKEND_ID",
+      "PROVIDERS_PINNED_ARTIFACT",
       "agentAwarenessBackendModuleRow",
       "backendManifest",
       "createAetheriaBackendService",
       "createAgentAwarenessBackendRegistration",
+      "createProvidersBackendRegistration",
       "prepareAetheriaBackend",
       "prepareBackend",
+      "providersBackendModuleRow",
     ]);
   });
 

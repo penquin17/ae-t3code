@@ -4,7 +4,7 @@
 import type { Xc6Operation, AetheriaCompositionStatus } from "@t3tools/aetheria-contracts";
 import { XC6_OPERATION_NAME_PATTERN } from "@t3tools/aetheria-contracts";
 
-import { PINNED_ARTIFACT } from "./artifact.ts";
+import { PINNED_ARTIFACT, PINNED_ARTIFACT_STAMPS } from "./artifact.ts";
 import {
   compareFaults,
   createHost,
@@ -149,7 +149,7 @@ export function prepareBackend(options: PrepareOptions): PrepareResult {
     composition: options.composition,
     host: "backend" as const,
     allowlist,
-    artifactStamps: { [PINNED_ARTIFACT.package]: PINNED_ARTIFACT.stamp },
+    artifactStamps: PINNED_ARTIFACT_STAMPS,
     builtinTools: options.facts?.builtinTools ?? [],
     ...(options.facts?.installed === undefined ? {} : { installed: options.facts.installed }),
     ...(options.facts?.designs === undefined ? {} : { designs: options.facts.designs }),
