@@ -160,10 +160,12 @@ describe("the providers module's descriptor", () => {
 });
 
 describe("production mode over the real archive", () => {
-  it("serves seven gated operations (four providers, three research), unavailable until the Backend runs and again after it drained", async () => {
+  it("serves nine gated operations (four providers, three research, two attachments), unavailable until the Backend runs and again after it drained", async () => {
     const backend = prepare(BACKEND_COMPOSITION_ID, undefined);
     const names = Object.keys(backend.operations()).sort();
     expect(names).toEqual([
+      "attachments.describe-snapshot",
+      "attachments.store-snapshot",
       "providers.report-failure",
       "providers.route-capabilities",
       "providers.route-states",

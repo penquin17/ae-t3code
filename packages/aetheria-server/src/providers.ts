@@ -1,11 +1,16 @@
 // @effect-diagnostics nodeBuiltinImport:off
-// AETHERIA M09 — the Backend registration of route availability (XC-11) and research, serving the `providers.*` and `research.*` XC-6 operations.
+// AETHERIA M09 — the Backend registration of route availability (XC-11), research and snapshots, serving the `providers.*`, `research.*` and
+// `attachments.*` XC-6 operations.
 // `production` answers from an explicit Pi agent directory (a Backend option, never the environment), else unknown; a refused
 // directory degrades visibly (unknown plus a path-free warning). `fixture` (FX-AV) refuses the production composition.
 // The service is created at module start, so a restart begins with empty failure memory.
 import * as NodePath from "node:path";
 
-import type { Xc6Operation } from "@t3tools/aetheria-contracts";
+import {
+  SNAPSHOT_DESCRIBE_OPERATION,
+  SNAPSHOT_STORE_OPERATION,
+  type Xc6Operation,
+} from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "./adapter.ts";
 import { BACKEND_COMPOSITION_ID } from "./compositionId.ts";
@@ -14,11 +19,14 @@ import {
   createPiAuthPort,
   createProductionAvailability,
   createProductionResearch,
+  createProductionSnapshots,
   createProvidersOperations,
+  parameter,
   type FxAvScript,
   type PiAuthPort,
   type ProductionAvailabilityOptions,
   type ProductionResearchOptions,
+  type ProductionSnapshots,
   type Route,
   type RouteAvailability,
   type RouteCapabilities,
@@ -63,6 +71,8 @@ export type ProvidersResearchSeams = Pick<ProductionResearchOptions, "fetch" | "
 
 /** The three research operations this module serves beside the four `providers.*` ones. */
 const RESEARCH_OPERATIONS = ["research.search", "research.fetch", "research.cancel"] as const;
+/** The two snapshot operations, served over T3's attachments directory. */
+const SNAPSHOT_OPERATIONS = [SNAPSHOT_STORE_OPERATION, SNAPSHOT_DESCRIBE_OPERATION] as const;
 /** Where the search records live: a private folder of this module inside the Aetheria state root. */
 const SEARCH_RECORDS_FOLDER = ["backend-providers", "search-records"] as const;
 
@@ -71,6 +81,8 @@ export interface ProvidersRegistrationOptions {
   readonly composition: string;
   /** The Aetheria state root; the search records go to a private folder inside it. Absent: search is not recorded. */
   readonly stateRoot?: string;
+  /** T3's attachments directory (explicit, never ambient); snapshots live in its `deliverables/` folder, outside the state root. Absent: snapshots are off. */
+  readonly attachmentsDir?: string;
   readonly research?: ProvidersResearchSeams;
   /** Default: production. */
   readonly providers?: ProvidersMode;
@@ -80,6 +92,10 @@ export interface ProvidersRegistrationOptions {
 /** The registration, plus the in-process capability answer the Pi selection seam uses (it throws while the service is not running). */
 export type ProvidersBackendRegistration = BackendRegistration & {
   readonly routeCapabilities: (route: Route) => RouteCapabilities;
+  /** Open a snapshot for its owning session (M10's download route); unavailable while snapshots are not running. */
+  readonly openSnapshot: ProductionSnapshots["openSnapshot"];
+  /** Remove a Pi session's snapshots; unavailable while snapshots are not running. */
+  readonly forgetSession: ProductionSnapshots["forgetSession"];
 };
 
 /**
@@ -94,6 +110,7 @@ export function createProvidersBackendRegistration(
   let current: RouteAvailability | undefined;
   let research: ReturnType<typeof createProductionResearch> | undefined;
   let researchAuth: PiAuthPort | undefined;
+  let snapshots: ProductionSnapshots | undefined;
 
   const live = (): RouteAvailability => {
     if (current === undefined) throw new Error("providers service is not running");
@@ -119,6 +136,15 @@ export function createProvidersBackendRegistration(
       return handler({ sessionId: context.sessionId, args: context.args });
     };
   }
+  // Snapshot handlers take the same verified session id; they exist between start and drain, and only when an attachments directory was supplied.
+  for (const name of SNAPSHOT_OPERATIONS) {
+    operations[name] = async (context) => {
+      const handler = snapshots?.operations[name];
+      if (handler === undefined) throw new Error("snapshots are not running");
+      return handler({ sessionId: context.sessionId, args: context.args });
+    };
+  }
+  const unavailable = { ok: false, code: "unavailable" } as const;
 
   return {
     entry: PROVIDERS_BACKEND_ENTRY,
@@ -183,14 +209,24 @@ export function createProvidersBackendRegistration(
             ? {}
             : { fetchWork: options.research.fetchWork }),
         });
+        if (options.attachmentsDir !== undefined) {
+          snapshots = createProductionSnapshots({
+            attachmentsDir: options.attachmentsDir,
+            maxBytes: parameter("sourceImageMaxBytes"),
+            ...(mode.mode === "production" && "warn" in mode ? { warn: mode.warn } : {}),
+          });
+        }
       },
       drain: async () => {
         const service = current;
         const running = research;
         const auth = researchAuth;
+        const copies = snapshots;
         current = undefined;
         research = undefined;
         researchAuth = undefined;
+        snapshots = undefined;
+        await copies?.dispose();
         await running?.dispose();
         await auth?.dispose();
         await service?.dispose();
@@ -198,6 +234,7 @@ export function createProvidersBackendRegistration(
           released: [
             ...(service === undefined ? [] : ["backend-providers.availability"]),
             ...(running === undefined ? [] : ["backend-providers.research"]),
+            ...(copies === undefined ? [] : ["backend-providers.snapshots"]),
           ],
           stopped: [],
           transferred: [],
@@ -207,5 +244,11 @@ export function createProvidersBackendRegistration(
     },
     operations,
     routeCapabilities: (route) => proxy.routeCapabilities(route),
+    openSnapshot: (sessionId, snapshotId) =>
+      snapshots === undefined
+        ? Promise.resolve(unavailable)
+        : snapshots.openSnapshot(sessionId, snapshotId),
+    forgetSession: (sessionId) =>
+      snapshots === undefined ? Promise.resolve(unavailable) : snapshots.forgetSession(sessionId),
   };
 }

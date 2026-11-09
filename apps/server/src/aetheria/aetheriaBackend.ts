@@ -26,6 +26,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
+import * as ServerConfig from "../config.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { layerFromBackend } from "./backendComposition.ts";
 
@@ -35,8 +36,11 @@ export class AetheriaBackend extends Context.Service<AetheriaBackend, AetheriaBa
   "t3/aetheria/aetheriaBackend",
 ) {}
 
-/** The running service for a given state root. Requires the event sink and the MCP credential store. */
-export const makeLayer = (stateRoot: string) =>
+/**
+ * The running service for a given state root. Requires the event sink and the MCP credential store. `attachmentsDir` is T3's attachments directory,
+ * handed over explicitly by the server graph (M09 step 21); without it the snapshot operations stay registered and fail closed.
+ */
+export const makeLayer = (stateRoot: string, options: { readonly attachmentsDir?: string } = {}) =>
   Layer.effect(
     AetheriaBackend,
     Effect.gen(function* () {
@@ -45,6 +49,7 @@ export const makeLayer = (stateRoot: string) =>
       const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
       const made = createAetheriaBackendService({
         stateRoot,
+        ...(options.attachmentsDir === undefined ? {} : { attachmentsDir: options.attachmentsDir }),
         credentialOf: (threadId) =>
           runPromise(
             mcpSessions
@@ -146,8 +151,20 @@ const whenStateRoot = <A, E, R>(
     ),
   ).pipe(Layer.orDie);
 
-/** Registered at the server graph (IP-1): the service, only when AETHERIA_STATE_ROOT is set. */
-export const layer = whenStateRoot(makeLayer);
+/** Registered at the server graph (IP-1): the service, only when AETHERIA_STATE_ROOT is set, over T3's own attachments directory. */
+export const layer = whenStateRoot((stateRoot) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
+      if (Option.isNone(config))
+        yield* Effect.logWarning("Aetheria snapshots are off: the server config is not available");
+      return makeLayer(
+        stateRoot,
+        Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {},
+      );
+    }),
+  ),
+);
 
 /** Provided at the bottom of the graph: the digest, only when AETHERIA_STATE_ROOT is set, so both are present or both absent. */
 export const compositionLayer = whenStateRoot(() => compositionLayerFor);

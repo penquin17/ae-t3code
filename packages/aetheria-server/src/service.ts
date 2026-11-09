@@ -13,10 +13,12 @@ import { createAgentAwarenessBackendRegistration } from "./agentAwareness.ts";
 import { BACKEND_COMPOSITION_ID } from "./composition.ts";
 import {
   createProvidersBackendRegistration,
+  type ProvidersBackendRegistration,
   type ProvidersMode,
   type ProvidersResearchSeams,
 } from "./providers.ts";
 import { createPiSelectionSeam, type PiSelectionSeam } from "./routeSeam.ts";
+import { createSnapshotRetention } from "./snapshotRetention.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
 import { createLifecycleTracker, type LifecycleTracker } from "./identity/lifecycle.ts";
@@ -69,6 +71,11 @@ export interface AetheriaBackendServiceOptions {
   readonly providers?: ProvidersMode;
   /** Test seams for research (M09 step 15): the search transport and a replacement fetch work. Absent in production. */
   readonly research?: ProvidersResearchSeams;
+  /**
+   * T3's attachments directory, supplied by the host that assembles the Backend (M09 step 21). Snapshots of delivered files live in its `deliverables/`
+   * folder, outside the state root. Absent: the two `attachments.*` operations stay registered and fail closed.
+   */
+  readonly attachmentsDir?: string;
 }
 
 export interface AetheriaBackendService {
@@ -100,6 +107,11 @@ export interface AetheriaBackendService {
   readonly backend: BackendAdapter;
   /** The route policy T3's Pi adapter consults before it sends a model or effort (M09 step 11). Capabilities are unknown until the service runs. */
   readonly piSelectionSeam: PiSelectionSeam;
+  /**
+   * Opens a delivered-file snapshot for the Pi session that owns it, for M10's authorised download route (in process; no HTTP route yet). Another
+   * session or an unknown id is ATTACHMENT_MISSING; unavailable while snapshots are not running. The caller closes the stream.
+   */
+  readonly openSnapshot: ProvidersBackendRegistration["openSnapshot"];
 }
 
 export type CreateServiceResult =
@@ -170,6 +182,7 @@ export function createAetheriaBackendService(
   const providersRegistration = createProvidersBackendRegistration({
     composition,
     stateRoot: options.stateRoot,
+    ...(options.attachmentsDir === undefined ? {} : { attachmentsDir: options.attachmentsDir }),
     ...(options.research === undefined ? {} : { research: options.research }),
     ...(options.providers === undefined ? {} : { providers: options.providers }),
     ...(options.now === undefined ? {} : { now: options.now }),
@@ -182,6 +195,10 @@ export function createAetheriaBackendService(
   if (prepared.outcome === "refused") return { outcome: "refused", faults: prepared.faults };
   const { backend } = prepared;
 
+  const retention = createSnapshotRetention({
+    index,
+    forgetSession: (sessionId) => providersRegistration.forgetSession(sessionId),
+  });
   const running = (): boolean => backend.status().phase === "running";
   let started: Promise<StartResult> | undefined;
   let held: HeldOwnerLock | undefined;
@@ -262,6 +279,9 @@ export function createAetheriaBackendService(
           });
         }
         await feed.ingest(stored);
+        // A deleted thread's Pi session loses its snapshots once no other thread holds it (the feed above keeps the binding for this lookup).
+        if (event?.type === "thread.deleted" && typeof event.threadId === "string")
+          await retention.threadDeleted(event.threadId);
       } catch {
         /* a bad event is dropped; liveness marks its own gaps */
       }
@@ -276,6 +296,8 @@ export function createAetheriaBackendService(
     piSelectionSeam: createPiSelectionSeam({
       capabilities: (route) => providersRegistration.routeCapabilities(route),
     }),
+    openSnapshot: (sessionId, snapshotId) =>
+      providersRegistration.openSnapshot(sessionId, snapshotId),
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

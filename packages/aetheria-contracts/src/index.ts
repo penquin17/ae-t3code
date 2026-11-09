@@ -1,3 +1,4 @@
+export * from "./attachmentOperations.ts";
 export * from "./awarenessOperations.ts";
 export * from "./boardOperations.ts";
 export * from "./compositionStatus.ts";

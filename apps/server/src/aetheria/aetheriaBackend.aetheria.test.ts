@@ -150,6 +150,31 @@ describe("the Backend layer", () => {
       }),
   );
 
+  it.live("gives the Backend T3's attachments directory only when the host supplies one", () =>
+    Effect.gen(function* () {
+      const ask = (options?: { readonly attachmentsDir: string }) =>
+        Effect.scoped(
+          Layer.build(
+            Live.makeLayer(makeRoot(false), options).pipe(
+              Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials(undefined))),
+            ),
+          ).pipe(
+            Effect.flatMap((context) =>
+              Effect.promise(() =>
+                Context.get(context, Live.AetheriaBackend).openSnapshot(
+                  SESSION,
+                  `snap_${"a".repeat(64)}`,
+                ),
+              ),
+            ),
+          ),
+        );
+      const attachmentsDir = NodePath.join(makeRoot(false), "attachments");
+      expect(yield* ask({ attachmentsDir })).toEqual({ ok: false, code: "ATTACHMENT_MISSING" });
+      expect(yield* ask()).toEqual({ ok: false, code: "unavailable" });
+    }),
+  );
+
   it.live("binds nothing when T3 holds no credential for the thread", () =>
     Effect.gen(function* () {
       const root = makeRoot();
