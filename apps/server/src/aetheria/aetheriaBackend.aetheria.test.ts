@@ -18,6 +18,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import type { AetheriaBackendService } from "@t3tools/aetheria-server";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
 
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -91,6 +92,27 @@ const layerCredentials = (credential: string | undefined) =>
           ? ({ providerSessionId: credential } as never)
           : undefined,
       ),
+  });
+
+const makeAgentDir = () => {
+  const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "m09-s24-agent-"));
+  NodeFS.chmodSync(dir, 0o700);
+  return NodeFS.realpathSync(dir);
+};
+const capabilitiesOf = (service: AetheriaBackendService) =>
+  Effect.promise(async () => {
+    const answer = await service.operations()["providers.route-states"]!({
+      caller: { threadId: THREAD, providerSessionId: "p", providerInstanceId: "i" },
+      sessionId: SESSION,
+      kind: "main",
+      rootSessionId: SESSION,
+      args: {
+        routes: [{ provider: "anthropic", model: "claude-sonnet-5" }],
+        purpose: "launch",
+      },
+    } as never);
+    const { result } = answer as unknown as { result: { states: Array<Record<string, unknown>> } };
+    return result.states[0]!;
   });
 
 const waitFor = (check: () => boolean) =>
@@ -172,6 +194,28 @@ describe("the Backend layer", () => {
       const attachmentsDir = NodePath.join(makeRoot(false), "attachments");
       expect(yield* ask({ attachmentsDir })).toEqual({ ok: false, code: "ATTACHMENT_MISSING" });
       expect(yield* ask()).toEqual({ ok: false, code: "unavailable" });
+    }),
+  );
+
+  it.live("hands the providers module the Pi agent directory only when the host supplies one", () =>
+    Effect.gen(function* () {
+      const ask = (options?: { readonly piAgentDir: string }) =>
+        Effect.scoped(
+          Layer.build(
+            Live.makeLayer(makeRoot(false), options).pipe(
+              Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials(undefined))),
+            ),
+          ).pipe(
+            Effect.flatMap((context) => capabilitiesOf(Context.get(context, Live.AetheriaBackend))),
+          ),
+        );
+      expect(yield* ask({ piAgentDir: makeAgentDir() })).toMatchObject({
+        reasonClass: "no-sign-in",
+      });
+      expect(yield* ask()).toMatchObject({
+        state: "unknown",
+        reasonClass: "service-unavailable",
+      });
     }),
   );
 
@@ -288,6 +332,51 @@ describe("registration is gated on AETHERIA_STATE_ROOT", () => {
         Effect.map((c) => Context.getOption(c, Live.AetheriaBackend)),
       );
       expect(context._tag).toBe("None");
+    }),
+  );
+
+  const capabilitiesWithEnv = (env: Record<string, string>) =>
+    Effect.scoped(
+      Layer.build(
+        Live.layer.pipe(
+          Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials(undefined))),
+          Layer.provide(withEnv(env)),
+        ),
+      ).pipe(
+        Effect.flatMap((context) => capabilitiesOf(Context.get(context, Live.AetheriaBackend))),
+      ),
+    );
+
+  it.live("reads the Pi agent directory only from AETHERIA_PI_AGENT_DIR, no ambient fallback", () =>
+    Effect.gen(function* () {
+      const root = makeRoot(false);
+      const dir = makeAgentDir();
+      const set = yield* capabilitiesWithEnv({
+        AETHERIA_STATE_ROOT: root,
+        AETHERIA_PI_AGENT_DIR: dir,
+      });
+      expect(set).toMatchObject({ reasonClass: "no-sign-in" });
+      const unset = yield* capabilitiesWithEnv({
+        AETHERIA_STATE_ROOT: makeRoot(false),
+        PI_CODING_AGENT_DIR: dir,
+      });
+      expect(unset).toMatchObject({
+        state: "unknown",
+        reasonClass: "service-unavailable",
+      });
+    }),
+  );
+
+  it.live("keeps the Backend running and unknown when AETHERIA_PI_AGENT_DIR is unusable", () =>
+    Effect.gen(function* () {
+      const refused = yield* capabilitiesWithEnv({
+        AETHERIA_STATE_ROOT: makeRoot(false),
+        AETHERIA_PI_AGENT_DIR: "relative/agent",
+      });
+      expect(refused).toMatchObject({
+        state: "unknown",
+        reasonClass: "service-unavailable",
+      });
     }),
   );
 

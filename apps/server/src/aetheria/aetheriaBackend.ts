@@ -2,7 +2,7 @@
 // AETHERIA M04 Plan step 16 (IP-1) — the Aetheria Backend as one Effect layer at the server layer graph.
 //
 // Owners. `@t3tools/aetheria-server` owns the Backend (composition, lifecycle, identity, liveness); this file owns only the Effect wiring: it
-// reads `AETHERIA_STATE_ROOT`, supplies T3's current MCP credential id, starts the service at layer build, feeds it from the UNFILTERED
+// reads `AETHERIA_STATE_ROOT` and `AETHERIA_PI_AGENT_DIR` (the explicit Pi sign-in directory), supplies T3's current MCP credential id, starts the service at layer build, feeds it from the UNFILTERED
 // `EventSinkV2.stream` (a sequence gap must be visible to liveness), and drains it when the layer's scope closes.
 //
 // Two layers, because two consumers sit at different depths of the graph. `compositionLayer` has no dependencies and provides only the
@@ -31,6 +31,7 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { layerFromBackend } from "./backendComposition.ts";
 
 const STATE_ROOT_ENV = "AETHERIA_STATE_ROOT";
+const PI_AGENT_DIR_ENV = "AETHERIA_PI_AGENT_DIR";
 
 export class AetheriaBackend extends Context.Service<AetheriaBackend, AetheriaBackendService>()(
   "t3/aetheria/aetheriaBackend",
@@ -40,7 +41,10 @@ export class AetheriaBackend extends Context.Service<AetheriaBackend, AetheriaBa
  * The running service for a given state root. Requires the event sink and the MCP credential store. `attachmentsDir` is T3's attachments directory,
  * handed over explicitly by the server graph (M09 step 21); without it the snapshot operations stay registered and fail closed.
  */
-export const makeLayer = (stateRoot: string, options: { readonly attachmentsDir?: string } = {}) =>
+export const makeLayer = (
+  stateRoot: string,
+  options: { readonly attachmentsDir?: string; readonly piAgentDir?: string } = {},
+) =>
   Layer.effect(
     AetheriaBackend,
     Effect.gen(function* () {
@@ -50,6 +54,17 @@ export const makeLayer = (stateRoot: string, options: { readonly attachmentsDir?
       const made = createAetheriaBackendService({
         stateRoot,
         ...(options.attachmentsDir === undefined ? {} : { attachmentsDir: options.attachmentsDir }),
+        ...(options.piAgentDir === undefined
+          ? {}
+          : {
+              providers: {
+                mode: "production" as const,
+                agentDir: options.piAgentDir,
+                warn: (line: string) => {
+                  void runPromise(Effect.logWarning(line)).catch(() => undefined);
+                },
+              },
+            }),
         credentialOf: (threadId) =>
           runPromise(
             mcpSessions
@@ -151,17 +166,21 @@ const whenStateRoot = <A, E, R>(
     ),
   ).pipe(Layer.orDie);
 
-/** Registered at the server graph (IP-1): the service, only when AETHERIA_STATE_ROOT is set, over T3's own attachments directory. */
+/**
+ * Registered at the server graph (IP-1): the service, only when AETHERIA_STATE_ROOT is set, over T3's own attachments directory.
+ * The Pi agent directory comes only from AETHERIA_PI_AGENT_DIR; with it unset the providers module answers unknown.
+ */
 export const layer = whenStateRoot((stateRoot) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
       if (Option.isNone(config))
         yield* Effect.logWarning("Aetheria snapshots are off: the server config is not available");
-      return makeLayer(
-        stateRoot,
-        Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {},
-      );
+      const piAgentDir = yield* Config.String(PI_AGENT_DIR_ENV).pipe(Config.option);
+      return makeLayer(stateRoot, {
+        ...(Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {}),
+        ...(Option.isSome(piAgentDir) ? { piAgentDir: piAgentDir.value } : {}),
+      });
     }),
   ),
 );
