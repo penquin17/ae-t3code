@@ -23,6 +23,15 @@ export {
   type ProvidersMode,
   type ProvidersRegistrationOptions,
 } from "./providers.ts";
+export {
+  PI_SELECTION_SEAM_SLOT,
+  createPiSelectionSeam,
+  installPiSelectionSeam,
+  type PiSelectionOutcome,
+  type PiSelectionRefusal,
+  type PiSelectionRequest,
+  type PiSelectionSeam,
+} from "./routeSeam.ts";
 export { PINNED_ARTIFACT, PROVIDERS_PINNED_ARTIFACT } from "./artifact.ts";
 export { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 export { BACKEND_COMPOSITION_ID, BACKEND_ENTRY_ALLOWLIST, backendManifest } from "./composition.ts";

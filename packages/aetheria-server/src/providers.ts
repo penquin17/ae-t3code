@@ -12,7 +12,9 @@ import {
   createProvidersOperations,
   type FxAvScript,
   type ProductionAvailabilityOptions,
+  type Route,
   type RouteAvailability,
+  type RouteCapabilities,
 } from "./library.ts";
 import { PROVIDERS_BACKEND_ENTRY } from "./providersRow.ts";
 
@@ -57,13 +59,18 @@ export interface ProvidersRegistrationOptions {
   readonly now?: () => number;
 }
 
+/** The registration, plus the in-process capability answer the Pi selection seam uses (it throws while the service is not running). */
+export type ProvidersBackendRegistration = BackendRegistration & {
+  readonly routeCapabilities: (route: Route) => RouteCapabilities;
+};
+
 /**
  * The module's registration. The service exists only between start and drain; the operations are declared once and reach it through a proxy
  * that refuses, rather than invents an answer, when it does not exist.
  */
 export function createProvidersBackendRegistration(
   options: ProvidersRegistrationOptions,
-): BackendRegistration {
+): ProvidersBackendRegistration {
   const mode: ProvidersMode = options.providers ?? { mode: "production" };
   const clock = { now: options.now ?? Date.now };
   let current: RouteAvailability | undefined;
@@ -137,5 +144,6 @@ export function createProvidersBackendRegistration(
       },
     },
     operations,
+    routeCapabilities: (route) => proxy.routeCapabilities(route),
   };
 }

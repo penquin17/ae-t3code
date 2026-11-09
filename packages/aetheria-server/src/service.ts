@@ -12,6 +12,7 @@ import type { BackendAdapter, BackendRegistration } from "./adapter.ts";
 import { createAgentAwarenessBackendRegistration } from "./agentAwareness.ts";
 import { BACKEND_COMPOSITION_ID } from "./composition.ts";
 import { createProvidersBackendRegistration, type ProvidersMode } from "./providers.ts";
+import { createPiSelectionSeam, type PiSelectionSeam } from "./routeSeam.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
 import { createLifecycleTracker, type LifecycleTracker } from "./identity/lifecycle.ts";
@@ -91,6 +92,8 @@ export interface AetheriaBackendService {
   readonly index: ThreadIndex;
   readonly tracker: LifecycleTracker;
   readonly backend: BackendAdapter;
+  /** The route policy T3's Pi adapter consults before it sends a model or effort (M09 step 11). Capabilities are unknown until the service runs. */
+  readonly piSelectionSeam: PiSelectionSeam;
 }
 
 export type CreateServiceResult =
@@ -158,16 +161,14 @@ export function createAetheriaBackendService(
         },
       ],
     };
+  const providersRegistration = createProvidersBackendRegistration({
+    composition,
+    ...(options.providers === undefined ? {} : { providers: options.providers }),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
   const prepared = prepareAetheriaBackend({
     composition,
-    registrations: [
-      registration,
-      createProvidersBackendRegistration({
-        composition,
-        ...(options.providers === undefined ? {} : { providers: options.providers }),
-        ...(options.now === undefined ? {} : { now: options.now }),
-      }),
-    ],
+    registrations: [registration, providersRegistration],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
   if (prepared.outcome === "refused") return { outcome: "refused", faults: prepared.faults };
@@ -264,6 +265,9 @@ export function createAetheriaBackendService(
     index,
     tracker,
     backend,
+    piSelectionSeam: createPiSelectionSeam({
+      capabilities: (route) => providersRegistration.routeCapabilities(route),
+    }),
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

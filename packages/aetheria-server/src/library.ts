@@ -5,9 +5,16 @@ import {
   createFxAv,
   createProductionAvailability,
   createProvidersOperations,
+  effectiveRoute,
+  RoutePolicyError,
+  type EffectiveRouteSource,
+  type EffortValidation,
   type FxAvScript,
   type ProductionAvailabilityOptions,
+  type Route,
   type RouteAvailability,
+  type RouteCapabilities,
+  type RoutePolicyErrorCode,
 } from "@aetheria/providers/backend";
 import {
   awarenessAction,
@@ -93,14 +100,31 @@ export type {
   StartResult,
 };
 
-export { createFxAv, createProductionAvailability, createProvidersOperations };
-export type { FxAvScript, ProductionAvailabilityOptions, RouteAvailability };
+export {
+  createFxAv,
+  createProductionAvailability,
+  createProvidersOperations,
+  effectiveRoute,
+  RoutePolicyError,
+};
+export type {
+  EffectiveRouteSource,
+  EffortValidation,
+  FxAvScript,
+  ProductionAvailabilityOptions,
+  Route,
+  RouteAvailability,
+  RouteCapabilities,
+  RoutePolicyErrorCode,
+};
 
 /** The runtime functions the providers module calls; a test checks each exists on the installed providers archive's Backend entry. */
 export const PROVIDERS_LIBRARY_EXPORTS = [
   "createFxAv",
   "createProductionAvailability",
   "createProvidersOperations",
+  "effectiveRoute",
+  "RoutePolicyError",
 ] as const;
 
 /** A reportable problem, as the shared validator and lifecycle driver return it. */

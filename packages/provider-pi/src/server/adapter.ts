@@ -306,6 +306,60 @@ function providerRef(
 
 const PI_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
+// AETHERIA-IP:IP-17 optional route policy, installed in-process by the Aetheria Backend; absent on bare T3.
+// The adapter decides nothing: it asks for the effort, refuses on a refusal, and otherwise sends as before.
+const AETHERIA_SELECTION_SEAM = Symbol.for("aetheria.pi.selection-seam");
+interface AetheriaSelectionSeam {
+  readonly resolve: (request: {
+    readonly provider: string;
+    readonly model: string;
+    readonly effort?: string;
+    readonly child: boolean;
+  }) =>
+    | { readonly outcome: "resolved"; readonly effort: string | null }
+    | { readonly outcome: "refused"; readonly message: string };
+}
+const aetheriaSelection = (
+  selection: ModelSelection,
+  child: boolean,
+): Effect.Effect<ModelSelection, ProviderAdapter.ProviderAdapterProtocolError> => {
+  const seam = (globalThis as Record<symbol, AetheriaSelectionSeam | undefined>)[
+    AETHERIA_SELECTION_SEAM
+  ];
+  const parsed =
+    selection.model === PI_INHERIT_MODEL_SLUG ? null : parsePiModelSlug(selection.model);
+  if (seam === undefined || parsed === null) return Effect.succeed(selection);
+  const thinking = getModelSelectionStringOptionValue(selection, "thinking");
+  const fail = (detail: string) =>
+    new ProviderAdapter.ProviderAdapterProtocolError({ driver: PI_PROVIDER, detail });
+  return Effect.try({
+    try: () =>
+      seam.resolve({
+        provider: parsed.provider,
+        model: parsed.modelId,
+        ...(thinking !== undefined && PI_THINKING_LEVELS.has(thinking) ? { effort: thinking } : {}),
+        child,
+      }),
+    catch: () => fail("The Aetheria route policy failed before any model command was sent"),
+  }).pipe(
+    Effect.flatMap((verdict) =>
+      verdict.outcome === "refused"
+        ? Effect.fail(fail(verdict.message))
+        : Effect.succeed(
+            verdict.effort === null
+              ? selection
+              : {
+                  ...selection,
+                  options: [
+                    ...(selection.options ?? []).filter((option) => option.id !== "thinking"),
+                    { id: "thinking", value: verdict.effort },
+                  ],
+                },
+          ),
+    ),
+  );
+};
+
 interface PiStreamItemState {
   readonly nativeItemId: string;
   readonly kind: "assistant_message" | "reasoning";
@@ -2542,7 +2596,11 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             const continuation =
               turnInput.message.createdBy === "agent" &&
               turnInput.message.creationSource === "provider";
-            if (!continuation) yield* applySelection(turnInput.modelSelection);
+            // AETHERIA-IP:IP-17 resolve the route and effort once; a refusal ends the turn before any model command
+            if (!continuation) {
+              const child = turnInput.appThread.lineage.relationshipToParent === "subagent";
+              yield* applySelection(yield* aetheriaSelection(turnInput.modelSelection, child));
+            }
             if (turnInput.appThread.title !== appliedSessionName) {
               yield* request({
                 type: "set_session_name",

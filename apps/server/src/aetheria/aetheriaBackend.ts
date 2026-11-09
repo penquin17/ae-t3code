@@ -12,6 +12,7 @@
 // half Backend. A start that does not report `started` fails the layer the same way.
 import {
   createAetheriaBackendService,
+  installPiSelectionSeam,
   prepareAetheriaBackend,
   type AetheriaBackendService,
   type StoredEventLike,
@@ -91,6 +92,11 @@ export const makeLayer = (stateRoot: string) =>
             ),
             Effect.ignoreCause,
           ),
+      );
+      // M09 step 11 (IP-17): T3's Pi adapter reads the route policy from a process slot. Filled once the Backend runs, emptied before it drains.
+      yield* Effect.acquireRelease(
+        Effect.sync(() => installPiSelectionSeam(service.piSelectionSeam)),
+        (release) => Effect.sync(release),
       );
       // Events up to the log's head now are history to this Backend: the board treats liveness from them as unknown. If the head cannot be
       // read the horizon stays unset and every holder is unknown (open and visible, never a stale "active" or "free").
