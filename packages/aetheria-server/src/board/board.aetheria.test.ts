@@ -366,6 +366,82 @@ describe("reconciliation at start", () => {
   });
 });
 
+const shell = (w: { run: ReturnType<typeof make>["run"] }, who: Who, args: unknown) =>
+  w.run("board.record-shell", who, args as Record<string, unknown>);
+
+describe("board.record-shell", () => {
+  it("records a session's shell change on its root, and a peer's summary shows it as not guarded without any claim", async () => {
+    const w = await live([A, B]);
+    const changed = NodePath.join(w.ws, "x.txt");
+    expect(await shell(w, A, { paths: [changed], outcome: "changed" })).toEqual({
+      status: "done",
+      result: { recorded: true, count: 1 },
+    });
+    const summary = await w.run("awareness.summary", B, {});
+    const text = (summary as { result: { text: string } }).result.text;
+    expect(text).toContain(`changed via shell (not guarded): ${changed}`);
+    expect(await check(w, B, changed)).toMatchObject({
+      result: { verdict: "allowed", governed: true, takenOver: 0 },
+    });
+    const board = JSON.parse(NodeFS.readFileSync(boardFileFor(w.stateRoot, w.ws), "utf8")) as {
+      claims: Record<string, unknown>;
+      markers: Record<string, unknown>;
+      sessions: Record<string, { edits: string[] }>;
+    };
+    expect([board.claims, board.markers, board.sessions[SESSION]?.edits]).toEqual([{}, {}, []]);
+  });
+
+  it("lands a child's record on its root session and records an unknown outcome", async () => {
+    const w = await live([A, C]);
+    const child = { ...C, kind: "child" as const, root: SESSION };
+    await shell(w, child, { paths: [NodePath.join(w.ws, "c.txt")], outcome: "changed" });
+    await shell(w, child, { paths: [], outcome: "unknown" });
+    const board = JSON.parse(NodeFS.readFileSync(boardFileFor(w.stateRoot, w.ws), "utf8")) as {
+      sessions: Record<string, { shell?: unknown }>;
+    };
+    expect(board.sessions[SESSION]?.shell).toEqual({
+      changed: [NodePath.join(w.ws, "c.txt")],
+      unknown: true,
+    });
+    expect(board.sessions[SESSION_C]).toBeUndefined();
+  });
+
+  it("refuses an outside or non-canonical path as a done value, stores nothing, and throws on a wrong shape", async () => {
+    const w = await live([A]);
+    const outside = await shell(w, A, { paths: ["/etc/hosts"], outcome: "changed" });
+    expect(outside).toMatchObject({
+      status: "done",
+      result: { recorded: false, code: "AWARENESS_INVALID" },
+    });
+    const dotted = `${w.ws}/d/../x.txt`;
+    expect(await shell(w, A, { paths: [dotted], outcome: "changed" })).toMatchObject({
+      result: { recorded: false, code: "AWARENESS_INVALID" },
+    });
+    expect(NodeFS.existsSync(boardFileFor(w.stateRoot, w.ws))).toBe(false);
+    await expect(shell(w, A, { paths: [], outcome: "changed" })).rejects.toThrow();
+    await expect(
+      shell(w, A, { paths: [NodePath.join(w.ws, "x")], outcome: "changed", sessionId: "s" }),
+    ).rejects.toThrow();
+  });
+
+  it("answers unavailable for a session with no workspace and while the board is unreadable, then records once it is readable", async () => {
+    const w = await live([A, B]);
+    const unavailable = { status: "unavailable", code: "AWARENESS_UNAVAILABLE" };
+    const target = NodePath.join(w.ws, "x.txt");
+    expect(await shell(w, C, { paths: [target], outcome: "changed" })).toEqual(unavailable);
+    await act(w, B, { action: "goal", text: "first" });
+    const file = boardFileFor(w.stateRoot, w.ws);
+    const good = NodeFS.readFileSync(file, "utf8");
+    NodeFS.writeFileSync(file, "{broken");
+    expect(await shell(w, A, { paths: [target], outcome: "changed" })).toEqual(unavailable);
+    expect(NodeFS.readFileSync(file, "utf8")).toBe("{broken");
+    NodeFS.writeFileSync(file, good);
+    expect(await shell(w, A, { paths: [target], outcome: "changed" })).toMatchObject({
+      result: { recorded: true, count: 1 },
+    });
+  });
+});
+
 describe("drain", () => {
   it("drains the boards with the Backend: clean report, operations unavailable afterwards", async () => {
     const w = await live([A]);
@@ -377,5 +453,14 @@ describe("drain", () => {
       status: "unavailable",
       code: "XC6_BACKEND_NOT_RUNNING",
     });
+  });
+
+  it("answers a shell record unavailable once drained, and records nothing", async () => {
+    const w = await live([A]);
+    await w.service.dispose("test");
+    expect(
+      await shell(w, A, { paths: [NodePath.join(w.ws, "x.txt")], outcome: "changed" }),
+    ).toEqual({ status: "unavailable", code: "XC6_BACKEND_NOT_RUNNING" });
+    expect(NodeFS.existsSync(boardFileFor(w.stateRoot, w.ws))).toBe(false);
   });
 });

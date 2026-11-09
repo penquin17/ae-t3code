@@ -1,5 +1,5 @@
-// AETHERIA — the XC-6 operations the guarded write/edit tools call: `board.check-write` before a write, `board.record-edit` after it.
-// The caller is the bearer's identity, never a field here; both are strict structs. Board unreadable or liveness unreadable is the XC-6
+// AETHERIA — the XC-6 operations the guarded write/edit tools call: `board.check-write` before a write, `board.record-edit` after it; and the
+// shell tool's `board.record-shell` (M09 step 17). The caller is the bearer's identity, never a field here; all are strict. Board unreadable or liveness unreadable is the XC-6
 // `unavailable` reply with one of the codes below (the Agent applies failOpen); a refusal is a `done` value with its AWARENESS_* code.
 import * as Schema from "effect/Schema";
 
@@ -64,3 +64,42 @@ export const BoardRecordEditResult = Schema.Struct({
   duplicate: Schema.Boolean,
 });
 export type BoardRecordEditResult = typeof BoardRecordEditResult.Type;
+
+/** M09 step 17: a shell command's final observation. Visibility only: it carries no version token and takes no claim. */
+export const BOARD_RECORD_SHELL_OPERATION = "board.record-shell";
+/** The most paths one shell record carries; the Agent's sink cuts to the same number. */
+const BOARD_RECORD_SHELL_MAX_PATHS = 100;
+
+/** `changed` carries 1 to 100 unique absolute paths; `unknown` carries none. The caller is the bearer's identity, never a field. */
+export const BoardRecordShellArgs = Schema.Union([
+  Schema.Struct({
+    paths: Schema.Array(AbsolutePath).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(BOARD_RECORD_SHELL_MAX_PATHS),
+      Schema.isUnique(),
+    ),
+    outcome: Schema.Literal("changed"),
+  }),
+  Schema.Struct({
+    paths: Schema.Array(AbsolutePath).check(Schema.isMaxLength(0)),
+    outcome: Schema.Literal("unknown"),
+  }),
+]);
+export type BoardRecordShellArgs = typeof BoardRecordShellArgs.Type;
+const decodeRecordShell = Schema.decodeUnknownSync(BoardRecordShellArgs, strict);
+export const decodeBoardRecordShellArgs = (args: unknown): BoardRecordShellArgs =>
+  decodeRecordShell(args);
+
+/** A small acknowledgement; a path the Backend will not store (outside the workspace, not canonical) is a refusal with its registry code. */
+export const BoardRecordShellResult = Schema.Union([
+  Schema.Struct({
+    recorded: Schema.Literal(true),
+    count: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  }),
+  Schema.Struct({
+    recorded: Schema.Literal(false),
+    code: Schema.Literal("AWARENESS_INVALID"),
+    detail: Schema.String,
+  }),
+]);
+export type BoardRecordShellResult = typeof BoardRecordShellResult.Type;

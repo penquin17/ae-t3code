@@ -1,5 +1,5 @@
-// AETHERIA M04 Plan step 20: the frozen wire shapes of the board and awareness operations, checked at their own boundary — what decodes and
-// what is refused. The Backend that answers them is tested in @t3tools/aetheria-server; the Agent that calls them is outside the fork.
+// AETHERIA M04 Plan step 20 (and M09 step 17 for board.record-shell, against shared vectors): the frozen wire shapes of the board and awareness
+// operations, checked at their own boundary — what decodes and what is refused. The Backend that answers them is tested in @t3tools/aetheria-server; the Agent that calls them is outside the fork.
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -11,20 +11,26 @@ import {
   AwarenessSummaryResult,
   BOARD_CHECK_WRITE_OPERATION,
   BOARD_RECORD_EDIT_OPERATION,
+  BOARD_RECORD_SHELL_OPERATION,
   BoardCheckWriteResult,
   BoardRecordEditArgs,
   BoardRecordEditResult,
+  BoardRecordShellArgs,
+  BoardRecordShellResult,
   BoardWriteArgs,
   XC10_CHILD_STATUS_UNAVAILABLE_CODE,
   XC6_OPERATION_NAME_PATTERN,
   XC8_DECISION_EVIDENCE_UNAVAILABLE_CODE,
 } from "./index.ts";
+import { boardShellVectors } from "./boardShellOperations.vectors.ts";
 
 const strict = { onExcessProperty: "error" } as const;
 const decodeWrite = Schema.decodeUnknownSync(BoardWriteArgs, strict);
 const decodeRecord = Schema.decodeUnknownSync(BoardRecordEditArgs, strict);
 const decodeCheck = Schema.decodeUnknownSync(BoardCheckWriteResult, strict);
 const decodeRecorded = Schema.decodeUnknownSync(BoardRecordEditResult, strict);
+const decodeShell = Schema.decodeUnknownSync(BoardRecordShellArgs, strict);
+const decodeShellResult = Schema.decodeUnknownSync(BoardRecordShellResult, strict);
 const decodeAction = Schema.decodeUnknownSync(AwarenessActionArgs, strict);
 const decodeSummary = Schema.decodeUnknownSync(AwarenessSummaryResult, strict);
 
@@ -83,6 +89,41 @@ describe("board.check-write and board.record-edit", () => {
       true,
     );
     expect(() => decodeRecorded({ recorded: false, governed: true, duplicate: false })).toThrow();
+  });
+});
+
+describe("board.record-shell", () => {
+  it("is a valid XC-6 name", () => {
+    expect(BOARD_RECORD_SHELL_OPERATION).toBe("board.record-shell");
+    expect(XC6_OPERATION_NAME_PATTERN.test(BOARD_RECORD_SHELL_OPERATION)).toBe(true);
+  });
+
+  it("decodes every accepted vector unchanged", () => {
+    for (const vector of boardShellVectors.recordShellArgs!.accept)
+      expect(decodeShell(vector.value), vector.name).toEqual(vector.value);
+  });
+
+  it("refuses every refused vector, including a caller field", () => {
+    for (const vector of boardShellVectors.recordShellArgs!.refuse)
+      expect(() => decodeShell(vector.value), vector.name).toThrow();
+  });
+
+  it("refuses a path past 4096 characters, which the vectors leave to the schema", () => {
+    expect(() => decodeShell({ paths: [`/w/${"a".repeat(4100)}`], outcome: "changed" })).toThrow();
+  });
+
+  it("answers a small acknowledgement or an AWARENESS_INVALID refusal — and nothing else", () => {
+    expect(decodeShellResult({ recorded: true, count: 2 })).toEqual({ recorded: true, count: 2 });
+    expect(
+      decodeShellResult({ recorded: false, code: "AWARENESS_INVALID", detail: "paths: x" })
+        .recorded,
+    ).toBe(false);
+    expect(() => decodeShellResult({ recorded: true, count: -1 })).toThrow();
+    expect(() => decodeShellResult({ recorded: true, count: 1, paths: [] })).toThrow();
+    expect(() =>
+      decodeShellResult({ recorded: false, code: "AWARENESS_HELD", detail: "x" }),
+    ).toThrow();
+    expect(() => decodeShellResult({ recorded: false, count: 0 })).toThrow();
   });
 });
 

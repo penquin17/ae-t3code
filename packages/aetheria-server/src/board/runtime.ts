@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // AETHERIA — the Backend's board runtime (design D9–D12; Plan step 20): one board service per workspace, the caller taken from the bearer's
-// identity and the thread binding, liveness read only from this Backend's own run, and the four XC-6 operations that use them.
+// identity and the thread binding, liveness read only from this Backend's own run, and the XC-6 operations that use them (M09 step 17 adds
+// `board.record-shell`, a shell change shown to peers as not guarded).
 // Evidence from before this Backend started is unknown: an observation counts only if its producing event is newer than the replay horizon.
 // Unreadable board or liveness is `unavailable`; production `assign` and `resolve` answer unavailable naming XC-10 / XC-8.
 // Step 22: when liveness reports a bound main session stopped or crashed, its board session is closed by the one close policy (`reconcileBoard`
@@ -15,7 +16,9 @@ import {
   AWARENESS_UNAVAILABLE_CODE,
   BOARD_CHECK_WRITE_OPERATION,
   BOARD_RECORD_EDIT_OPERATION,
+  BOARD_RECORD_SHELL_OPERATION,
   decodeBoardRecordEditArgs,
+  decodeBoardRecordShellArgs,
   decodeBoardWriteArgs,
   XC10_CHILD_STATUS_UNAVAILABLE_CODE,
   XC8_DECISION_EVIDENCE_UNAVAILABLE_CODE,
@@ -37,6 +40,7 @@ import {
   nodePathFs,
   reconcileBoard,
   recordEdit,
+  recordShell,
   resolveWorkspace,
   summarize,
   type ActionCaller,
@@ -68,7 +72,7 @@ export interface BoardRuntimeOptions {
 }
 
 export interface BoardRuntime {
-  /** The XC-6 operations: check-write, record-edit, the awareness actions and the summary. */
+  /** The XC-6 operations: check-write, record-edit, record-shell, the awareness actions and the summary. */
   operations(): Readonly<Record<string, Xc6Operation>>;
   /** The highest event sequence that existed before this Backend subscribed; only newer liveness events count as evidence. */
   setReplayHorizon(sequence: number): void;
@@ -308,6 +312,22 @@ export function createBoardRuntime(options: BoardRuntimeOptions): BoardRuntime {
     return done({ recorded: true, governed: outcome.governed, duplicate: outcome.duplicate });
   };
 
+  /** A session with no workspace has no board to tell, so the answer is unavailable (the Agent warns), never a recorded one. */
+  const recordShellOp: Xc6Operation = async (context) => {
+    const args = decodeBoardRecordShellArgs(context.args);
+    const at = await open(context);
+    if (at === undefined) return unavailable(AWARENESS_UNAVAILABLE_CODE);
+    const outcome = await recordShell(
+      at.caller,
+      { paths: [...args.paths], outcome: args.outcome },
+      ports(at.board),
+    );
+    if (outcome.status === "unavailable") return unavailable(reasonCode(outcome.reason));
+    if (outcome.status === "refused")
+      return done({ recorded: false, code: outcome.code, detail: outcome.detail });
+    return done({ recorded: true, count: outcome.count });
+  };
+
   const actionOp: Xc6Operation = async (context) => {
     const at = await open(context);
     if (at === undefined)
@@ -351,6 +371,7 @@ export function createBoardRuntime(options: BoardRuntimeOptions): BoardRuntime {
     operations: () => ({
       [BOARD_CHECK_WRITE_OPERATION]: tracked(checkWriteOp),
       [BOARD_RECORD_EDIT_OPERATION]: tracked(recordEditOp),
+      [BOARD_RECORD_SHELL_OPERATION]: tracked(recordShellOp),
       [AWARENESS_ACTION_OPERATION]: tracked(actionOp),
       [AWARENESS_SUMMARY_OPERATION]: tracked(summaryOp),
     }),
