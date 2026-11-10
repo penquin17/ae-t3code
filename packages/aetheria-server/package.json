@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@aetheria/awareness": "file:./artifacts/aetheria-awareness-0.1.0.tgz",
+    "@aetheria/evidence": "file:./artifacts/aetheria-evidence-0.1.0.tgz",
     "@aetheria/interaction": "file:./artifacts/aetheria-interaction-0.1.0.tgz",
     "@aetheria/providers": "file:./artifacts/aetheria-providers-0.1.0.tgz",
     "@t3tools/aetheria-contracts": "workspace:*"
@@ -26,12 +27,17 @@
     "@aetheria/awareness": {
       "archive": "artifacts/aetheria-awareness-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:0f0afff416c420afa178a9d00a21e7c129960fe0ae2c1033b2adf436fff27b9f"
+      "stamp": "sha256:8e84ea8f447e7d208ddeca730586138827cccbccbac30257e0d703858c13cc33"
+    },
+    "@aetheria/evidence": {
+      "archive": "artifacts/aetheria-evidence-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:4f93178fda3b7c63b83bfd608f07261a934a9621f4cb2ea1b56df11eb4559723"
     },
     "@aetheria/interaction": {
       "archive": "artifacts/aetheria-interaction-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:9fd61902f61449ebc5604cc3ad13ffb0b8141dad4d05d0fe079eb48d3efb899c"
+      "stamp": "sha256:52aa41b57570c741c73844a180a1aa50aad89c3e9787c671c0fcb90fa6782651"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",

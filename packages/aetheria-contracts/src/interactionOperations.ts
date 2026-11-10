@@ -299,14 +299,37 @@ const Todos = Schema.Array(Todo).check(
   uniqueBy((todo: typeof Todo.Type) => todo.content, "todo contents must be unique"),
 );
 
+/**
+ * `current`: the Backend holds the list the Agent most recently published in this Backend run. `stale`: the view was written in an earlier Backend run
+ * and no republish has confirmed it yet. `unknown`: the Backend saw contradicting publications and cannot say which list is the session's. A client shows
+ * `stale` and `unknown` as such, never as a current list.
+ */
+export const TaskState = Schema.Literals(["current", "stale", "unknown"]);
+export type TaskState = typeof TaskState.Type;
+
+/** The Backend's rebuildable view of one session's task list; the authority is the Pi session entry. `rootSessionId` is derived by the Backend. */
 export const TaskView = Schema.Struct({
   sessionId: Id,
+  rootSessionId: Id,
   entryId: Id,
   seq: Nat,
   todos: Todos,
   publishedAt: IsoUtc,
+  state: TaskState,
 });
 export type TaskView = typeof TaskView.Type;
+
+/**
+ * The Agent's ordering evidence for one publication. `lifecycle` is the start time of the Agent's session lifecycle (a `Date#toISOString` string, so the
+ * strings compare in time order), set anew on every session start and every session-tree navigation; `n` counts publications within it. The Backend
+ * compares `(lifecycle, n)` lexicographically: an entry id and a branch-local `seq` cannot say which of two branches is current, but a publication
+ * issued later always has the greater pair.
+ */
+export const TaskOrder = Schema.Struct({
+  lifecycle: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)),
+  n: Nat,
+});
+export type TaskOrder = typeof TaskOrder.Type;
 
 const RECORD_CARRYING_CODES: readonly InteractionCode[] = [
   "INTERACTION_ALREADY_SETTLED",
@@ -379,7 +402,12 @@ export const InteractionReleaseResult = reply(InteractionRecord, [
 ]);
 export type InteractionReleaseResult = typeof InteractionReleaseResult.Type;
 
-export const TasksPublishArgs = Schema.Struct({ entryId: Id, seq: Nat, list: Todos });
+export const TasksPublishArgs = Schema.Struct({
+  entryId: Id,
+  seq: Nat,
+  order: TaskOrder,
+  list: Todos,
+});
 export type TasksPublishArgs = typeof TasksPublishArgs.Type;
 export const TasksPublishResult = reply(TaskView, ["INTERACTION_UNAVAILABLE"]);
 export type TasksPublishResult = typeof TasksPublishResult.Type;

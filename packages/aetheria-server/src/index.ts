@@ -30,6 +30,7 @@ export {
   humanControlBackendModuleRow,
   sessionTurnDispatch,
   type AgentIdentity,
+  type AuditPort,
   type ClientActor,
   type ClientIdentity,
   type HumanControlBackendRegistration,

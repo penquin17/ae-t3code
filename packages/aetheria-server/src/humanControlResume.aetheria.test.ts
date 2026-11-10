@@ -186,6 +186,8 @@ const fakeService = (overrides: Partial<HumanControlService> = {}) => {
     getPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     setPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     grant: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    publishTasks: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    getTasks: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     canAccess: () => false,
     reconcileWaits: async (sessionId) => {
       calls.push(`reconcile:${sessionId}`);

@@ -117,6 +117,35 @@ describe("XC-6 carrier core", () => {
     expect(reply.body).toEqual({ v: 1, status: "unavailable", code: "BOARD_UNAVAILABLE" });
   });
 
+  it("lets an operation refuse a verified caller with a stable code: a refused reply, 403, with the code and nothing else", async () => {
+    const events: unknown[] = [];
+    const backend = make(
+      { "probe.refuse": () => ({ status: "refused", code: "AUTH_TOOL_NOT_ALLOWED" }) },
+      events,
+    );
+    const reply = await backend.handle(call({ v: 1, op: "probe.refuse" }));
+    expect(reply.http).toBe(403);
+    expect(reply.body).toEqual({ v: 1, status: "refused", code: "AUTH_TOOL_NOT_ALLOWED" });
+    expect(events).toEqual([
+      { kind: "call", op: "probe.refuse", status: "refused", code: "AUTH_TOOL_NOT_ALLOWED" },
+    ]);
+  });
+
+  it("delivers a refusal that settles later as the same refused reply on the poll", async () => {
+    const backend = make({
+      "probe.slow-refuse": () => ({
+        status: "pending",
+        settle: Promise.resolve({ status: "refused", code: "AUTH_ROLE_REMOVED" } as const),
+      }),
+    });
+    const started = await backend.handle(call({ v: 1, op: "probe.slow-refuse" }));
+    const token = (started.body as { token: string }).token;
+    await Promise.resolve();
+    const polled = await backend.handle(call({ v: 1, poll: token }));
+    expect(polled.http).toBe(403);
+    expect(polled.body).toEqual({ v: 1, status: "refused", code: "AUTH_ROLE_REMOVED" });
+  });
+
   it("reports an operation that throws as an error reply without its message", async () => {
     const backend = make({
       boom: () => {

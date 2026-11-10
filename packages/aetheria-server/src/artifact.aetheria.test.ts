@@ -24,10 +24,12 @@ import {
 import { PINNED_ARTIFACT } from "./artifact.ts";
 import { BACKEND_ENTRY_ALLOWLIST } from "./composition.ts";
 import {
+  EVIDENCE_LIBRARY_EXPORTS,
   INTERACTION_LIBRARY_EXPORTS,
   LIBRARY_EXPORTS,
   PROVIDERS_LIBRARY_EXPORTS,
 } from "./library.ts";
+import * as evidenceEntry from "@aetheria/evidence/backend";
 import * as interactionEntry from "@aetheria/interaction/backend";
 import * as providersEntry from "@aetheria/providers/backend";
 
@@ -51,6 +53,7 @@ describe("the pinned archive", () => {
     // M09 A15: awareness and the pinned providers archive (checked in providers.aetheria.test.ts); M06 adds the interaction archive.
     expect(Object.keys(manifest.aetheriaArtifacts).sort()).toEqual([
       "@aetheria/awareness",
+      "@aetheria/evidence",
       "@aetheria/interaction",
       "@aetheria/providers",
     ]);
@@ -98,6 +101,7 @@ describe("the artifact boundary", () => {
             "@aetheria/awareness/backend",
             "@aetheria/providers/backend",
             "@aetheria/interaction/backend",
+            "@aetheria/evidence/backend",
           ]).toContain(specifier);
         }
         expect(specifier).not.toMatch(/packages\/aetheria-|apps\/aetheria|(\.\.\/){3,}/);
@@ -114,6 +118,8 @@ describe("the artifact boundary", () => {
   it("finds every name the providers module re-exports on the real providers archive's Backend entry", () => {
     for (const name of INTERACTION_LIBRARY_EXPORTS)
       expect(typeof (interactionEntry as Record<string, unknown>)[name], name).toBe("function");
+    for (const name of EVIDENCE_LIBRARY_EXPORTS)
+      expect(typeof (evidenceEntry as Record<string, unknown>)[name], name).toBe("function");
     for (const name of PROVIDERS_LIBRARY_EXPORTS)
       expect(typeof (providersEntry as Record<string, unknown>)[name]).toBe("function");
     expect(providersEntry.PROVIDERS_BACKEND_ENTRY).toBe("@aetheria/providers/backend");

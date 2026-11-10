@@ -124,6 +124,7 @@ const evi = { ...ev, interactionId: "int_1" };
 const planMode = { sessionId: "sess1", active: true, modeRevision: 3 };
 const taskView = {
   sessionId: "sess1",
+  rootSessionId: "root1",
   entryId: "entry_1",
   seq: 2,
   todos: [
@@ -132,7 +133,10 @@ const taskView = {
     { content: "Report", status: "in_progress" },
   ],
   publishedAt: at,
+  state: "current",
 };
+/** The Agent's ordering evidence for one publication: the lifecycle it was issued in (reset on every session start and tree navigation) and its counter. */
+const taskOrder = { lifecycle: at, n: 1 };
 
 const ok = (value: unknown) => ({ ok: true, value });
 const fail = (code: string) => ({ ok: false, code });
@@ -378,9 +382,12 @@ export const interactionVectors: Readonly<Record<string, InteractionVectorSet>> 
     accept: [
       {
         name: "list with parallel in-progress items",
-        value: { entryId: "entry_1", seq: 2, list: taskView.todos },
+        value: { entryId: "entry_1", seq: 2, order: taskOrder, list: taskView.todos },
       },
-      { name: "empty list", value: { entryId: "entry_1", seq: 0, list: [] } },
+      {
+        name: "empty list",
+        value: { entryId: "entry_1", seq: 0, order: { lifecycle: at, n: 0 }, list: [] },
+      },
     ],
     refuse: [
       {
@@ -388,6 +395,7 @@ export const interactionVectors: Readonly<Record<string, InteractionVectorSet>> 
         value: {
           entryId: "e",
           seq: 1,
+          order: taskOrder,
           list: [
             { content: "a", status: "pending" },
             { content: "a", status: "completed" },
@@ -396,20 +404,71 @@ export const interactionVectors: Readonly<Record<string, InteractionVectorSet>> 
       },
       {
         name: "empty content",
-        value: { entryId: "e", seq: 1, list: [{ content: "", status: "pending" }] },
+        value: {
+          entryId: "e",
+          seq: 1,
+          order: taskOrder,
+          list: [{ content: "", status: "pending" }],
+        },
       },
       {
         name: "unknown status",
-        value: { entryId: "e", seq: 1, list: [{ content: "a", status: "blocked" }] },
+        value: {
+          entryId: "e",
+          seq: 1,
+          order: taskOrder,
+          list: [{ content: "a", status: "blocked" }],
+        },
       },
       {
         name: "extra todo key",
-        value: { entryId: "e", seq: 1, list: [{ content: "a", status: "pending", owner: "x" }] },
+        value: {
+          entryId: "e",
+          seq: 1,
+          order: taskOrder,
+          list: [{ content: "a", status: "pending", owner: "x" }],
+        },
       },
-      { name: "negative seq", value: { entryId: "e", seq: -1, list: [] } },
-      { name: "entry id missing", value: { seq: 1, list: [] } },
-      { name: "session id smuggled", value: { entryId: "e", seq: 1, list: [], sessionId: "s" } },
-      { name: "actor claimed", value: { entryId: "e", seq: 1, list: [], actor: "human" } },
+      { name: "negative seq", value: { entryId: "e", seq: -1, order: taskOrder, list: [] } },
+      { name: "entry id missing", value: { seq: 1, order: taskOrder, list: [] } },
+      { name: "order missing", value: { entryId: "e", seq: 1, list: [] } },
+      {
+        name: "order lifecycle not a time",
+        value: { entryId: "e", seq: 1, order: { lifecycle: "later", n: 1 }, list: [] },
+      },
+      {
+        name: "order lifecycle without milliseconds (strings must compare in time order)",
+        value: {
+          entryId: "e",
+          seq: 1,
+          order: { lifecycle: "2026-11-10T12:00:00Z", n: 1 },
+          list: [],
+        },
+      },
+      {
+        name: "order counter negative",
+        value: { entryId: "e", seq: 1, order: { lifecycle: at, n: -1 }, list: [] },
+      },
+      {
+        name: "order counter missing",
+        value: { entryId: "e", seq: 1, order: { lifecycle: at }, list: [] },
+      },
+      {
+        name: "extra order key",
+        value: { entryId: "e", seq: 1, order: { ...taskOrder, branch: "b" }, list: [] },
+      },
+      {
+        name: "session id smuggled",
+        value: { entryId: "e", seq: 1, order: taskOrder, list: [], sessionId: "s" },
+      },
+      {
+        name: "actor claimed",
+        value: { entryId: "e", seq: 1, order: taskOrder, list: [], actor: "human" },
+      },
+      {
+        name: "root claimed",
+        value: { entryId: "e", seq: 1, order: taskOrder, list: [], rootSessionId: "r" },
+      },
     ],
   },
   tasksPublishResult: {
@@ -898,9 +957,15 @@ export const interactionVectors: Readonly<Record<string, InteractionVectorSet>> 
     accept: [
       { name: "view", value: taskView },
       { name: "empty list", value: { ...taskView, todos: [] } },
+      { name: "stale view", value: { ...taskView, state: "stale" } },
+      { name: "unknown view", value: { ...taskView, state: "unknown" } },
     ],
     refuse: [
       { name: "published time missing", value: { ...taskView, publishedAt: undefined } },
+      { name: "state missing", value: { ...taskView, state: undefined } },
+      { name: "state not one of the three", value: { ...taskView, state: "fresh" } },
+      { name: "root missing", value: { ...taskView, rootSessionId: undefined } },
+      { name: "order is not part of the view", value: { ...taskView, order: taskOrder } },
       {
         name: "duplicate content",
         value: { ...taskView, todos: [taskView.todos[0], taskView.todos[0]] },

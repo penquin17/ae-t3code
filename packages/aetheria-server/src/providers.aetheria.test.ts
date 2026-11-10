@@ -77,9 +77,10 @@ describe("the second pinned archive", () => {
     expect(manifest.dependencies["@aetheria/providers"]).toBe(
       "file:./artifacts/aetheria-providers-0.1.0.tgz",
     );
-    // M06 adds the interaction archive (its own declaration is checked in humanControl.aetheria.test.ts).
+    // M06 adds the interaction archive (its own declaration is checked in humanControl.aetheria.test.ts) and the evidence archive (step 22/23).
     expect(Object.keys(manifest.aetheriaArtifacts).sort()).toEqual([
       "@aetheria/awareness",
+      "@aetheria/evidence",
       "@aetheria/interaction",
       "@aetheria/providers",
     ]);

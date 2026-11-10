@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off
 // AETHERIA M06 Plan step 6 — the Backend `human-control-backend` module: registration, the XC-6 operations, the single shared service.
 //
 // Boundary: the real Backend service (owner lock, composition validation, ordered start, reverse drain, XC-7 report) with the module selected by the
@@ -19,7 +19,7 @@ import {
   HUMAN_CONTROL_BACKEND_ID,
   humanControlBackendModuleRow,
 } from "./humanControlRow.ts";
-import type { HumanControlService } from "./humanControl.ts";
+import type { AuditPort, HumanControlService } from "./humanControl.ts";
 import { createAetheriaBackendService } from "./service.ts";
 
 const SHA = "a".repeat(64);
@@ -42,6 +42,7 @@ const emptyDrain = { released: [], stopped: [], transferred: [], stillLive: [] }
 interface FakeOptions {
   readonly startResult?: Awaited<ReturnType<HumanControlService["start"]>>;
   readonly awaitSegment?: HumanControlService["awaitSegment"];
+  readonly publishTasks?: HumanControlService["publishTasks"];
 }
 const makeFake = (options: FakeOptions = {}) => {
   const calls: Array<{ readonly method: string; readonly args: readonly unknown[] }> = [];
@@ -81,6 +82,26 @@ const makeFake = (options: FakeOptions = {}) => {
       note("getPlanMode", sessionId);
       return { ok: true, value: { sessionId, active: false, modeRevision: 0 } };
     },
+    publishTasks: async (who, args) => {
+      note("publishTasks", who, args);
+      if (options.publishTasks !== undefined) return options.publishTasks(who, args);
+      return {
+        ok: true,
+        value: {
+          sessionId: who.sessionId,
+          rootSessionId: who.rootSessionId,
+          entryId: args.entryId,
+          seq: args.seq,
+          todos: args.list,
+          publishedAt: "2026-11-10T12:00:00.000Z",
+          state: "current",
+        },
+      };
+    },
+    getTasks: async (sessionId) => {
+      note("getTasks", sessionId);
+      return { ok: true, value: null };
+    },
     setPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     grant: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     verifyHumanOrigin: async (originId, expect) => {
@@ -119,12 +140,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const prepare = (fake: ReturnType<typeof makeFake>, root = stateRoot()) => {
+const prepare = (fake: ReturnType<typeof makeFake>, root = stateRoot(), auditPort?: AuditPort) => {
   const factory = vi.fn(() => fake.service);
   const made = createAetheriaBackendService({
     stateRoot: root,
     credentialOf: () => undefined,
     interactionFactory: factory,
+    ...(auditPort === undefined ? {} : { auditPort }),
   });
   if (made.outcome !== "prepared") throw new Error(`must prepare: ${JSON.stringify(made.faults)}`);
   return { service: made.service, factory };
@@ -248,6 +270,11 @@ describe("the operations: strict arguments, identity from the context only", () 
     { actor: { clientSessionId: "c1" } },
     { repository: "/etc" },
     { caller: "x" },
+    { repo: "/etc" },
+    { path: "../../etc" },
+    { root: "/etc" },
+    { role: "reviewer" },
+    { project: { root: "/etc" } },
   ];
   const valid: Record<(typeof SEVEN)[number], Record<string, unknown>> = {
     "interaction.create": {
@@ -257,7 +284,12 @@ describe("the operations: strict arguments, identity from the context only", () 
     },
     "interaction.await": { interactionId: "int-1" },
     "interaction.release": { interactionId: "int-1", cause: "abort" },
-    "tasks.publish": { entryId: "e1", seq: 1, list: [] },
+    "tasks.publish": {
+      entryId: "e1",
+      seq: 1,
+      order: { lifecycle: "2026-11-10T12:00:00.000Z", n: 0 },
+      list: [{ content: "write", status: "in_progress" }],
+    },
     "plan-mode.get": {},
     "audit.history": { cycle: "v1p1-human-control" },
     "origin.verify": { originId: "org-1" },
@@ -312,17 +344,241 @@ describe("the operations: strict arguments, identity from the context only", () 
     await service.dispose("test");
   });
 
-  it("answers unavailable, never a success, for the operations whose steps are not built", async () => {
-    const fake = makeFake();
-    const { service } = prepare(fake);
-    await service.start();
-    for (const name of ["tasks.publish", "audit.history"] as const)
-      expect(await service.operations()[name]!(context(valid[name]))).toEqual({
+  describe("audit.history (step 23)", () => {
+    const project = {
+      root: "/work/project",
+      place: "foreign" as const,
+      settingsPaths: { cycles: "work/cycles/" },
+      problems: ["settings: paths.bogus: unknown key"],
+    };
+    const evidence = { verdict: "unverified", reason: "the cycle has no record" };
+    const makeAudit = (
+      overrides: {
+        access?: AuditPort["access"];
+        history?: AuditPort["history"];
+      } = {},
+    ) => {
+      const calls: Array<{ method: string; args: unknown[] }> = [];
+      const port: AuditPort = {
+        access:
+          overrides.access ??
+          (async (who) => {
+            calls.push({ method: "access", args: [who] });
+            return { ok: true, project, role: "reviewer" };
+          }),
+        history:
+          overrides.history ??
+          (async (input) => {
+            calls.push({ method: "history", args: [input] });
+            return evidence;
+          }),
+      };
+      return { port, calls };
+    };
+
+    it("checks the carrier-verified caller first, then reads the evidence with THAT session's project and role, and answers it as done", async () => {
+      const audit = makeAudit();
+      const { service } = prepare(makeFake(), stateRoot(), audit.port);
+      await service.start();
+      const result = await service.operations()["audit.history"]!(context(valid["audit.history"]!));
+      expect(result).toEqual({ status: "done", result: evidence });
+      expect(audit.calls.map((c) => c.method)).toEqual(["access", "history"]);
+      expect(audit.calls[0]?.args[0]).toEqual({
+        sessionId: "session-1",
+        rootSessionId: "root-1",
+        kind: "main",
+      });
+      expect(audit.calls[1]?.args[0]).toMatchObject({
+        cycle: "v1p1-human-control",
+        project,
+        role: "reviewer",
+      });
+      const read = audit.calls[1]?.args[0] as { signal: AbortSignal };
+      expect(read.signal.aborted).toBe(false);
+      await service.dispose("test");
+    });
+
+    it("answers a refused identity or role as XC-6 refused with M03's own code, and reads no evidence", async () => {
+      for (const code of [
+        "AUTH_IDENTITY_UNAVAILABLE",
+        "AUTH_IDENTITY_INVALID",
+        "AUTH_ROLE_REMOVED",
+        "AUTH_TOOL_NOT_ALLOWED",
+      ]) {
+        const audit = makeAudit({ access: async () => ({ ok: false, code, reason: "no" }) });
+        const { service } = prepare(makeFake(), stateRoot(), audit.port);
+        await service.start();
+        expect(
+          await service.operations()["audit.history"]!(context(valid["audit.history"]!)),
+        ).toEqual({ status: "refused", code });
+        expect(audit.calls.filter((c) => c.method === "history")).toEqual([]);
+        await service.dispose("test");
+      }
+    });
+
+    it("answers unavailable, never a success, when the check or the evidence port fails", async () => {
+      for (const audit of [
+        makeAudit({
+          access: async () => {
+            throw new Error("boom");
+          },
+        }),
+        makeAudit({
+          history: async () => {
+            throw new Error("boom");
+          },
+        }),
+      ]) {
+        const { service } = prepare(makeFake(), stateRoot(), audit.port);
+        await service.start();
+        expect(
+          await service.operations()["audit.history"]!(context(valid["audit.history"]!)),
+        ).toEqual({ status: "unavailable", code: "INTERACTION_UNAVAILABLE" });
+        await service.dispose("test");
+      }
+    });
+
+    it("refuses an incomplete verified identity before the check, and decodes strictly before any port runs", async () => {
+      const audit = makeAudit();
+      const { service } = prepare(makeFake(), stateRoot(), audit.port);
+      await service.start();
+      const audited = service.operations()["audit.history"]!;
+      expect(await audited({ ...context(valid["audit.history"]!), sessionId: "" })).toEqual({
         status: "unavailable",
         code: "INTERACTION_UNAVAILABLE",
       });
-    expect(fake.calls.map((c) => c.method)).toEqual(["start"]);
-    await service.dispose("test");
+      await expect(
+        Promise.resolve().then(() => audited(context({ cycle: "c", repo: "/etc" }))),
+      ).rejects.toThrow();
+      await expect(Promise.resolve().then(() => audited(context({})))).rejects.toThrow();
+      expect(audit.calls).toEqual([]);
+      await service.dispose("test");
+    });
+
+    it("aborts a running read when the Backend drains", async () => {
+      let reading!: (signal: AbortSignal) => void;
+      const started = new Promise<AbortSignal>((resolve) => {
+        reading = resolve;
+      });
+      const audit = makeAudit({
+        history: (input) =>
+          new Promise((resolve) => {
+            reading(input.signal);
+            input.signal.addEventListener("abort", () => resolve({ verdict: "unverified" }), {
+              once: true,
+            });
+          }),
+      });
+      const { service } = prepare(makeFake(), stateRoot(), audit.port);
+      await service.start();
+      const running = service.operations()["audit.history"]!(context(valid["audit.history"]!));
+      const signal = await started;
+      expect(signal.aborted).toBe(false);
+      await service.dispose("test");
+      expect(signal.aborted).toBe(true);
+      await running;
+    });
+  });
+
+  describe("tasks.publish (step 21)", () => {
+    it("passes the carrier-verified identity and the decoded arguments to the service and returns its view as given", async () => {
+      const fake = makeFake();
+      const { service } = prepare(fake);
+      await service.start();
+      const result = await service.operations()["tasks.publish"]!(context(valid["tasks.publish"]!));
+      expect(result).toMatchObject({
+        status: "done",
+        result: {
+          ok: true,
+          value: {
+            sessionId: "session-1",
+            rootSessionId: "root-1",
+            entryId: "e1",
+            state: "current",
+          },
+        },
+      });
+      expect(fake.calls.slice(1)).toEqual([
+        {
+          method: "publishTasks",
+          args: [
+            { sessionId: "session-1", rootSessionId: "root-1", kind: "main" },
+            valid["tasks.publish"],
+          ],
+        },
+      ]);
+      await service.dispose("test");
+    });
+
+    it("relays a stale or unknown answer and a refusal unchanged: nothing is upgraded to a success or to current", async () => {
+      for (const reply of [
+        { ok: true, value: { state: "unknown" } },
+        { ok: true, value: { state: "stale" } },
+        {
+          ok: false,
+          code: "INTERACTION_UNAVAILABLE",
+          detail: "the task view could not be written",
+        },
+      ]) {
+        const fake = makeFake({ publishTasks: async () => reply as never });
+        const { service } = prepare(fake);
+        await service.start();
+        expect(
+          await service.operations()["tasks.publish"]!(context(valid["tasks.publish"]!)),
+        ).toEqual({ status: "done", result: reply });
+        await service.dispose("test");
+      }
+    });
+
+    it("answers unavailable, never throws, when the service fails, so a failed publication cannot fail the caller's write", async () => {
+      const fake = makeFake({
+        publishTasks: async () => {
+          throw new Error("disk");
+        },
+      });
+      const { service } = prepare(fake);
+      await service.start();
+      expect(
+        await service.operations()["tasks.publish"]!(context(valid["tasks.publish"]!)),
+      ).toEqual({
+        status: "unavailable",
+        code: "INTERACTION_UNAVAILABLE",
+      });
+      await service.dispose("test");
+    });
+
+    it("refuses an incomplete verified identity, a missing order and the old order-less shape without running the service", async () => {
+      const fake = makeFake();
+      const { service } = prepare(fake);
+      await service.start();
+      const publish = service.operations()["tasks.publish"]!;
+      expect(await publish({ ...context(valid["tasks.publish"]!), sessionId: "" })).toEqual({
+        status: "unavailable",
+        code: "INTERACTION_UNAVAILABLE",
+      });
+      const { order: _order, ...orderless } = valid["tasks.publish"]!;
+      await expect(Promise.resolve().then(() => publish(context(orderless)))).rejects.toThrow();
+      await expect(
+        Promise.resolve().then(() =>
+          publish(
+            context({
+              ...valid["tasks.publish"],
+              order: { lifecycle: "2026-11-10T12:00:00Z", n: 0 },
+            }),
+          ),
+        ),
+      ).rejects.toThrow();
+      expect(fake.calls.map((c) => c.method)).toEqual(["start"]);
+      await service.dispose("test");
+    });
+
+    it("answers unavailable while the module is not running", async () => {
+      const { service } = prepare(makeFake());
+      // Before the Backend starts, the carrier's own not-running answer applies: still unavailable, never done.
+      expect(
+        await service.operations()["tasks.publish"]!(context(valid["tasks.publish"]!)),
+      ).toMatchObject({ status: "unavailable" });
+    });
   });
 
   it("origin.verify is a read-only verdict from the service: the verdict as given, and an unreadable origin unavailable, never verified", async () => {

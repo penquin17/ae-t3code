@@ -1,6 +1,6 @@
 // AETHERIA M06 Plan step 6 — the Backend `human-control` module as data: its ids and its manifest row. No runtime import of a pinned archive, so the
 // composition (composition.ts) and the outer digest tests can load it as data; the registration that serves the operations is humanControl.ts.
-import { INTERACTION_PINNED_ARTIFACT } from "./artifact.ts";
+import { EVIDENCE_PINNED_ARTIFACT, INTERACTION_PINNED_ARTIFACT } from "./artifact.ts";
 
 export const HUMAN_CONTROL_BACKEND_ID = "human-control-backend";
 export const HUMAN_CONTROL_BACKEND_ENTRY = "aetheria:human-control-backend";
@@ -24,6 +24,7 @@ export function humanControlBackendModuleRow(
         [INTERACTION_PINNED_ARTIFACT.package]: {
           stamp: options.stamp ?? INTERACTION_PINNED_ARTIFACT.stamp,
         },
+        [EVIDENCE_PINNED_ARTIFACT.package]: { stamp: EVIDENCE_PINNED_ARTIFACT.stamp },
       },
     },
     contract: {
@@ -34,7 +35,7 @@ export function humanControlBackendModuleRow(
       failure:
         "An argument outside the strict contract, including any caller, actor, root or repository field, throws before the service runs and the carrier reports an error; a store that cannot be read or whose declaration is unsupported refuses the Backend start; a module that is not running answers unavailable, never a stale answer.",
       uncertainty:
-        "Production exposes the XC-6 operations create, await, release, plan-mode.get and origin.verify, and all eleven client methods except tasks.get. tasks.publish, audit.history and tasks.get answer INTERACTION_UNAVAILABLE until their steps; none answers success it did not produce. An answer whose write may have landed is reported as an unknown outcome, never as a definite non-execution.",
+        "Production exposes all seven XC-6 operations and all eleven client methods; none answers success it did not produce. audit.history reads only the caller's own derived project after M03 authorizes its current checkout role, and answers refused with that code otherwise. A task view may be stale or unknown and says so. An answer whose write may have landed is reported as an unknown outcome, never as a definite non-execution.",
       stateOwner: "backend-interactions-state",
     },
   };

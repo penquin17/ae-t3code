@@ -69,10 +69,12 @@ import {
   createFileInteractionStore,
   createInteractionService,
 } from "@aetheria/interaction/backend";
+import { auditHistory } from "@aetheria/evidence/backend";
 import * as NodeCrypto from "node:crypto";
 
 import {
   sessionTurnDispatch,
+  type AuditPort,
   type HumanControlService,
   type HumanControlServiceDeps,
   type HumanControlServiceFactory,
@@ -159,6 +161,26 @@ export const PROVIDERS_LIBRARY_EXPORTS = [
   "parameter",
   "RoutePolicyError",
 ] as const;
+
+/** The runtime function the audit evidence operation calls (M06 step 23); a test checks it exists on the installed evidence archive's Backend entry. */
+export const EVIDENCE_LIBRARY_EXPORTS = ["auditHistory"] as const;
+
+/**
+ * The fixed, read-only audit `history` operation over the real Node file and Git adapters. The Backend passes only the cycle slug, the project facts its
+ * own check derived for the caller, the role and a drain signal; no repository, path, Git option or actor reaches it.
+ */
+export const readAuditHistory: AuditPort["history"] = (input) =>
+  auditHistory({
+    cycle: input.cycle,
+    project: {
+      root: input.project.root,
+      place: input.project.place,
+      settingsPaths: { cycles: input.project.settingsPaths.cycles },
+      problems: input.project.problems,
+    },
+    role: input.role,
+    signal: input.signal,
+  });
 
 /** The runtime functions the human-control module calls; a test checks each exists on the installed interaction archive's Backend entry. */
 export const INTERACTION_LIBRARY_EXPORTS = [

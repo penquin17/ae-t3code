@@ -25,6 +25,7 @@ const strip = (text: string) =>
 describe("the identity module", () => {
   it("has the sources it should", () => {
     expect(sources.sort()).toEqual([
+      "auditAccess.ts",
       "backendEntry.ts",
       "feed.ts",
       "lifecycle.ts",
@@ -62,6 +63,8 @@ describe("the identity module", () => {
   it("finds every name it takes on the installed archive, and the archive offers no writer", () => {
     for (const name of BACKEND_ENTRY_NAMES)
       expect(typeof (backendEntry as Record<string, unknown>)[name]).toBe("function");
+    // The Node file port the project derivation reads through is a value, not a function.
+    expect(typeof (backendEntry as Record<string, unknown>).nodeFs).toBe("object");
     expect(Object.keys(backendEntry)).not.toContain("createIdentityStore");
   });
 

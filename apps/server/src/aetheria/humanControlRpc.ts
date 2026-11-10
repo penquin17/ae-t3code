@@ -17,7 +17,7 @@
 // once for a connection that fails the checks or when no service runs, ends when the Backend drains, and unsubscribes when the connection's fiber is
 // interrupted (disconnect, or T3 closing a revoked session's connection).
 //
-// Tasks. The interaction service has no task read yet (the derived task view is step 21), so `tasks.get` answers unavailable after the same checks.
+// Tasks. `tasks.get` reads the Backend's derived task view after the same checks, then checks access to the root the service derived for it.
 import type {
   AuthorizationGrantPayload,
   AuthorizationGrantResult,
@@ -138,15 +138,27 @@ export const planModeGet = (
     service.getPlanMode(payload.sessionId),
   );
 
-/** The derived task view is step 21; until then the service has nothing to read, and the answer is unavailable, never an empty list. */
+/**
+ * The Backend's view of one session's task list (step 21). The session is the only thing the client names; after the same scope and access check as the
+ * other reads, the service answers the view with the root IT derived, and access is checked once more against that root, so a session reachable only
+ * as itself cannot show a list that belongs to a root the connection may not reach. `null` is "nothing published"; a stale or unknown view says so;
+ * a damaged or unreadable view is unavailable, never an empty list.
+ */
 export const tasksGet = (
   backend: Backend,
   actor: ClientActor,
   payload: TasksGetPayload,
 ): Effect.Effect<TasksGetResult> =>
-  read(backend, actor, rootOnly(payload.sessionId), async () =>
-    unavailable("tasks.get is not built yet; the task view arrives with its step"),
-  );
+  read(backend, actor, rootOnly(payload.sessionId), async (service) => {
+    const reply = await service.getTasks(payload.sessionId);
+    if (!reply.ok || reply.value === null) return reply;
+    return (await mayRead(service, actor, {
+      sessionId: payload.sessionId,
+      rootSessionId: reply.value.rootSessionId,
+    }))
+      ? reply
+      : notFound("not available to this connection");
+  });
 
 /** The change stream: a push that only prompts a fresh snapshot. */
 export const interactionsChanges = (

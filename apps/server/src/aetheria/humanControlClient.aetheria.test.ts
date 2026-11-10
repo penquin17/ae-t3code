@@ -27,6 +27,7 @@ import {
   interactionsClose,
   interactionsHold,
   interactionsSnapshot,
+  tasksGet,
 } from "./humanControlRpc.ts";
 
 type Json = Record<string, any>; // replies are checked field by field; the wire shapes are the contracts' own
@@ -437,6 +438,180 @@ describe("XC-6 origin.verify over the real service (M07's Agent-side route to XC
     expect(await verify({ originId: "org-nobody" })).toEqual({
       status: "done",
       result: { verified: false, code: "ORIGIN_NOT_FOUND" },
+    });
+  });
+});
+
+describe("XC-6 tasks.publish and the client tasks.get over the real service (step 21)", () => {
+  // Needs the repacked @aetheria/interaction archive (publishTasks/getTasks); against the step-15 archive these answer unavailable.
+  const L1 = "2026-11-10T10:00:00.000Z";
+  const L2 = "2026-11-10T11:00:00.000Z";
+  const todos = (...contents: string[]) =>
+    contents.map((content) => ({ content, status: "pending" as const }));
+  const publish = (
+    w: World,
+    session: string,
+    args: Record<string, unknown>,
+    thread = "thread:a",
+  ): Promise<Json> =>
+    w.service.operations()["tasks.publish"]!({
+      caller: {
+        threadId: thread,
+        providerSessionId: `provider-session:${thread.slice(-1)}`,
+        providerInstanceId: "pi",
+      },
+      sessionId: session,
+      kind: "main",
+      rootSessionId: session,
+      args,
+    }) as Promise<Json>;
+  const body = (entryId: string, seq: number, lifecycle: string, n: number, list: unknown) => ({
+    entryId,
+    seq,
+    order: { lifecycle, n },
+    list,
+  });
+  // The session tree is M03's identity records (the Agent host's writer leaves them under <stateRoot>/identity); ROOT_A and ROOT_B are main sessions.
+  // UNBOUND has none, so the tree does not know it.
+  const identify = (stateRoot: string, sessionId: string) => {
+    const dir = NodePath.join(stateRoot, "identity");
+    NodeFS.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    NodeFS.chmodSync(dir, 0o700);
+    const file = NodePath.join(dir, `${sessionId}.json`);
+    NodeFS.writeFileSync(
+      file,
+      `${JSON.stringify({
+        formatVersion: 1,
+        state: "active",
+        attemptId: "attempt-1",
+        writer: "agent-authority",
+        acceptedPrompt: false,
+        record: {
+          sessionId,
+          kind: "main",
+          rootSessionId: sessionId,
+          parentChain: [],
+          role: null,
+          roleOrigin: null,
+          roleDigest: null,
+          authoritySource: "main",
+        },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    NodeFS.chmodSync(file, 0o600);
+  };
+  const taskWorld = (stateRoot = newStateRoot()) => {
+    identify(stateRoot, ROOT_A);
+    identify(stateRoot, ROOT_B);
+    return world(stateRoot);
+  };
+
+  it("publishes under the verified session, reads it back through the client with scope and access checks, and leaves the change stream still", async () => {
+    const w = await taskWorld();
+    const operator = await client("client-1");
+    await w.ask(ROOT_A, "call-a");
+    const stream = await watch(w, operator, ROOT_A);
+    const published = await publish(w, ROOT_A, body("e1", 1, L1, 1, todos("write", "test")));
+    expect(published).toMatchObject({
+      status: "done",
+      result: {
+        ok: true,
+        value: { sessionId: ROOT_A, rootSessionId: ROOT_A, entryId: "e1", state: "current" },
+      },
+    });
+    const read = await run(tasksGet(w.backend, operator, { sessionId: ROOT_A }));
+    expect(read).toEqual({ ok: true, value: published.result.value });
+    expect(read.value.todos).toEqual(todos("write", "test"));
+    await settle();
+    // D15/C7: the stream's version counts journal events, and the derived task view has none; M10 re-reads tasks.get.
+    expect(stream.events.map((event) => event.version)).toEqual([]);
+    await stream.stop();
+    expect(await run(tasksGet(w.backend, operator, { sessionId: ROOT_B }))).toEqual({
+      ok: true,
+      value: null,
+    });
+  });
+
+  it("orders by the Agent's evidence, so an abandoned branch's larger seq arriving late changes nothing", async () => {
+    const w = await taskWorld();
+    const operator = await client("client-1");
+    await publish(w, ROOT_A, body("a5", 5, L1, 5, todos("A5")));
+    await publish(w, ROOT_A, body("a2", 2, L2, 0, todos("A2")));
+    const late = await publish(w, ROOT_A, body("a6", 6, L1, 6, todos("A6")));
+    expect(late).toMatchObject({
+      result: { ok: true, value: { entryId: "a2", state: "current" } },
+    });
+    expect(await run(tasksGet(w.backend, operator, { sessionId: ROOT_A }))).toMatchObject({
+      value: { entryId: "a2", seq: 2, todos: todos("A2"), state: "current" },
+    });
+  });
+
+  it("reads stale after a Backend restart until a republish, and a lost tasks/ folder reads as nothing published until the next publish repairs it", async () => {
+    const stateRoot = newStateRoot();
+    const first = await taskWorld(stateRoot);
+    await publish(first, ROOT_A, body("e1", 1, L1, 1, todos("x")));
+    await first.service.dispose("restart");
+    live.splice(live.indexOf(first.service), 1);
+    const second = await taskWorld(stateRoot);
+    const operator = await client("client-1");
+    expect(await run(tasksGet(second.backend, operator, { sessionId: ROOT_A }))).toMatchObject({
+      ok: true,
+      value: { entryId: "e1", state: "stale", todos: todos("x") },
+    });
+    const republished = await publish(second, ROOT_A, body("e1", 1, L2, 0, todos("x")));
+    expect(republished).toMatchObject({ result: { value: { state: "current" } } });
+    NodeFS.rmSync(NodePath.join(stateRoot, "interactions", "tasks"), { recursive: true });
+    expect(await run(tasksGet(second.backend, operator, { sessionId: ROOT_A }))).toEqual({
+      ok: true,
+      value: null,
+    });
+    await publish(second, ROOT_A, body("e2", 2, L2, 1, todos("x", "y")));
+    expect(await run(tasksGet(second.backend, operator, { sessionId: ROOT_A }))).toMatchObject({
+      value: { entryId: "e2", state: "current" },
+    });
+  });
+
+  it("answers an unreadable view as unavailable, never as an empty list", async () => {
+    const w = await taskWorld();
+    await publish(w, ROOT_A, body("e1", 1, L1, 1, todos("x")));
+    NodeFS.writeFileSync(
+      NodePath.join(w.stateRoot, "interactions", "tasks", `${ROOT_A}.json`),
+      "{broken",
+    );
+    expect(
+      await run(tasksGet(w.backend, await client("client-1"), { sessionId: ROOT_A })),
+    ).toMatchObject({ ok: false, code: "INTERACTION_UNAVAILABLE" });
+  });
+
+  it("is root-scoped and caller-keyed: an unbound session is unreachable, a session unknown to the tree cannot publish, and an identity claim in the arguments is refused", async () => {
+    const w = await taskWorld();
+    const operator = await client("client-1");
+    await w.ask(UNBOUND, "call-outside");
+    // The access rule refuses a session no T3 thread is bound to: not found, with nothing about it shown.
+    expect(await run(tasksGet(w.backend, operator, { sessionId: UNBOUND }))).toMatchObject({
+      ok: false,
+      code: "INTERACTION_NOT_FOUND",
+    });
+    const stranger = await publish(w, UNBOUND, body("e1", 1, L1, 1, todos("x")));
+    expect(stranger).toMatchObject({
+      status: "done",
+      result: { ok: false, code: "INTERACTION_UNAVAILABLE" },
+    });
+    for (const claim of [{ sessionId: ROOT_B }, { rootSessionId: ROOT_B }, { actor: "human" }])
+      await expect(
+        Promise.resolve().then(() =>
+          publish(w, ROOT_A, { ...body("e9", 9, L1, 9, todos("claimed")), ...claim }),
+        ),
+      ).rejects.toThrow();
+    // Each root keeps its own list; the claim never reached the other root's view.
+    expect(await run(tasksGet(w.backend, operator, { sessionId: ROOT_B }))).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(await run(tasksGet(w.backend, operator, { sessionId: ROOT_A }))).toEqual({
+      ok: true,
+      value: null,
     });
   });
 });

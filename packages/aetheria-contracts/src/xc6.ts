@@ -65,9 +65,14 @@ export interface Xc6OperationContext {
   readonly args: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * How an operation ends. `refused` is for a verified caller the operation itself may not serve (an M03 `AUTH_*` code), distinct from `unavailable`
+ * (the Backend or its store cannot answer now) and from `done` (an answer, including evidence that says "unverified").
+ */
 export type Xc6Settled =
   | { readonly status: "done"; readonly result: unknown }
-  | { readonly status: "unavailable"; readonly code: string };
+  | { readonly status: "unavailable"; readonly code: string }
+  | { readonly status: "refused"; readonly code: string };
 
 export type Xc6OperationResult =
   | Xc6Settled

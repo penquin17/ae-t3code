@@ -35,12 +35,16 @@ import {
   type PlanModeGetResult,
   type PlanModeSetPayload,
   type PlanModeSetResult,
+  type TasksGetResult,
+  type TasksPublishArgs,
+  type TasksPublishResult,
   type Xc6Operation,
   type Xc6OperationContext,
   type Xc6Settled,
 } from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "./adapter.ts";
+import type { AuditAccess, AuditProject } from "./identity/auditAccess.ts";
 import { HUMAN_CONTROL_BACKEND_ENTRY } from "./humanControlRow.ts";
 
 export {
@@ -107,6 +111,10 @@ export interface HumanControlService {
   /** A session never set reads inactive at revision 0; an unreadable record is unavailable, never inactive. Serves the client read and XC-6 `plan-mode.get`. */
   getPlanMode(sessionId: string): Promise<PlanModeGetResult>;
   setPlanMode(who: ClientIdentity, args: PlanModeSetPayload): Promise<PlanModeSetResult>;
+  /** XC-6 `tasks.publish`: the caller's own session only (the transport's), ordered by `args.order`; the reply is the view the Backend holds. */
+  publishTasks(who: AgentIdentity, args: TasksPublishArgs): Promise<TasksPublishResult>;
+  /** The client read `tasks.get`: `null` when nothing was published; a damaged view is unavailable, never an empty list. */
+  getTasks(sessionId: string): Promise<TasksGetResult>;
   /** Client-only: returns the origin id to the client, never to an Agent. */
   grant(who: ClientIdentity, args: AuthorizationGrantPayload): Promise<AuthorizationGrantResult>;
   /** XC-17, read-only: the verdict on one origin; `{ok:false}` is unavailable, which a caller reads as "not a human decision". Writes nothing. */
@@ -265,9 +273,25 @@ export type HumanControlBackendRegistration = BackendRegistration & {
   ) => (() => void) | undefined;
 };
 
+/**
+ * The audit evidence's two seams (step 23): the Backend's independent check of the caller, then the read-only evidence over the project that check derived.
+ * `access` never throws for a refusal (it returns the M03 code); `history` is the evidence package's fixed operation and takes no repository or path.
+ */
+export interface AuditPort {
+  access(who: AgentIdentity): Promise<AuditAccess>;
+  history(input: {
+    readonly cycle: string;
+    readonly project: AuditProject;
+    readonly role: string | null;
+    readonly signal: AbortSignal;
+  }): Promise<unknown>;
+}
+
 export interface HumanControlRegistrationOptions {
   /** Builds the service. Absent: the module runs unconfigured and every operation answers unavailable. */
   readonly create?: (() => HumanControlService) | undefined;
+  /** The audit evidence. Absent: `audit.history` answers unavailable. */
+  readonly audit?: AuditPort | undefined;
 }
 
 export function createHumanControlBackendRegistration(
@@ -278,6 +302,9 @@ export function createHumanControlBackendRegistration(
   let built: HumanControlService | undefined;
   /** Each live subscription's end hook: a drain runs them all, so no stream outlives the service it listens to. */
   const watchers = new Set<() => void>();
+  /** Aborted at drain, so a running evidence read (a Git command) is cancelled instead of outliving the Backend. */
+  let drainSignal: AbortSignal | undefined;
+  let drainController: AbortController | undefined;
 
   const withService =
     (run: (service: HumanControlService, context: Xc6OperationContext) => Promise<Xc6Settled>) =>
@@ -349,14 +376,41 @@ export function createHumanControlBackendRegistration(
         return "ok" in verdict ? unavailable() : done(verdict);
       })(context);
     },
-    // The two below answer unavailable until their steps (19, 22); they decode first so the strict contract already holds.
+    // The Agent's task list view (D11): the key is the carrier-verified session, never an argument. A service failure is unavailable and never an error:
+    // a failed publication must not fail the Agent's task write, and the next publish repairs the view. The reply is the service's, never upgraded.
     [TASKS_PUBLISH_OPERATION]: (context) => {
-      decodeTasksPublishArgs(context.args);
-      return withService(async () => unavailable())(context);
+      const args = decodeTasksPublishArgs(context.args);
+      return withIdentity(async (service, who) => {
+        try {
+          return done(await service.publishTasks(who, args));
+        } catch {
+          return unavailable();
+        }
+      })(context);
     },
+    // The read-only audit evidence (D12, C6). The only argument is the cycle slug; the caller is the carrier's, the project is derived for THAT session by the
+    // Backend's own check (never an argument), and that check — M03's record, role catalog and `authorize` — runs BEFORE any file or Git is touched. A refusal
+    // is an XC-6 `refused` with M03's code; a failed check or read is `unavailable`; the evidence itself, `invalid` and `unverified` included, is `done`.
     [AUDIT_HISTORY_OPERATION]: (context) => {
-      decodeAuditHistoryArgs(context.args);
-      return withService(async () => unavailable())(context);
+      const args = decodeAuditHistoryArgs(context.args);
+      const audit = options.audit;
+      return withIdentity(async (_service, who) => {
+        if (audit === undefined || drainSignal === undefined) return unavailable();
+        try {
+          const access = await audit.access(who);
+          if (!access.ok) return { status: "refused", code: access.code };
+          return done(
+            await audit.history({
+              cycle: args.cycle,
+              project: access.project,
+              role: access.role,
+              signal: drainSignal,
+            }),
+          );
+        } catch {
+          return unavailable();
+        }
+      })(context);
     },
   };
 
@@ -365,6 +419,8 @@ export function createHumanControlBackendRegistration(
     activation: {
       start: async () => {
         if (options.create === undefined) return;
+        drainController = new AbortController();
+        drainSignal = drainController.signal;
         const service = options.create();
         built = service;
         const started = await service.start();
@@ -378,6 +434,9 @@ export function createHumanControlBackendRegistration(
         const service = built;
         running = undefined;
         built = undefined;
+        drainController?.abort();
+        drainController = undefined;
+        drainSignal = undefined;
         for (const end of watchers) end();
         if (service === undefined)
           return { released: [], stopped: [], transferred: [], stillLive: [] };

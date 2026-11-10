@@ -29,7 +29,8 @@ export type Xc6Identity =
 
 export type Xc6Settled =
   | { readonly status: "done"; readonly result: unknown }
-  | { readonly status: "unavailable"; readonly code: string };
+  | { readonly status: "unavailable"; readonly code: string }
+  | { readonly status: "refused"; readonly code: string };
 
 export type Xc6OperationResult =
   | Xc6Settled
@@ -183,10 +184,19 @@ export function createXc6Backend(deps: Xc6Deps): Xc6Backend {
     }
   };
 
-  const settledReply = (settled: Xc6Settled): Xc6Reply =>
-    settled.status === "done"
-      ? { v: 1, status: "done", result: settled.result }
-      : { v: 1, status: "unavailable", code: settled.code };
+  const settledReply = (settled: Xc6Settled): Xc6Reply => {
+    switch (settled.status) {
+      case "done":
+        return { v: 1, status: "done", result: settled.result };
+      case "refused":
+        return { v: 1, status: "refused", code: settled.code };
+      case "unavailable":
+        return { v: 1, status: "unavailable", code: settled.code };
+    }
+  };
+  /** A refusal is a 403 like the carrier's own; a done or unavailable answer is a 200. */
+  const settledResponse = (settled: Xc6Settled): Xc6Response =>
+    reply(settled.status === "refused" ? 403 : 200, settledReply(settled));
 
   const backend: Xc6Backend = {
     async handle({ caller, claimedSessionId, body }) {
@@ -217,7 +227,7 @@ export function createXc6Backend(deps: Xc6Deps): Xc6Backend {
           );
         }
         pending.delete(key);
-        return done("poll", entry.op, reply(200, settledReply(entry.settled)));
+        return done("poll", entry.op, settledResponse(entry.settled));
       }
 
       const operation = Object.hasOwn(deps.operations, request.op)
@@ -241,8 +251,7 @@ export function createXc6Backend(deps: Xc6Deps): Xc6Backend {
           reply(500, { v: 1, status: "error", code: "XC6_OPERATION_FAILED" }),
         );
       }
-      if (outcome.status !== "pending")
-        return done("call", request.op, reply(200, settledReply(outcome)));
+      if (outcome.status !== "pending") return done("call", request.op, settledResponse(outcome));
       if (pending.size >= deps.maxPending) {
         return done(
           "call",

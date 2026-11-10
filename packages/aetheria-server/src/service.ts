@@ -43,7 +43,9 @@ import {
   type LivenessService,
   type UnknownReason,
 } from "./liveness/service.ts";
-import { createArchiveInteractionService } from "./library.ts";
+import { createArchiveInteractionService, readAuditHistory } from "./library.ts";
+import { createAuditAccess } from "./identity/auditAccess.ts";
+import type { AuditPort } from "./humanControl.ts";
 import { acquireOwnerLock, type HeldOwnerLock, type OwnerLockOptions } from "./ownerLock.ts";
 import { createIdentityLifecycleOperation } from "./operations/identityLifecycle.ts";
 import { createGit, type GitPort } from "./board/git.ts";
@@ -60,6 +62,18 @@ export interface AetheriaBackendServiceOptions {
   /** T3's current MCP credential id for a thread (the id its bearer proves), or undefined when T3 holds none. */
   readonly credentialOf: (threadId: string) => string | undefined | Promise<string | undefined>;
   readonly projectRootOf?: (workingFolder: string) => string | null;
+  /**
+   * The Aetheria checkout (`AETHERIA_CHECKOUT`, the value the server's Pi child also receives): the source of the CURRENT role catalog and of the home
+   * versus foreign rule for the audit evidence. Absent or relative: `audit.history` refuses every caller with AUTH_IDENTITY_UNAVAILABLE and nothing else changes.
+   */
+  readonly checkout?: string;
+  /** Test seam: the home-role lookup inputs for the audit check. Absent in production, which reads the process's own environment and home like the Agent host. */
+  readonly auditRoles?: {
+    readonly env?: Record<string, string | undefined>;
+    readonly homedir?: () => string;
+  };
+  /** Test seam: another audit check and evidence reader. Absent in production, which uses M03's logic and the evidence archive. */
+  readonly auditPort?: AuditPort;
   readonly now?: () => number;
   /** Test seam: another manifest to prove a mixed composition is refused. */
   readonly manifest?: AetheriaBackendOptions["manifest"];
@@ -213,7 +227,19 @@ export function createAetheriaBackendService(
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const interactionFactory = options.interactionFactory ?? createArchiveInteractionService;
+  // The audit evidence (M06 step 23): the caller is checked against M03's record, the checkout's current roles and `authorize` before any file or Git is read.
+  const auditAccess = createAuditAccess({
+    reader: identityReader,
+    index,
+    checkout: options.checkout,
+    env: options.auditRoles?.env,
+    homedir: options.auditRoles?.homedir,
+  });
   const humanControlRegistration = createHumanControlBackendRegistration({
+    audit: options.auditPort ?? {
+      access: (who) => auditAccess.check(who.sessionId),
+      history: readAuditHistory,
+    },
     // Built inside the module's start, which the Backend runs only after it holds the owner lock.
     create:
       interactionFactory === undefined

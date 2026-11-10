@@ -38,6 +38,8 @@ import { makeThreadTurnDispatch } from "./humanControlDelivery.ts";
 
 const STATE_ROOT_ENV = "AETHERIA_STATE_ROOT";
 const PI_AGENT_DIR_ENV = "AETHERIA_PI_AGENT_DIR";
+/** The Aetheria checkout, the launch input the Pi child also receives: the source of the current role catalog the audit evidence check reads (M06 step 23). */
+const CHECKOUT_ENV = "AETHERIA_CHECKOUT";
 
 export class AetheriaBackend extends Context.Service<AetheriaBackend, AetheriaBackendService>()(
   "t3/aetheria/aetheriaBackend",
@@ -52,6 +54,8 @@ export const makeLayer = (
   options: {
     readonly attachmentsDir?: string;
     readonly piAgentDir?: string;
+    /** The Aetheria checkout for the audit evidence's role check. Absent or relative: `audit.history` refuses with AUTH_IDENTITY_UNAVAILABLE. */
+    readonly checkout?: string;
     /** Builds the interaction service (M06). Absent: the module answers unavailable. */
     readonly interactionFactory?: HumanControlServiceFactory;
   } = {},
@@ -85,6 +89,7 @@ export const makeLayer = (
       const made = createAetheriaBackendService({
         stateRoot,
         turnDispatch,
+        ...(options.checkout === undefined ? {} : { checkout: options.checkout }),
         ...(options.interactionFactory === undefined
           ? {}
           : { interactionFactory: options.interactionFactory }),
@@ -229,11 +234,13 @@ export const layer = whenStateRoot((stateRoot) =>
       if (Option.isNone(config))
         yield* Effect.logWarning("Aetheria snapshots are off: the server config is not available");
       const piAgentDir = yield* Config.String(PI_AGENT_DIR_ENV).pipe(Config.option);
+      const checkout = yield* Config.String(CHECKOUT_ENV).pipe(Config.option);
       // M06 steps 6 and 13: T3's thread dispatch comes from the runtime services and the command receipt store from server.ts (IP-23); makeLayer
       // requires both and fails the Backend start without them.
       return makeLayer(stateRoot, {
         ...(Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {}),
         ...(Option.isSome(piAgentDir) ? { piAgentDir: piAgentDir.value } : {}),
+        ...(Option.isSome(checkout) ? { checkout: checkout.value } : {}),
       });
     }),
   ),

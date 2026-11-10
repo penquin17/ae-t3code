@@ -6,7 +6,7 @@
 // repacked yet; the real service + real intake run in humanControlDelivery.aetheria.test.ts once it is). It shows: each method has one explicit
 // scope — the reads and the stream `orchestration:read`, the seven actions `orchestration:operate`; a token without it is refused BEFORE the handler
 // runs; the actor, scopes and authentication time the service receives are the connection's, and a payload field cannot name an actor; methods whose
-// steps are not built answer INTERACTION_UNAVAILABLE and reach no service; no Backend answers unavailable, never an empty success. Step 16 adds: every
+// steps are not built answer INTERACTION_UNAVAILABLE and reach no service (step 21 built tasks.get, tested below); no Backend answers unavailable, never an empty success. Step 16 adds: every
 // handler passes only the schema's fields and the connection's actor to the service (seven actions, three reads); a read checks the scope and the
 // service's access rule first and a refused check reaches no read; the stream unsubscribes when it ends, is interrupted, or the Backend drains. It does
 // NOT show a real WebSocket upgrade, device pairing, or revocation of a live connection (humanControlClient.aetheria.test.ts runs the same handlers
@@ -162,7 +162,25 @@ const record = (state: string) => ({
   content: { questions: [{ id: "q1", question: "Which?" }] },
 });
 
-const fakeService = (options: { readonly access?: boolean } = {}) => {
+const taskView = (overrides: Record<string, unknown> = {}) => ({
+  sessionId: "session-1",
+  rootSessionId: "root-1",
+  entryId: "entry-1",
+  seq: 2,
+  todos: [{ content: "write", status: "in_progress" }],
+  publishedAt: "2026-11-10T12:00:00.000Z",
+  state: "current",
+  ...overrides,
+});
+
+const fakeService = (
+  options: {
+    readonly access?: boolean;
+    /** Roots the host's access rule refuses, whatever the session. */
+    readonly deniedRoots?: ReadonlyArray<string>;
+    readonly tasks?: () => Promise<unknown>;
+  } = {},
+) => {
   const calls: Array<{ readonly method: string; readonly args: readonly unknown[] }> = [];
   const listeners = new Set<(change: { rootSessionId: string; version: number }) => void>();
   const ends = new Set<() => void>();
@@ -191,9 +209,16 @@ const fakeService = (options: { readonly access?: boolean } = {}) => {
       value: { sessionId: "session-1", active: true, modeRevision: 1 },
     }),
     grant: note("grant", { ok: true, value: { originId: "org-1" } }),
+    getTasks: async (...args: unknown[]) => {
+      calls.push({ method: "getTasks", args });
+      return options.tasks === undefined ? { ok: true, value: taskView() } : options.tasks();
+    },
     canAccess: async (...args: unknown[]) => {
       calls.push({ method: "canAccess", args });
-      return options.access ?? true;
+      const target = args[1] as { readonly rootSessionId: string };
+      return (
+        (options.access ?? true) && !(options.deniedRoots ?? []).includes(target.rootSessionId)
+      );
     },
     onChange: (listener: (change: { rootSessionId: string; version: number }) => void) => {
       listeners.add(listener);
@@ -297,22 +322,123 @@ describe("the handlers over the one interaction service", () => {
     }),
   );
 
-  it.effect(
-    "serves planMode.get after the check and answers tasks.get unavailable, never an empty list",
-    () =>
-      Effect.gen(function* () {
-        const fake = fakeService();
-        const actor = yield* connectionActor(session);
-        expect(
-          yield* planModeGet(backendOf(fake.service), actor, { sessionId: "session-1" }),
-        ).toMatchObject({
-          ok: true,
-          value: { active: false, modeRevision: 0 },
-        });
-        const tasks = yield* tasksGet(backendOf(fake.service), actor, { sessionId: "session-1" });
-        expect(tasks).toMatchObject({ ok: false, code: "INTERACTION_UNAVAILABLE" });
-      }),
+  it.effect("serves planMode.get after the check", () =>
+    Effect.gen(function* () {
+      const fake = fakeService();
+      const actor = yield* connectionActor(session);
+      expect(
+        yield* planModeGet(backendOf(fake.service), actor, { sessionId: "session-1" }),
+      ).toMatchObject({
+        ok: true,
+        value: { active: false, modeRevision: 0 },
+      });
+    }),
   );
+
+  describe("tasks.get (step 21)", () => {
+    it.effect(
+      "checks the scope and the access rule first, reads the session's view, then checks access to the view's own root",
+      () =>
+        Effect.gen(function* () {
+          const fake = fakeService();
+          const actor = yield* connectionActor(session);
+          const tasks = yield* tasksGet(backendOf(fake.service), actor, { sessionId: "session-1" });
+          expect(tasks).toEqual({ ok: true, value: taskView() });
+          expect(fake.calls.map((call) => call.method)).toEqual([
+            "canAccess",
+            "getTasks",
+            "canAccess",
+          ]);
+          expect(fake.calls[1]?.args).toEqual(["session-1"]);
+          // The second check names the root the Backend derived, not the one the client could say.
+          expect(fake.calls[2]?.args[1]).toEqual({
+            sessionId: "session-1",
+            rootSessionId: "root-1",
+          });
+        }),
+    );
+
+    it.effect(
+      "answers nothing-published as ok(null), and stale and unknown views as such — never an empty list",
+      () =>
+        Effect.gen(function* () {
+          const actor = yield* connectionActor(session);
+          for (const reply of [
+            { ok: true, value: null },
+            { ok: true, value: taskView({ state: "stale" }) },
+            { ok: true, value: taskView({ state: "unknown" }) },
+          ]) {
+            const fake = fakeService({ tasks: async () => reply });
+            expect(
+              yield* tasksGet(backendOf(fake.service), actor, { sessionId: "session-1" }),
+            ).toEqual(reply);
+          }
+        }),
+    );
+
+    it.effect(
+      "refuses a view whose derived root the host's access rule refuses, as not found, without showing the list",
+      () =>
+        Effect.gen(function* () {
+          const actor = yield* connectionActor(session);
+          const fake = fakeService({
+            // The session id passes as its own root; the root the Backend derived does not.
+            deniedRoots: ["root-VICTIM"],
+            tasks: async () => ({ ok: true, value: taskView({ rootSessionId: "root-VICTIM" }) }),
+          });
+          const tasks = yield* tasksGet(backendOf(fake.service), actor, { sessionId: "session-1" });
+          expect(tasks).toMatchObject({ ok: false, code: "INTERACTION_NOT_FOUND" });
+          expect(JSON.stringify(tasks)).not.toContain("write");
+        }),
+    );
+
+    it.effect(
+      "relays an unavailable read, turns a service failure into unavailable, and answers unavailable with no service",
+      () =>
+        Effect.gen(function* () {
+          const actor = yield* connectionActor(session);
+          const down = fakeService({
+            tasks: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE", detail: "damaged" }),
+          });
+          expect(
+            yield* tasksGet(backendOf(down.service), actor, { sessionId: "session-1" }),
+          ).toMatchObject({ ok: false, code: "INTERACTION_UNAVAILABLE" });
+          const broken = fakeService({
+            tasks: async () => {
+              throw new Error("boom");
+            },
+          });
+          expect(
+            yield* tasksGet(backendOf(broken.service), actor, { sessionId: "session-1" }),
+          ).toMatchObject({ ok: false, code: "INTERACTION_UNAVAILABLE" });
+          for (const none of [Option.none(), backendOf(undefined)])
+            expect(yield* tasksGet(none, actor, { sessionId: "session-1" })).toMatchObject({
+              ok: false,
+              code: "INTERACTION_UNAVAILABLE",
+            });
+        }),
+    );
+
+    it.effect("a refused scope or access reaches no read of the view", () =>
+      Effect.gen(function* () {
+        const reader = yield* connectionActor(session);
+        const operateOnly = yield* connectionActor({
+          sessionId: "c2",
+          scopes: [AuthOrchestrationOperateScope],
+        });
+        const refused = fakeService({ access: false });
+        const allowed = fakeService();
+        expect(
+          yield* tasksGet(backendOf(refused.service), reader, { sessionId: "session-1" }),
+        ).toMatchObject({ ok: false, code: "INTERACTION_NOT_FOUND" });
+        expect(
+          yield* tasksGet(backendOf(allowed.service), operateOnly, { sessionId: "session-1" }),
+        ).toMatchObject({ ok: false, code: "INTERACTION_NOT_FOUND" });
+        expect(refused.calls.map((call) => call.method)).toEqual(["canAccess"]);
+        expect(allowed.calls).toEqual([]);
+      }),
+    );
+  });
 
   it.effect(
     "passes only the schema's fields and the connection's actor to each of the seven actions",
