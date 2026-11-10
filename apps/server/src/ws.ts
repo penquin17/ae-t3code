@@ -3413,26 +3413,30 @@ export const layerWsRpc = (
         // AETHERIA-IP:IP-11 the read-only Aetheria composition status method: the Backend's safe status, or the typed unavailable error
         [AETHERIA_WS_METHODS.compositionStatus]: (_input) =>
           aetheriaCompositionStatus(aetheriaBackend),
-        // AETHERIA-IP:IP-22 the XC-18 human-control methods. T3 authorizes each scope before these run (IP-20); snapshot, answer and the stream use
-        // the one interaction service, and every other method answers INTERACTION_UNAVAILABLE until its step.
+        // AETHERIA-IP:IP-22 the XC-18 human-control methods. T3 authorizes each scope before these run (IP-20); the three reads, the stream and the seven actions use
+        // the one interaction service (the actor is the connection's); the derived task view answers unavailable until its step.
         [AETHERIA_WS_METHODS.interactionsSnapshot]: (input) =>
-          AetheriaHumanControl.interactionsSnapshot(aetheriaBackend, input),
+          AetheriaHumanControl.interactionsSnapshot(aetheriaBackend, aetheriaActor, input),
         [AETHERIA_WS_METHODS.interactionsChanges]: (input) =>
-          AetheriaHumanControl.interactionsChanges(aetheriaBackend, input),
+          AetheriaHumanControl.interactionsChanges(aetheriaBackend, aetheriaActor, input),
         [AETHERIA_WS_METHODS.interactionsAnswer]: (input) =>
           AetheriaHumanControl.interactionsAnswer(aetheriaBackend, aetheriaActor, input),
-        [AETHERIA_WS_METHODS.planModeGet]: (_input) => AetheriaHumanControl.unbuiltPlanModeGet(),
-        [AETHERIA_WS_METHODS.tasksGet]: (_input) => AetheriaHumanControl.unbuiltTasksGet(),
-        [AETHERIA_WS_METHODS.interactionsCancel]: (_input) =>
-          AetheriaHumanControl.unbuiltInteractionAction("interactions.cancel"),
-        [AETHERIA_WS_METHODS.interactionsHold]: (_input) =>
-          AetheriaHumanControl.unbuiltInteractionAction("interactions.hold"),
-        [AETHERIA_WS_METHODS.interactionsClose]: (_input) =>
-          AetheriaHumanControl.unbuiltInteractionAction("interactions.close"),
-        [AETHERIA_WS_METHODS.planDecide]: (_input) =>
-          AetheriaHumanControl.unbuiltInteractionAction("plan.decide"),
-        [AETHERIA_WS_METHODS.planModeSet]: (_input) => AetheriaHumanControl.unbuiltPlanModeSet(),
-        [AETHERIA_WS_METHODS.authorizationGrant]: (_input) => AetheriaHumanControl.unbuiltGrant(),
+        [AETHERIA_WS_METHODS.planModeGet]: (input) =>
+          AetheriaHumanControl.planModeGet(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.tasksGet]: (input) =>
+          AetheriaHumanControl.tasksGet(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.interactionsCancel]: (input) =>
+          AetheriaHumanControl.interactionsCancel(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.interactionsHold]: (input) =>
+          AetheriaHumanControl.interactionsHold(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.interactionsClose]: (input) =>
+          AetheriaHumanControl.interactionsClose(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.planDecide]: (input) =>
+          AetheriaHumanControl.planDecide(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.planModeSet]: (input) =>
+          AetheriaHumanControl.planModeSet(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.authorizationGrant]: (input) =>
+          AetheriaHumanControl.authorizationGrant(aetheriaBackend, aetheriaActor, input),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =

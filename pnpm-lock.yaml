@@ -2567,7 +2567,7 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz':
-    resolution: {integrity: sha512-qiaTqQaSWDsMJCQkvAwGvxrdE4H0ar5ECggNHca2IpjAnpUmDhjmLFvyXi1pqjLpcoXI1RqRQPr8Aq7LejJbPw==, tarball: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz}
+    resolution: {integrity: sha512-iSNqwhRqM9OMqqPK5vfK78LQoczSS6nfjTEsojjLqnxs8TbNN3oHwN9p1EJymkhDvm1efRLrLxnAaPSdWVey4w==, tarball: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 

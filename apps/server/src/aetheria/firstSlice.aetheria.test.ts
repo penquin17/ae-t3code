@@ -577,7 +577,7 @@ const makeWorld = (label: string, script: Effect.Success<ReturnType<typeof scrip
             Layer.mergeAll(
               rpcGroup.toLayerHandler(M.interactionsSnapshot, (payload) =>
                 Effect.sync(() => handled.push("snapshot")).pipe(
-                  Effect.andThen(interactionsSnapshot(backend, payload)),
+                  Effect.andThen(interactionsSnapshot(backend, actor, payload)),
                 ),
               ),
               rpcGroup.toLayerHandler(M.interactionsAnswer, (payload) =>

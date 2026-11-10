@@ -170,23 +170,35 @@ export const INTERACTION_LIBRARY_EXPORTS = [
  * The production interaction service over the archive: the file store under the explicit state root (no I/O until `start`), the Backend's clock,
  * random opaque ids, T3's delivery by session, and the host's independent root/session access check.
  */
-export const createArchiveInteractionService: HumanControlServiceFactory = (deps) =>
-  // The archive's record types and the contracts' strict schemas describe the same wire (the shared vectors prove it); TypeScript cannot see
-  // that the kind/content union matches field for field, so this one seam names the service as the wire-typed port the Backend serves.
-  asHumanControlService(
-    createInteractionService({
-      store: createFileInteractionStore(deps.stateRoot),
-      clock: {
-        now: () => new Date(deps.now()).toISOString(),
-        nowMs: () => deps.now(),
-      },
-      ids: { next: (prefix) => `${prefix}-${NodeCrypto.randomUUID()}` },
-      canOperate: deps.canOperate,
-      writtenBy: "aetheria-backend",
-      ...optionalDispatch(deps),
+export const createArchiveInteractionService: HumanControlServiceFactory = (deps) => {
+  // Built as a value, not a literal: the archive's dependency type gains `sessions` with the step-15 repack, and a fresh literal would be
+  // rejected for it until then.
+  const archiveDeps = {
+    store: createFileInteractionStore(deps.stateRoot),
+    clock: {
+      now: () => new Date(deps.now()).toISOString(),
+      nowMs: () => deps.now(),
+    },
+    ids: { next: (prefix: "int" | "org") => `${prefix}-${NodeCrypto.randomUUID()}` },
+    canOperate: deps.canOperate,
+    sessions: deps.sessions,
+    writtenBy: "aetheria-backend",
+    ...optionalDispatch(deps),
+  };
+  const archive = createInteractionService(archiveDeps);
+  // The archive's reads carry no actor, so a client read is access-checked here by the very `canOperate` the archive applies to its actions: one rule.
+  return asHumanControlService(
+    Object.assign(archive, {
+      canAccess: (
+        actor: Parameters<HumanControlServiceDeps["canOperate"]>[0],
+        target: Parameters<HumanControlServiceDeps["canOperate"]>[1],
+      ) => deps.canOperate(actor, target),
     }),
   );
+};
 
+// The archive's record types and the contracts' strict schemas describe the same wire (the shared vectors prove it); TypeScript cannot see
+// that the kind/content union matches field for field, so this one seam names the service as the wire-typed port the Backend serves.
 const asHumanControlService = (service: unknown): HumanControlService =>
   service as HumanControlService;
 

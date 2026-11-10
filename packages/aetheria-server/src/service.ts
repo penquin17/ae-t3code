@@ -28,6 +28,7 @@ import { createSnapshotRetention } from "./snapshotRetention.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
 import { createResumeSignal } from "./identity/resume.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
+import { createSessionDirectory } from "./identity/sessionDirectory.ts";
 import { createLifecycleTracker, type LifecycleTracker } from "./identity/lifecycle.ts";
 import {
   createIdentityResolver,
@@ -132,6 +133,13 @@ export interface AetheriaBackendService {
    * after drain. A caller that finds it undefined answers unavailable, never an invented state.
    */
   interactions(): HumanControlService | undefined;
+  /**
+   * Subscribes to the interaction service's change pushes; `onEnd` runs when the Backend drains. Undefined when no service runs. Returns the unsubscribe.
+   */
+  watchInteractions(
+    listener: Parameters<HumanControlService["onChange"]>[0],
+    onEnd: () => void,
+  ): (() => void) | undefined;
 }
 
 export type CreateServiceResult =
@@ -148,10 +156,8 @@ export function createAetheriaBackendService(
   });
   const tracker = createLifecycleTracker({ index });
   const liveness = createLivenessService(options.now === undefined ? {} : { now: options.now });
-  const resolver = createIdentityResolver({
-    reader: createIdentityReader({ stateRoot: options.stateRoot }),
-    index,
-  });
+  const identityReader = createIdentityReader({ stateRoot: options.stateRoot });
+  const resolver = createIdentityResolver({ reader: identityReader, index });
 
   const config = parseAwarenessConfig(options.awareness);
   if (!config.ok)
@@ -218,6 +224,7 @@ export function createAetheriaBackendService(
               now: options.now ?? Date.now,
               ...(options.turnDispatch === undefined ? {} : { turnDispatch: options.turnDispatch }),
               threadOfSession: (sessionId) => index.bindingOfSession(sessionId)?.threadId,
+              sessions: createSessionDirectory(identityReader),
               canOperate: (_actor, target) =>
                 index.bindingOfSession(target.sessionId) !== undefined &&
                 index.bindingOfSession(target.rootSessionId) !== undefined,
@@ -359,6 +366,7 @@ export function createAetheriaBackendService(
     openSnapshot: (sessionId, snapshotId) =>
       providersRegistration.openSnapshot(sessionId, snapshotId),
     interactions: () => humanControlRegistration.interactions(),
+    watchInteractions: (listener, onEnd) => humanControlRegistration.watch(listener, onEnd),
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

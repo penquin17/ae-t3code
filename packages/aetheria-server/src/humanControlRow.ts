@@ -34,7 +34,7 @@ export function humanControlBackendModuleRow(
       failure:
         "An argument outside the strict contract, including any caller, actor, root or repository field, throws before the service runs and the carrier reports an error; a store that cannot be read or whose declaration is unsupported refuses the Backend start; a module that is not running answers unavailable, never a stale answer.",
       uncertainty:
-        "Production exposes create, await, release and the client snapshot and answer actions. The other XC-6 operations (tasks.publish, plan-mode.get, audit.history, origin.verify) and the other client actions answer INTERACTION_UNAVAILABLE until their steps; none answers success it did not produce. An answer whose write may have landed is reported as an unknown outcome, never as a definite non-execution.",
+        "Production exposes the XC-6 operations create, await, release, plan-mode.get and origin.verify, and all eleven client methods except tasks.get. tasks.publish, audit.history and tasks.get answer INTERACTION_UNAVAILABLE until their steps; none answers success it did not produce. An answer whose write may have landed is reported as an unknown outcome, never as a definite non-execution.",
       stateOwner: "backend-interactions-state",
     },
   };

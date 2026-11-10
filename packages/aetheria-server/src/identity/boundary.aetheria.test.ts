@@ -30,6 +30,7 @@ describe("the identity module", () => {
       "lifecycle.ts",
       "resolver.ts",
       "resume.ts",
+      "sessionDirectory.ts",
       "threadIndex.ts",
     ]);
   });

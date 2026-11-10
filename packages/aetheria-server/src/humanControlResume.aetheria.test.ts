@@ -174,10 +174,19 @@ const fakeService = (overrides: Partial<HumanControlService> = {}) => {
   const service: HumanControlService = {
     start: async () => ({ ok: true, value: { continued: [] } }),
     create: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    verifyHumanOrigin: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }),
     awaitSegment: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     release: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     snapshot: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     answer: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    cancel: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    hold: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    close: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    decidePlan: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    getPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    setPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    grant: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    canAccess: () => false,
     reconcileWaits: async (sessionId) => {
       calls.push(`reconcile:${sessionId}`);
       return { ok: true, value: { continued: [] } };

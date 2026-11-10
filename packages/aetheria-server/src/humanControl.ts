@@ -17,13 +17,24 @@ import {
   ORIGIN_VERIFY_OPERATION,
   PLAN_MODE_GET_OPERATION,
   TASKS_PUBLISH_OPERATION,
+  type AuthorizationGrantPayload,
+  type AuthorizationGrantResult,
   type InteractionActionResult,
   type InteractionAwaitResult,
   type InteractionCreateArgs,
   type InteractionCreateResult,
   type InteractionReleaseResult,
   type InteractionsAnswerPayload,
+  type InteractionsCancelPayload,
+  type InteractionsClosePayload,
+  type InteractionsHoldPayload,
   type InteractionsSnapshotResult,
+  type OriginVerifyArgs,
+  type OriginVerifyResult,
+  type PlanDecidePayload,
+  type PlanModeGetResult,
+  type PlanModeSetPayload,
+  type PlanModeSetResult,
   type Xc6Operation,
   type Xc6OperationContext,
   type Xc6Settled,
@@ -42,6 +53,8 @@ export {
 export interface AgentIdentity {
   readonly sessionId: string;
   readonly rootSessionId: string;
+  /** The carrier-verified kind (`main` or `child`): only a main session may open a plan review, and an absent kind is refused by the service. */
+  readonly kind?: string;
 }
 
 /** The connection's authenticated client session (T3's `AuthenticatedSession`): never a payload field. */
@@ -86,6 +99,29 @@ export interface HumanControlService {
     who: ClientIdentity,
     args: Pick<InteractionsAnswerPayload, "interactionId" | "revision" | "answers">,
   ): Promise<InteractionActionResult>;
+  /** The client actions below each check the connection's scope and the host's access rule inside the service (C1), then write one conditional commit. */
+  cancel(who: ClientIdentity, args: InteractionsCancelPayload): Promise<InteractionActionResult>;
+  hold(who: ClientIdentity, args: InteractionsHoldPayload): Promise<InteractionActionResult>;
+  close(who: ClientIdentity, args: InteractionsClosePayload): Promise<InteractionActionResult>;
+  decidePlan(who: ClientIdentity, args: PlanDecidePayload): Promise<InteractionActionResult>;
+  /** A session never set reads inactive at revision 0; an unreadable record is unavailable, never inactive. Serves the client read and XC-6 `plan-mode.get`. */
+  getPlanMode(sessionId: string): Promise<PlanModeGetResult>;
+  setPlanMode(who: ClientIdentity, args: PlanModeSetPayload): Promise<PlanModeSetResult>;
+  /** Client-only: returns the origin id to the client, never to an Agent. */
+  grant(who: ClientIdentity, args: AuthorizationGrantPayload): Promise<AuthorizationGrantResult>;
+  /** XC-17, read-only: the verdict on one origin; `{ok:false}` is unavailable, which a caller reads as "not a human decision". Writes nothing. */
+  verifyHumanOrigin(
+    originId: string,
+    expect?: OriginVerifyArgs["expect"],
+  ): Promise<OriginVerifyResult | { readonly ok: false; readonly code: string }>;
+  /**
+   * The host's access rule for a client READ, the same rule the actions use: whether this actor may reach that session and root. The archive service
+   * has no actor on its reads, so the Backend's wrapper (`createArchiveInteractionService`) supplies this from the one `canOperate` it was built with.
+   */
+  canAccess(
+    actor: ClientActor,
+    target: { readonly sessionId: string; readonly rootSessionId: string },
+  ): boolean | Promise<boolean>;
   /** Ends each pending wait no live segment holds (`process-exit` for a session; `backend-restart` for none). Never re-asks. */
   reconcileWaits(sessionId?: string): Promise<
     | {
@@ -115,8 +151,20 @@ export interface HumanControlService {
   drain(): Promise<HumanControlDrainReport>;
 }
 
+/** A session's root as the Backend knows it. `absent` is a session the Backend has no record of; `unavailable` is a record that cannot be read. */
+export type SessionLookup =
+  | { readonly kind: "found"; readonly sessionId: string; readonly rootSessionId: string }
+  | { readonly kind: "absent" }
+  | { readonly kind: "unavailable"; readonly reason: string };
+/** The archive's `SessionDirectoryPort`: the service derives a grant's or a mode change's root from it, never from the client. */
+export interface SessionDirectory {
+  lookup(sessionId: string): Promise<SessionLookup>;
+}
+
 /** What a service factory is given: the Backend's own seams, nothing else. */
 export interface HumanControlServiceDeps {
+  /** Session → root, from the Backend's identity records. Without it the service answers unavailable for grant and mode changes. */
+  readonly sessions: SessionDirectory;
   readonly stateRoot: string;
   readonly now: () => number;
   /** The T3 delivery seam, by thread. Absent: a late answer stays `pending` delivery (the service's own rule). */
@@ -199,7 +247,7 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 /** The identity the carrier verified, or undefined when any part is missing: the service is not called with a partial caller. */
 function identityOf(context: Xc6OperationContext): AgentIdentity | undefined {
   return text(context.sessionId) && text(context.rootSessionId) && text(context.kind)
-    ? { sessionId: context.sessionId, rootSessionId: context.rootSessionId }
+    ? { sessionId: context.sessionId, rootSessionId: context.rootSessionId, kind: context.kind }
     : undefined;
 }
 
@@ -207,6 +255,14 @@ function identityOf(context: Xc6OperationContext): AgentIdentity | undefined {
 export type HumanControlBackendRegistration = BackendRegistration & {
   /** The running service, or undefined before start and after drain (a handler then answers unavailable, never an invented state). */
   readonly interactions: () => HumanControlService | undefined;
+  /**
+   * Subscribes to the running service's change pushes. `onEnd` runs when the Backend drains (the service then drops its listeners without a word, so
+   * a stream would otherwise hang). Returns the unsubscribe, or undefined when no service runs: the caller ends its stream.
+   */
+  readonly watch: (
+    listener: Parameters<HumanControlService["onChange"]>[0],
+    onEnd: () => void,
+  ) => (() => void) | undefined;
 };
 
 export interface HumanControlRegistrationOptions {
@@ -220,6 +276,8 @@ export function createHumanControlBackendRegistration(
   let running: HumanControlService | undefined;
   /** The service that was built, whether or not its start completed: drain must reach it however far start got. */
   let built: HumanControlService | undefined;
+  /** Each live subscription's end hook: a drain runs them all, so no stream outlives the service it listens to. */
+  const watchers = new Set<() => void>();
 
   const withService =
     (run: (service: HumanControlService, context: Xc6OperationContext) => Promise<Xc6Settled>) =>
@@ -276,21 +334,28 @@ export function createHumanControlBackendRegistration(
       const args = decodeInteractionReleaseArgs(context.args);
       return withIdentity(async (service, who) => done(await service.release(who, args)))(context);
     },
-    // The four below answer unavailable until their steps (19, 15, 22, 15); they decode first so the strict contract already holds.
+    // The session is the transport's, never an argument; an unreadable mode record is the service's unavailable, not an inactive mode.
+    [PLAN_MODE_GET_OPERATION]: (context) => {
+      decodePlanModeGetArgs(context.args);
+      return withIdentity(async (service, who) => done(await service.getPlanMode(who.sessionId)))(
+        context,
+      );
+    },
+    // M07's Agent-side route to XC-17: a read-only verdict, any identified caller; an unavailable store answers unavailable, never verified.
+    [ORIGIN_VERIFY_OPERATION]: (context) => {
+      const args = decodeOriginVerifyArgs(context.args);
+      return withIdentity(async (service) => {
+        const verdict = await service.verifyHumanOrigin(args.originId, args.expect);
+        return "ok" in verdict ? unavailable() : done(verdict);
+      })(context);
+    },
+    // The two below answer unavailable until their steps (19, 22); they decode first so the strict contract already holds.
     [TASKS_PUBLISH_OPERATION]: (context) => {
       decodeTasksPublishArgs(context.args);
       return withService(async () => unavailable())(context);
     },
-    [PLAN_MODE_GET_OPERATION]: (context) => {
-      decodePlanModeGetArgs(context.args);
-      return withService(async () => unavailable())(context);
-    },
     [AUDIT_HISTORY_OPERATION]: (context) => {
       decodeAuditHistoryArgs(context.args);
-      return withService(async () => unavailable())(context);
-    },
-    [ORIGIN_VERIFY_OPERATION]: (context) => {
-      decodeOriginVerifyArgs(context.args);
       return withService(async () => unavailable())(context);
     },
   };
@@ -313,6 +378,7 @@ export function createHumanControlBackendRegistration(
         const service = built;
         running = undefined;
         built = undefined;
+        for (const end of watchers) end();
         if (service === undefined)
           return { released: [], stopped: [], transferred: [], stillLive: [] };
         const report = await service.drain();
@@ -326,5 +392,20 @@ export function createHumanControlBackendRegistration(
     },
     operations,
     interactions: () => running,
+    watch: (listener, onEnd) => {
+      const service = running;
+      if (service === undefined) return undefined;
+      const stop = service.onChange(listener);
+      const unsubscribe = () => {
+        stop();
+        watchers.delete(end);
+      };
+      const end = () => {
+        unsubscribe();
+        onEnd();
+      };
+      watchers.add(end);
+      return unsubscribe;
+    },
   };
 }

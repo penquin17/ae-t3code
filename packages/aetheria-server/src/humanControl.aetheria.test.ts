@@ -73,6 +73,23 @@ const makeFake = (options: FakeOptions = {}) => {
       note("answer", who, args);
       return { ok: true, value: record({ state: "answered" }) as never };
     },
+    cancel: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    hold: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    close: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    decidePlan: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    getPlanMode: async (sessionId) => {
+      note("getPlanMode", sessionId);
+      return { ok: true, value: { sessionId, active: false, modeRevision: 0 } };
+    },
+    setPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    grant: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    verifyHumanOrigin: async (originId, expect) => {
+      note("verifyHumanOrigin", originId, expect);
+      return originId === "org-unreadable"
+        ? { ok: false, code: "INTERACTION_UNAVAILABLE" }
+        : { verified: false, code: "ORIGIN_NOT_FOUND" };
+    },
+    canAccess: () => true,
     reconcileWaits: async (sessionId) => {
       note("reconcileWaits", sessionId);
       return { ok: true, value: { continued: [] } };
@@ -271,7 +288,8 @@ describe("the operations: strict arguments, identity from the context only", () 
     expect(created).toEqual({ status: "done", result: { ok: true, value: record() } });
     await ops["interaction.await"]!(context(valid["interaction.await"]!));
     await ops["interaction.release"]!(context(valid["interaction.release"]!));
-    const who = { sessionId: "session-1", rootSessionId: "root-1" };
+    // The carrier's `kind` travels with the identity: only a main session may open a plan review, and the service refuses an absent kind.
+    const who = { sessionId: "session-1", rootSessionId: "root-1", kind: "main" };
     expect(fake.calls.slice(1).map((c) => [c.method, c.args[0]])).toEqual([
       ["create", who],
       ["awaitSegment", who],
@@ -298,18 +316,77 @@ describe("the operations: strict arguments, identity from the context only", () 
     const fake = makeFake();
     const { service } = prepare(fake);
     await service.start();
-    for (const name of [
-      "tasks.publish",
-      "plan-mode.get",
-      "audit.history",
-      "origin.verify",
-    ] as const)
+    for (const name of ["tasks.publish", "audit.history"] as const)
       expect(await service.operations()[name]!(context(valid[name]))).toEqual({
         status: "unavailable",
         code: "INTERACTION_UNAVAILABLE",
       });
     expect(fake.calls.map((c) => c.method)).toEqual(["start"]);
     await service.dispose("test");
+  });
+
+  it("origin.verify is a read-only verdict from the service: the verdict as given, and an unreadable origin unavailable, never verified", async () => {
+    const fake = makeFake();
+    const { service } = prepare(fake);
+    await service.start();
+    const expect_ = { kind: "authorization" as const, sessionId: "session-1" };
+    expect(
+      await service.operations()["origin.verify"]!(context({ originId: "org-1", expect: expect_ })),
+    ).toEqual({ status: "done", result: { verified: false, code: "ORIGIN_NOT_FOUND" } });
+    expect(
+      await service.operations()["origin.verify"]!(context({ originId: "org-unreadable" })),
+    ).toEqual({ status: "unavailable", code: "INTERACTION_UNAVAILABLE" });
+    expect(fake.calls.filter((c) => c.method === "verifyHumanOrigin")).toEqual([
+      { method: "verifyHumanOrigin", args: ["org-1", expect_] },
+      { method: "verifyHumanOrigin", args: ["org-unreadable", undefined] },
+    ]);
+    await service.dispose("test");
+  });
+
+  it("reads the plan mode of the transport's session, never of one named in the arguments", async () => {
+    const fake = makeFake();
+    const { service } = prepare(fake);
+    await service.start();
+    expect(await service.operations()["plan-mode.get"]!(context({}))).toEqual({
+      status: "done",
+      result: { ok: true, value: { sessionId: "session-1", active: false, modeRevision: 0 } },
+    });
+    expect(fake.calls.map((c) => [c.method, c.args[0]])).toEqual([
+      ["start", undefined],
+      ["getPlanMode", "session-1"],
+    ]);
+    await service.dispose("test");
+  });
+
+  it("lets a subscriber listen to the running service only, and ends it when the Backend drains", async () => {
+    const fake = makeFake();
+    const { service } = prepare(fake);
+    expect(
+      service.watchInteractions(
+        () => {},
+        () => {},
+      ),
+    ).toBeUndefined();
+    await service.start();
+    let ended = 0;
+    const stop = service.watchInteractions(
+      () => {},
+      () => void (ended += 1),
+    );
+    expect(stop).toBeTypeOf("function");
+    const unsubscribed = service.watchInteractions(
+      () => {},
+      () => void (ended += 10),
+    );
+    unsubscribed?.();
+    await service.dispose("server-teardown");
+    expect(ended).toBe(1); // the live subscriber was ended once; the unsubscribed one never
+    expect(
+      service.watchInteractions(
+        () => {},
+        () => {},
+      ),
+    ).toBeUndefined();
   });
 
   it("never returns an XC-6 pending result, and a segment that never settles still resolves done inside its bound", async () => {
