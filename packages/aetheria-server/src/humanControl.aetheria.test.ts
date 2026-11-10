@@ -138,6 +138,8 @@ const stateRoot = () => {
 };
 afterEach(() => {
   vi.useRealTimers();
+  // Each test's own scratch state root, created by stateRoot() above; nothing else is removed.
+  for (const root of roots.splice(0)) NodeFS.rmSync(root, { recursive: true, force: true });
 });
 
 const prepare = (fake: ReturnType<typeof makeFake>, root = stateRoot(), auditPort?: AuditPort) => {

@@ -13,7 +13,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { createAetheriaBackendService } from "@t3tools/aetheria-server";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createXc6Backend, type Xc6Operation } from "./xc6Core.ts";
 
@@ -25,8 +25,15 @@ const caller = { threadId: "thread-1", providerSessionId: "ps-1", providerInstan
 const stateRoot = () => {
   const base = NodePath.join(NodeOS.homedir(), ".aetheria", "candidate-envs");
   NodeFS.mkdirSync(base, { recursive: true, mode: 0o700 });
-  return NodeFS.mkdtempSync(NodePath.join(base, "m06-s14-stress-"));
+  const root = NodeFS.mkdtempSync(NodePath.join(base, "m06-s14-stress-"));
+  scratchRoots.push(root);
+  return root;
 };
+// The scratch state roots this file creates; removed after all its cases.
+const scratchRoots: string[] = [];
+afterAll(() => {
+  for (const root of scratchRoots.splice(0)) NodeFS.rmSync(root, { recursive: true, force: true });
+});
 const tree = (dir: string): Record<string, string> => {
   const out: Record<string, string> = {};
   const walk = (current: string): void => {

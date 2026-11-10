@@ -42,7 +42,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServer } from "effect/http";
 import * as RpcTest from "effect/rpc/RpcTest";
-import { describe, expect } from "vitest";
+import { afterAll, describe, expect } from "vitest";
 
 import * as RpcAuthorization from "../auth/RpcAuthorization.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -309,8 +309,14 @@ interface PiOptions {
   readonly script: ReadonlyArray<Json>;
   readonly plan?: boolean;
 }
+// The Pi scratch roots this file creates; removed after every case has stopped its Pi children.
+const piRoots: string[] = [];
+afterAll(() => {
+  for (const root of piRoots.splice(0)) NodeFS.rmSync(root, { recursive: true, force: true });
+});
 const startPi = (config: PiOptions) => {
   const root = NodeFS.mkdtempSync(NodePath.join(stateRootBase(), "m06-s28-pi-"));
+  piRoots.push(root);
   const dirs = Object.fromEntries(
     ["workspace", "agent", "home", "sessions"].map((name) => [name, NodePath.join(root, name)]),
   ) as Record<"workspace" | "agent" | "home" | "sessions", string>;

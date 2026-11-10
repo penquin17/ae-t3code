@@ -2570,12 +2570,12 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/evidence@file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz':
-    resolution: {integrity: sha512-8WrOIYqAd2rGMoFk2o574ool1vkm0V1tOvaxasSB9DXU1/aSOusgqvEr6kOeN9WUoCUrOUJo3LFQs6cpBi1k6A==, tarball: file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz}
+    resolution: {integrity: sha512-LdWUGWdlbIBohp0Gi1OQhb16FzqZqSomPwN8lBDnHNb/Ysjwrax+1hpRb7NIl/AjajL7cgtWqZhRnCm1js4U8A==, tarball: file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
   '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz':
-    resolution: {integrity: sha512-G3c96g+Sy2v0l0rtitOfhc3nBnvkeeXovrdd7bNWXXOfmSXOSl/PsFS44s3nXNK7lzIKa43q05clenQZD3BY5A==, tarball: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz}
+    resolution: {integrity: sha512-leFUi1OcQShPhgPaCE+np5O4HQQNa8uIDcE/DFSldfe6UPBmjLyOY6izSspmMhoyD/6zEqAoAecbC9CMgCPcyw==, tarball: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 

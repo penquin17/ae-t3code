@@ -32,12 +32,12 @@
     "@aetheria/evidence": {
       "archive": "artifacts/aetheria-evidence-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:4f93178fda3b7c63b83bfd608f07261a934a9621f4cb2ea1b56df11eb4559723"
+      "stamp": "sha256:51dc3f8c18d66493bbe5e785a5bd020817d456ba1bc604da94c1bc1cf328edd8"
     },
     "@aetheria/interaction": {
       "archive": "artifacts/aetheria-interaction-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:c475496e3ad3f0d1a3937d5bf9ac5e3fd3cabb343a16daaa907806b30a48fdb8"
+      "stamp": "sha256:c3c59d59afc5898c5c8799d992f1735a80d186a3c3d4e48dc5948ccb8f3535b8"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",
