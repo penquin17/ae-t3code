@@ -195,7 +195,7 @@ const fakeService = (overrides: Partial<HumanControlService> = {}) => {
     },
     redeliver: async (sessionId) => {
       calls.push(`redeliver:${sessionId}`);
-      return { ok: true, value: { delivered: 0, failed: 0, pending: 0 } };
+      return { ok: true, value: { delivered: [], failed: [], pending: [] } };
     },
     onChange: () => () => {},
     drain: async () => ({ released: [], stopped: [], transferred: [], stillLive: [] }),

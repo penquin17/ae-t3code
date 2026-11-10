@@ -37,7 +37,7 @@ export function agentAwarenessBackendModuleRow(
       failure:
         "A failed start rolls the Backend back and is reported in the disposal report; operations of a module that is not running answer unavailable, never a stale success.",
       uncertainty:
-        "Only sessions this Backend has observed since its start count as live; earlier history is unknown. Production assign (XC-10) and resolve (XC-8) answer unavailable. Operations answer for module code that is trusted, not sandboxed.",
+        "Only sessions this Backend has observed since its start count as live; earlier history is unknown. Production assign (XC-10) answers unavailable until M05; resolve (XC-8) decides only on M06's verified human answer evidence. Operations answer for module code that is trusted, not sandboxed.",
       stateOwner: "backend-awareness-state",
     },
   };

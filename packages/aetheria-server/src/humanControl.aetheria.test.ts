@@ -117,7 +117,7 @@ const makeFake = (options: FakeOptions = {}) => {
     },
     redeliver: async (sessionId) => {
       note("redeliver", sessionId);
-      return { ok: true, value: { delivered: 0, failed: 0, pending: 0 } };
+      return { ok: true, value: { delivered: [], failed: [], pending: [] } };
     },
     onChange: () => () => {},
     drain: async () => {

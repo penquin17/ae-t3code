@@ -145,10 +145,11 @@ export interface HumanControlService {
   redeliver(sessionId?: string): Promise<
     | {
         readonly ok: true;
+        // The interaction ids in each outcome (the archive's RedeliverReport), not counts.
         readonly value: {
-          readonly delivered: number;
-          readonly failed: number;
-          readonly pending: number;
+          readonly delivered: readonly string[];
+          readonly failed: readonly string[];
+          readonly pending: readonly string[];
         };
       }
     | { readonly ok: false; readonly code: string; readonly detail?: string }

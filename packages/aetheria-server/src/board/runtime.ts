@@ -3,7 +3,9 @@
 // identity and the thread binding, liveness read only from this Backend's own run, and the XC-6 operations that use them (M09 step 17 adds
 // `board.record-shell`, a shell change shown to peers as not guarded).
 // Evidence from before this Backend started is unknown: an observation counts only if its producing event is newer than the replay horizon.
-// Unreadable board or liveness is `unavailable`; production `assign` and `resolve` answer unavailable naming XC-10 / XC-8.
+// Unreadable board or liveness is `unavailable`; production `assign` answers unavailable naming XC-10 (M05).
+// M06 step 26: `resolve` decides on the interaction service's `questionEvidence` (XC-8), called in process with the root, the cited call id and the
+// caller as asker; an absent, stopped or unreadable provider is unavailable naming XC-8, and advice that points at `resolve` is told only with a provider.
 // Step 22: when liveness reports a bound main session stopped or crashed, its board session is closed by the one close policy (`reconcileBoard`
 // with that session as the only one without live evidence): markers only for files still changed, unknown Git defers. The drain stops the
 // listener, waits for the operations in flight, closes every session still open (a clean teardown), and reports what it could not close as still live.
@@ -54,6 +56,11 @@ import {
 import type { LivenessObservation, LivenessService } from "../liveness/service.ts";
 import type { GitPort } from "./git.ts";
 
+/** XC-8 as `resolve` calls it (the archive's `ActionPorts.questionEvidence`): in process, never an XC-6 round trip. */
+export type QuestionEvidenceProvider = NonNullable<
+  Parameters<typeof awarenessAction>[2]["questionEvidence"]
+>;
+
 export interface BoardRuntimeOptions {
   readonly stateRoot: string;
   readonly index: Pick<ThreadIndex, "bindingOfSession" | "sessions" | "lookup">;
@@ -69,6 +76,11 @@ export interface BoardRuntimeOptions {
   readonly childStatus?:
     | ((rootId: string, childId: string) => ChildStatus | Promise<ChildStatus>)
     | undefined;
+  /**
+   * The durable verified-human evidence of XC-8 (M06): the running interaction service's `questionEvidence`. Absent: `resolve` answers unavailable naming
+   * XC-8 and no refusal advice points at it. Present: `resolve` is offered, and the provider answers unavailable itself while the service is not running.
+   */
+  readonly questionEvidence?: QuestionEvidenceProvider | undefined;
 }
 
 export interface BoardRuntime {
@@ -205,6 +217,9 @@ export function createBoardRuntime(options: BoardRuntimeOptions): BoardRuntime {
     summaryMaxBytes: config.summaryMaxBytes,
     newId: () => NodeCrypto.randomUUID(),
     childStatus: options.childStatus,
+    questionEvidence: options.questionEvidence,
+    // Advice names `resolve` only where a provider can answer it (one word from one place: no provider, no pointer).
+    resolveAvailable: options.questionEvidence !== undefined,
   });
 
   /** A bound main session's stop or crash closes its board session; every other session keeps the evidence it has. */

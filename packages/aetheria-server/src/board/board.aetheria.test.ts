@@ -11,9 +11,10 @@ import * as NodePath from "node:path";
 import { afterAll, describe, expect, it } from "vite-plus/test";
 
 import { createAetheriaBackendService } from "../service.ts";
-import type { AetheriaBackendServiceOptions } from "../service.ts";
+import type { AetheriaBackendService, AetheriaBackendServiceOptions } from "../service.ts";
+import type { HumanControlService } from "../humanControl.ts";
 import type { StoredEventLike } from "../identity/feed.ts";
-import { boardFileFor } from "../library.ts";
+import { boardFileFor, createArchiveInteractionService } from "../library.ts";
 import {
   DEAD_OWNER,
   SESSION,
@@ -209,18 +210,6 @@ describe("assignment by identity, and main authority", () => {
         code: "XC10_CHILD_STATUS_UNAVAILABLE",
       },
     );
-    expect(
-      await act(production, A, {
-        action: "resolve",
-        decision: "overlap",
-        answer: "no",
-        askCallId: "q",
-        path: "a.txt",
-      }),
-    ).toEqual({
-      status: "unavailable",
-      code: "XC8_DECISION_EVIDENCE_UNAVAILABLE",
-    });
   });
 
   it("refuses a child at execution, refuses a named caller key, and changes nothing", async () => {
@@ -244,6 +233,163 @@ describe("assignment by identity, and main authority", () => {
         .catch(() => "threw"),
     ).toBe("threw");
     expect(NodeFS.existsSync(boardFileFor(w.stateRoot, w.ws))).toBe(false);
+  });
+});
+
+// M06 step 26 (D13, D20): resolve on the REAL interaction service's verified answers, through the assembled Backend; T3's client auth is not shown.
+// The eight DSH rows are ported in tests/awareness/board/resolve.test.mjs; here: wiring, advice, outage, restart, an unchanged board on failure.
+const humanClient = {
+  actor: {
+    clientSessionId: "device-1",
+    grantedScopes: ["orchestration:operate"],
+    authenticatedAt: "2026-11-10T12:00:00.000Z",
+  },
+};
+const batch = [{ id: "q1", question: "Decide?", options: [{ label: "Yes" }, { label: "No" }] }];
+const yes = [{ id: "q1", selected: ["Yes"], skipped: false }];
+type Interactions = NonNullable<ReturnType<AetheriaBackendService["interactions"]>>;
+type Asked = { interactionId: string; revision: string };
+const interactionsOf = (w: { service: AetheriaBackendService }): Interactions => {
+  const service = w.service.interactions();
+  if (service === undefined) throw new Error("the interaction service is not running");
+  return service;
+};
+const ask = async (w: { service: AetheriaBackendService }, who: Who, callId: string) => {
+  clock.t += 10;
+  const out = await interactionsOf(w).create(
+    { sessionId: who.session, rootSessionId: who.root ?? who.session, kind: who.kind ?? "main" },
+    { kind: "question", callId, questions: batch } as never,
+  );
+  expect(out.ok).toBe(true);
+  return (out as unknown as { value: Asked }).value;
+};
+const answerIt = async (w: { service: AetheriaBackendService }, question: Asked) => {
+  clock.t += 10;
+  const out = await interactionsOf(w).answer(humanClient, {
+    interactionId: question.interactionId,
+    revision: question.revision,
+    answers: yes as never,
+  });
+  expect(out.ok).toBe(true);
+  return (out as unknown as { value: { resolution: { originId: string } } }).value.resolution
+    .originId;
+};
+const boardText = (w: { stateRoot: string; ws: string }): string =>
+  NodeFS.readFileSync(boardFileFor(w.stateRoot, w.ws), "utf8");
+const boardOf = (w: { stateRoot: string; ws: string }) =>
+  JSON.parse(boardText(w)) as {
+    decisions: { kind: string; askCallId: string; answer: string }[];
+    claims: Record<string, { sharedWith: string[] }>;
+  };
+const share = (callId: string) => ({
+  action: "resolve",
+  decision: "overlap",
+  path: "a.txt",
+  answer: "share",
+  askCallId: callId,
+});
+
+describe("resolve on a verified human answer (XC-8)", () => {
+  it("offers resolve in its advice, refuses an unanswered question without a change, and records the decision once a client has answered the same question", async () => {
+    const w = await live([A, B]);
+    const target = NodePath.join(w.ws, "a.txt");
+    await act(w, B, { action: "claim", path: "a.txt", idea: "tokenizer" });
+    const refused = await check(w, A, target);
+    expect(String((refused as { result: { detail: string } }).result.detail)).toContain(
+      "awareness resolve",
+    );
+    const claimText = await act(w, A, { action: "claim", path: "a.txt", idea: "mine" });
+    expect(String((claimText as { result: { message: string } }).result.message)).toContain(
+      'then call awareness resolve {decision: "overlap"',
+    );
+    const question = await ask(w, A, "ask-1");
+    const before = boardText(w);
+    expect(await act(w, A, share("ask-1"))).toMatchObject({
+      status: "done",
+      result: { ok: false, code: "AWARENESS_UNVERIFIED" },
+    });
+    expect(boardText(w)).toBe(before);
+    await answerIt(w, question);
+    const done = await act(w, A, share("ask-1"));
+    expect(done).toMatchObject({ status: "done", result: { ok: true, sharedWith: [SESSION_B] } });
+    expect(boardOf(w).decisions).toMatchObject([
+      { kind: "overlap", askCallId: "ask-1", answer: "share" },
+    ]);
+    expect(await check(w, A, target)).toMatchObject({ result: { verdict: "allowed" } });
+    expect(await check(w, B, target)).toMatchObject({ result: { verdict: "allowed" } });
+  });
+
+  it("is unavailable naming XC-8 while the origin cannot be read, changes nothing, and succeeds on the same request once it can", async () => {
+    const w = await live([A, B]);
+    await act(w, B, { action: "claim", path: "a.txt", idea: "tokenizer" });
+    await check(w, A, NodePath.join(w.ws, "a.txt"));
+    const originId = await answerIt(w, await ask(w, A, "ask-1"));
+    const originFile = NodePath.join(w.stateRoot, "interactions", "origins", `${originId}.json`);
+    const good = NodeFS.readFileSync(originFile, "utf8");
+    NodeFS.writeFileSync(originFile, "{broken");
+    const before = boardText(w);
+    expect(await act(w, A, share("ask-1"))).toEqual({
+      status: "unavailable",
+      code: "XC8_DECISION_EVIDENCE_UNAVAILABLE",
+    });
+    expect(boardText(w)).toBe(before);
+    NodeFS.writeFileSync(originFile, good);
+    expect(await act(w, A, share("ask-1"))).toMatchObject({ result: { ok: true } });
+  });
+
+  it("is unavailable naming XC-8 when the running interaction service offers no question evidence", async () => {
+    const w = await live([A, B], {
+      interactionFactory: (deps) => {
+        const { questionEvidence: _gone, ...rest } = createArchiveInteractionService(
+          deps,
+        ) as unknown as Record<string, unknown>;
+        return rest as unknown as HumanControlService;
+      },
+    });
+    await act(w, B, { action: "claim", path: "a.txt", idea: "tokenizer" });
+    await check(w, A, NodePath.join(w.ws, "a.txt"));
+    await answerIt(w, await ask(w, A, "ask-1"));
+    const before = boardText(w);
+    expect(await act(w, A, share("ask-1"))).toEqual({
+      status: "unavailable",
+      code: "XC8_DECISION_EVIDENCE_UNAVAILABLE",
+    });
+    expect(boardText(w)).toBe(before);
+  });
+
+  it("keeps the evidence across a restart while the persisted decision stays history: the refusal that owed it died with the process", async () => {
+    const w = await live([A, B]);
+    await act(w, B, { action: "claim", path: "a.txt", idea: "tokenizer" });
+    await check(w, A, NodePath.join(w.ws, "a.txt"));
+    await answerIt(w, await ask(w, A, "ask-1"));
+    expect(await act(w, A, share("ask-1"))).toMatchObject({ result: { ok: true } });
+    const report = await w.service.dispose("restart");
+    expect(report.ok).toBe(true);
+
+    const second = make({}, w.stateRoot);
+    expect((await second.service.start()).outcome).toBe("started");
+    second.service.setReplayHorizon(sequence);
+    for (const who of [A, B]) {
+      await second.service.ingest(sessionEvent(who.thread, "running", w.ws));
+      await second.service.ingest(threadEvent(who.thread, who.session));
+    }
+    const evidence = await (
+      interactionsOf(second) as Interactions & {
+        questionEvidence(args: {
+          rootSessionId: string;
+          askCallId: string;
+          askerSessionId: string;
+        }): Promise<{ ok: boolean; value?: { answered: boolean } }>;
+      }
+    ).questionEvidence({ rootSessionId: SESSION, askCallId: "ask-1", askerSessionId: SESSION });
+    expect(evidence).toMatchObject({ ok: true, value: { answered: true } });
+    const before = boardText(w);
+    expect(await act(second, A, share("ask-1"))).toMatchObject({
+      status: "done",
+      result: { ok: false, code: "AWARENESS_UNVERIFIED" },
+    });
+    expect(boardText(w)).toBe(before);
+    expect(boardOf(w).decisions).toHaveLength(1);
   });
 });
 

@@ -54,6 +54,7 @@ import {
   createBoardRuntime,
   type BoardRuntime,
   type BoardRuntimeOptions,
+  type QuestionEvidenceProvider,
 } from "./board/runtime.ts";
 
 export interface AetheriaBackendServiceOptions {
@@ -186,6 +187,29 @@ export function createAetheriaBackendService(
         },
       ],
     };
+  // M06 step 26: `resolve` asks the ONE running interaction service for the durable, verified-human answer (XC-8), in process. The service is built later,
+  // inside the human-control module's start, so the provider looks it up at each call: not running (before start, after drain) is unavailable, never "unanswered".
+  // `HumanControlService` does not declare `questionEvidence` (humanControl.ts is the module's, not this seam's); the archive's service has it, and a service without it
+  // (a scripted test factory) answers unavailable the same way.
+  let interactionsNow: () => HumanControlService | undefined = () => undefined;
+  const questionEvidence: QuestionEvidenceProvider = async (args) => {
+    const service = interactionsNow() as
+      | (HumanControlService & { questionEvidence?: QuestionEvidenceProvider })
+      | undefined;
+    if (service === undefined)
+      return {
+        ok: false,
+        code: "INTERACTION_UNAVAILABLE",
+        detail: "the interaction service is not running",
+      };
+    if (typeof service.questionEvidence !== "function")
+      return {
+        ok: false,
+        code: "INTERACTION_UNAVAILABLE",
+        detail: "the interaction service offers no question evidence",
+      };
+    return service.questionEvidence(args);
+  };
   const board = createBoardRuntime({
     stateRoot: options.stateRoot,
     index,
@@ -194,6 +218,7 @@ export function createAetheriaBackendService(
     now: options.now ?? Date.now,
     git: options.git ?? createGit(),
     childStatus: options.childStatus,
+    questionEvidence,
   });
 
   const registration: BackendRegistration = createAgentAwarenessBackendRegistration({
@@ -256,6 +281,7 @@ export function createAetheriaBackendService(
                 index.bindingOfSession(target.rootSessionId) !== undefined,
             }),
   });
+  interactionsNow = () => humanControlRegistration.interactions();
   // M06 step 13: T3 attaching a bound thread to a provider session after the replay is a resume; the interaction service ends the waits no segment
   // holds and retries undelivered late answers for that Pi session. The horizon is the one the board uses; the signal never fires before it is known.
   let replayHorizon: number | undefined;
