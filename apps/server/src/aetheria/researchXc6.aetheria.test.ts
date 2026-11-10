@@ -34,6 +34,7 @@ const FOLDER = "/work/project";
 const TOKEN_CANARY = "ACCESS-TOKEN-SYNTHETIC-RESEARCH";
 const ACCOUNT_CANARY = "ACCOUNT-SYNTHETIC-RESEARCH-0001";
 const REQUEST_ID = "request-id-0000000001";
+const SETTLE_POLLS = 200;
 
 const layerRegistry = McpSessionRegistry.layer.pipe(
   Layer.provideMerge(
@@ -239,11 +240,14 @@ const withBackend = (
         send(bearer, session, { v: 1, poll: token });
       const settle = (bearer: string, session: string, first: any) =>
         Effect.gen(function* () {
-          // Every settlement here is a chain of resolved promises, so one turn of the event loop completes it; a poll that is still pending fails the caller's assertion.
-          yield* Effect.yieldNow;
-          return first.json.status === "pending"
-            ? yield* poll(bearer, session, first.json.token)
-            : first;
+          // The carrier may answer pending first: poll until it settles, at most SETTLE_POLLS more times (each poll is a socket round trip, so the work progresses between polls); one still pending at the end fails the caller's assertion.
+          if (first.json.status !== "pending") return first;
+          return yield* poll(bearer, session, first.json.token).pipe(
+            Effect.repeat({
+              until: (reply) => reply.json.status !== "pending",
+              times: SETTLE_POLLS,
+            }),
+          );
         });
       yield* Effect.promise(async () => {
         const result = await service.start();
