@@ -17,6 +17,12 @@ import {
   type ProvidersMode,
   type ProvidersResearchSeams,
 } from "./providers.ts";
+import {
+  createHumanControlBackendRegistration,
+  type HumanControlService,
+  type HumanControlServiceFactory,
+  type ThreadTurnDispatch,
+} from "./humanControl.ts";
 import { createPiSelectionSeam, type PiSelectionSeam } from "./routeSeam.ts";
 import { createSnapshotRetention } from "./snapshotRetention.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
@@ -35,6 +41,7 @@ import {
   type LivenessService,
   type UnknownReason,
 } from "./liveness/service.ts";
+import { createArchiveInteractionService } from "./library.ts";
 import { acquireOwnerLock, type HeldOwnerLock, type OwnerLockOptions } from "./ownerLock.ts";
 import { createIdentityLifecycleOperation } from "./operations/identityLifecycle.ts";
 import { createGit, type GitPort } from "./board/git.ts";
@@ -76,6 +83,13 @@ export interface AetheriaBackendServiceOptions {
    * folder, outside the state root. Absent: the two `attachments.*` operations stay registered and fail closed.
    */
   readonly attachmentsDir?: string;
+  /**
+   * T3's message intake and receipt store by thread, adapted by the host that assembles the Backend (M06 step 6; the apps/server wrapper, with the
+   * captured Effect runtime). Absent: a late answer stays pending delivery, never delivered another way.
+   */
+  readonly turnDispatch?: ThreadTurnDispatch;
+  /** Builds the interaction service (M06). Absent: the module runs unconfigured and its operations answer unavailable. */
+  readonly interactionFactory?: HumanControlServiceFactory;
 }
 
 export interface AetheriaBackendService {
@@ -112,6 +126,11 @@ export interface AetheriaBackendService {
    * session or an unknown id is ATTACHMENT_MISSING; unavailable while snapshots are not running. The caller closes the stream.
    */
   readonly openSnapshot: ProvidersBackendRegistration["openSnapshot"];
+  /**
+   * The ONE interaction service (M06), shared by the XC-6 operations, the client RPC handlers and direct consumers; undefined before start and
+   * after drain. A caller that finds it undefined answers unavailable, never an invented state.
+   */
+  interactions(): HumanControlService | undefined;
 }
 
 export type CreateServiceResult =
@@ -187,9 +206,26 @@ export function createAetheriaBackendService(
     ...(options.providers === undefined ? {} : { providers: options.providers }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
+  const interactionFactory = options.interactionFactory ?? createArchiveInteractionService;
+  const humanControlRegistration = createHumanControlBackendRegistration({
+    // Built inside the module's start, which the Backend runs only after it holds the owner lock.
+    create:
+      interactionFactory === undefined
+        ? undefined
+        : () =>
+            interactionFactory({
+              stateRoot: options.stateRoot,
+              now: options.now ?? Date.now,
+              ...(options.turnDispatch === undefined ? {} : { turnDispatch: options.turnDispatch }),
+              threadOfSession: (sessionId) => index.bindingOfSession(sessionId)?.threadId,
+              canOperate: (_actor, target) =>
+                index.bindingOfSession(target.sessionId) !== undefined &&
+                index.bindingOfSession(target.rootSessionId) !== undefined,
+            }),
+  });
   const prepared = prepareAetheriaBackend({
     composition,
-    registrations: [registration, providersRegistration],
+    registrations: [registration, providersRegistration, humanControlRegistration],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
   if (prepared.outcome === "refused") return { outcome: "refused", faults: prepared.faults };
@@ -298,6 +334,7 @@ export function createAetheriaBackendService(
     }),
     openSnapshot: (sessionId, snapshotId) =>
       providersRegistration.openSnapshot(sessionId, snapshotId),
+    interactions: () => humanControlRegistration.interactions(),
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

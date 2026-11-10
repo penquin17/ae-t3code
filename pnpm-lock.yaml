@@ -1520,6 +1520,9 @@ importers:
       '@aetheria/awareness':
         specifier: file:./artifacts/aetheria-awareness-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz
+      '@aetheria/interaction':
+        specifier: file:./artifacts/aetheria-interaction-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz
       '@aetheria/providers':
         specifier: file:./artifacts/aetheria-providers-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz
@@ -2560,6 +2563,11 @@ packages:
 
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz':
     resolution: {integrity: sha512-cAsdJUmxJtFOGfReD+quouL/x9HEps41NCTOG+rPm+3uouRHVwpcHABuhpq8ZSJOJFDZD+oyKMMFcP45IgKW9g==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz':
+    resolution: {integrity: sha512-hCU7cHIwvFCD4PfRmDp+AlRW6sDHiQqBVzRCjINXS1lTNBszrrr0n419hvFltENDe4w/1Y/LFHAde6i9nyTXjA==, tarball: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
@@ -12578,6 +12586,8 @@ snapshots:
       typescript: '@tsc-rs/typescript@0.8.0'
 
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz': {}
+
+  '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz': {}
 
   '@aetheria/providers@file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz': {}
 

@@ -112,11 +112,12 @@ describe("composition and lifecycle status", () => {
 });
 
 describe("the namespaced RPC", () => {
-  it("has one read-only method under the aetheria. namespace and joins as a group", () => {
-    expect(Object.values(AETHERIA_WS_METHODS)).toEqual(["aetheria.composition.status"]);
+  it("joins the read-only status method first, then the XC-18 methods, all under the aetheria. namespace", () => {
+    // The XC-18 methods (M06) are declared in AetheriaInteractionRpcGroup (checked in interactionOperations.aetheria.test.ts) and merged here.
+    expect(Object.values(AETHERIA_WS_METHODS)[0]).toBe("aetheria.composition.status");
     for (const tag of Object.values(AETHERIA_WS_METHODS))
       expect(tag.startsWith("aetheria.")).toBe(true);
     expect(AetheriaCompositionStatusRpc._tag).toBe(AETHERIA_WS_METHODS.compositionStatus);
-    expect([...AetheriaRpcGroup.requests.keys()]).toEqual([AETHERIA_WS_METHODS.compositionStatus]);
+    expect([...AetheriaRpcGroup.requests.keys()]).toEqual(Object.values(AETHERIA_WS_METHODS));
   });
 });

@@ -11,6 +11,9 @@ describe("the public entry", () => {
       "AGENT_AWARENESS_BACKEND_ID",
       "BACKEND_COMPOSITION_ID",
       "BACKEND_ENTRY_ALLOWLIST",
+      "HUMAN_CONTROL_BACKEND_ENTRY",
+      "HUMAN_CONTROL_BACKEND_ID",
+      "INTERACTION_PINNED_ARTIFACT",
       "OPERATION_NOT_RUNNING",
       "PINNED_ARTIFACT",
       "PI_SELECTION_SEAM_SLOT",
@@ -21,12 +24,15 @@ describe("the public entry", () => {
       "backendManifest",
       "createAetheriaBackendService",
       "createAgentAwarenessBackendRegistration",
+      "createHumanControlBackendRegistration",
       "createPiSelectionSeam",
       "createProvidersBackendRegistration",
+      "humanControlBackendModuleRow",
       "installPiSelectionSeam",
       "prepareAetheriaBackend",
       "prepareBackend",
       "providersBackendModuleRow",
+      "sessionTurnDispatch",
     ]);
   });
 

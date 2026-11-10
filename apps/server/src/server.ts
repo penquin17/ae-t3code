@@ -75,6 +75,8 @@ import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as Xc6Route from "./aetheria/xc6Route.ts";
 // AETHERIA-IP:IP-1 the Aetheria Backend layers registered below
 import * as AetheriaBackendLive from "./aetheria/aetheriaBackend.ts";
+// AETHERIA-IP:IP-23 T3's command receipt store, provided to the Backend layer below
+import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
@@ -821,7 +823,19 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(ServerHttp.layerHttpCompression),
   // AETHERIA-IP:IP-1 the one Backend registration: starts at server start, fed from the unfiltered event stream, drained at teardown; present only when AETHERIA_STATE_ROOT is set
   // The event sink is the runtime's own instance: layers memoize by reference, so this is the stream every other reader of the log uses.
-  Layer.provideMerge(AetheriaBackendLive.layer.pipe(Layer.provide(RuntimeLayer.layerEventSink))),
+  Layer.provideMerge(
+    AetheriaBackendLive.layer.pipe(
+      Layer.provide(RuntimeLayer.layerEventSink),
+      // AETHERIA-IP:IP-23 M06 late-answer delivery: T3's command receipt store for the Backend's receipt lookup. ThreadManagementService comes from
+      // the runtime services already provided to this graph (outside this layer, so there is no cycle); the receipt store is a stateless reader over
+      // the same receipts table the runtime shares through layerEventInfrastructure.
+      Layer.provide(
+        CommandReceiptStore.layerFromApplicationReceipts.pipe(
+          Layer.provide(RuntimeLayer.layerEventInfrastructure),
+        ),
+      ),
+    ),
+  ),
 );
 
 const layerMakeServer = Layer.unwrap(

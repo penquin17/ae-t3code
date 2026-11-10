@@ -40,10 +40,10 @@ describe("the Aetheria RPC is in the group with one explicit scope", () => {
     expect(requiredScopeForRpcMethod(TAG)).toBe(AuthOrchestrationReadScope);
   });
 
-  it("adds no other Aetheria tag", () => {
-    expect([...WsRpcGroup.requests.keys()].filter((tag) => tag.startsWith("aetheria."))).toEqual([
-      TAG,
-    ]);
+  it("adds only the status tag and the eleven XC-18 human-control tags (M06 step 6)", () => {
+    expect(
+      [...WsRpcGroup.requests.keys()].filter((tag) => tag.startsWith("aetheria.")).sort(),
+    ).toEqual(Object.values(AETHERIA_WS_METHODS).sort());
   });
 });
 

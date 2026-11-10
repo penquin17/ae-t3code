@@ -23,7 +23,12 @@ import {
 } from "./agentAwareness.ts";
 import { PINNED_ARTIFACT } from "./artifact.ts";
 import { BACKEND_ENTRY_ALLOWLIST } from "./composition.ts";
-import { LIBRARY_EXPORTS, PROVIDERS_LIBRARY_EXPORTS } from "./library.ts";
+import {
+  INTERACTION_LIBRARY_EXPORTS,
+  LIBRARY_EXPORTS,
+  PROVIDERS_LIBRARY_EXPORTS,
+} from "./library.ts";
+import * as interactionEntry from "@aetheria/interaction/backend";
 import * as providersEntry from "@aetheria/providers/backend";
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -43,9 +48,10 @@ describe("the pinned archive", () => {
     expect(manifest.dependencies["@aetheria/awareness"]).toBe(
       "file:./artifacts/aetheria-awareness-0.1.0.tgz",
     );
-    // M09 A15: awareness and the one additional pinned providers archive (its own declaration is checked in providers.aetheria.test.ts).
+    // M09 A15: awareness and the pinned providers archive (checked in providers.aetheria.test.ts); M06 adds the interaction archive.
     expect(Object.keys(manifest.aetheriaArtifacts).sort()).toEqual([
       "@aetheria/awareness",
+      "@aetheria/interaction",
       "@aetheria/providers",
     ]);
     expect(Object.keys(declared).sort()).toEqual(["archive", "stamp", "version"]);
@@ -88,9 +94,11 @@ describe("the artifact boundary", () => {
         if (specifier.startsWith("@aetheria/")) {
           // Two accepted archives (M09 A15), each through its Backend entry, both from the one library module.
           expect(file).toBe("library.ts");
-          expect(["@aetheria/awareness/backend", "@aetheria/providers/backend"]).toContain(
-            specifier,
-          );
+          expect([
+            "@aetheria/awareness/backend",
+            "@aetheria/providers/backend",
+            "@aetheria/interaction/backend",
+          ]).toContain(specifier);
         }
         expect(specifier).not.toMatch(/packages\/aetheria-|apps\/aetheria|(\.\.\/){3,}/);
       }
@@ -104,6 +112,8 @@ describe("the artifact boundary", () => {
   });
 
   it("finds every name the providers module re-exports on the real providers archive's Backend entry", () => {
+    for (const name of INTERACTION_LIBRARY_EXPORTS)
+      expect(typeof (interactionEntry as Record<string, unknown>)[name], name).toBe("function");
     for (const name of PROVIDERS_LIBRARY_EXPORTS)
       expect(typeof (providersEntry as Record<string, unknown>)[name]).toBe("function");
     expect(providersEntry.PROVIDERS_BACKEND_ENTRY).toBe("@aetheria/providers/backend");
@@ -138,6 +148,7 @@ describe("the Backend agent-awareness module", () => {
     expect(BACKEND_ENTRY_ALLOWLIST).toEqual([
       AGENT_AWARENESS_BACKEND_ENTRY,
       "aetheria:providers-backend",
+      "aetheria:human-control-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(agentAwarenessBackendModuleRow()).toMatchObject({

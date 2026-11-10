@@ -225,6 +225,18 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeAuthAccess]: "auth",
   // AETHERIA-IP:IP-14 span-aggregate label for the Aetheria status method; this map is exhaustive over the joined group
   [AETHERIA_WS_METHODS.compositionStatus]: "aetheria",
+  // AETHERIA-IP:IP-21 span-aggregate label for the XC-18 human-control methods; same exhaustive map
+  [AETHERIA_WS_METHODS.interactionsSnapshot]: "aetheria",
+  [AETHERIA_WS_METHODS.interactionsChanges]: "aetheria",
+  [AETHERIA_WS_METHODS.planModeGet]: "aetheria",
+  [AETHERIA_WS_METHODS.tasksGet]: "aetheria",
+  [AETHERIA_WS_METHODS.interactionsAnswer]: "aetheria",
+  [AETHERIA_WS_METHODS.interactionsCancel]: "aetheria",
+  [AETHERIA_WS_METHODS.interactionsHold]: "aetheria",
+  [AETHERIA_WS_METHODS.interactionsClose]: "aetheria",
+  [AETHERIA_WS_METHODS.planDecide]: "aetheria",
+  [AETHERIA_WS_METHODS.planModeSet]: "aetheria",
+  [AETHERIA_WS_METHODS.authorizationGrant]: "aetheria",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

@@ -18,6 +18,7 @@ import {
   AGENT_AWARENESS_BACKEND_ENTRY,
   createAgentAwarenessBackendRegistration,
 } from "./agentAwareness.ts";
+import { createHumanControlBackendRegistration } from "./humanControl.ts";
 import { createProvidersBackendRegistration, type ProvidersMode } from "./providers.ts";
 
 void AGENT_AWARENESS_BACKEND_ENTRY;
@@ -65,6 +66,7 @@ function prepare(providers: ProvidersMode) {
         providers,
         now: () => Date.parse(ISO),
       }),
+      createHumanControlBackendRegistration({}),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);

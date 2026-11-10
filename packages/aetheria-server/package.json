@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@aetheria/awareness": "file:./artifacts/aetheria-awareness-0.1.0.tgz",
+    "@aetheria/interaction": "file:./artifacts/aetheria-interaction-0.1.0.tgz",
     "@aetheria/providers": "file:./artifacts/aetheria-providers-0.1.0.tgz",
     "@t3tools/aetheria-contracts": "workspace:*"
   },
@@ -26,6 +27,11 @@
       "archive": "artifacts/aetheria-awareness-0.1.0.tgz",
       "version": "0.1.0",
       "stamp": "sha256:0f0afff416c420afa178a9d00a21e7c129960fe0ae2c1033b2adf436fff27b9f"
+    },
+    "@aetheria/interaction": {
+      "archive": "artifacts/aetheria-interaction-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:6c61fa77f3b5553f67533787d3da4a445396c2776db91358006af445f59d7024"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",

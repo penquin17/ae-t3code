@@ -24,6 +24,23 @@ export {
   type ProvidersRegistrationOptions,
 } from "./providers.ts";
 export {
+  HUMAN_CONTROL_BACKEND_ENTRY,
+  HUMAN_CONTROL_BACKEND_ID,
+  createHumanControlBackendRegistration,
+  humanControlBackendModuleRow,
+  sessionTurnDispatch,
+  type AgentIdentity,
+  type ClientActor,
+  type ClientIdentity,
+  type HumanControlBackendRegistration,
+  type HumanControlDrainReport,
+  type HumanControlService,
+  type HumanControlServiceDeps,
+  type HumanControlServiceFactory,
+  type SessionTurnDispatch,
+  type ThreadTurnDispatch,
+} from "./humanControl.ts";
+export {
   PI_SELECTION_SEAM_SLOT,
   createPiSelectionSeam,
   installPiSelectionSeam,
@@ -32,7 +49,11 @@ export {
   type PiSelectionRequest,
   type PiSelectionSeam,
 } from "./routeSeam.ts";
-export { PINNED_ARTIFACT, PROVIDERS_PINNED_ARTIFACT } from "./artifact.ts";
+export {
+  INTERACTION_PINNED_ARTIFACT,
+  PINNED_ARTIFACT,
+  PROVIDERS_PINNED_ARTIFACT,
+} from "./artifact.ts";
 export { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 export { BACKEND_COMPOSITION_ID, BACKEND_ENTRY_ALLOWLIST, backendManifest } from "./composition.ts";
 export type { StoredEventLike } from "./identity/feed.ts";

@@ -2,7 +2,7 @@
 //
 // The outer build wrote each archive and its stamp (tools/lib/foundations/artifact.mjs); the manifest's `aetheriaArtifacts` entries are the
 // declaration the graphs check compares with the archive bytes. The Backend publishes these stamps as facts of its composition, so a
-// module whose row expects another stamp is refused as stale. Two archives are accepted (M09 A15): awareness and providers.
+// module whose row expects another stamp is refused as stale. Three archives are accepted (M09 A15, M06): awareness, providers and interaction.
 import manifest from "../package.json" with { type: "json" };
 
 const declaredArtifacts = manifest.aetheriaArtifacts as Record<
@@ -24,8 +24,12 @@ export const PINNED_ARTIFACT = pinned("@aetheria/awareness");
 /** The providers archive: route availability (XC-11), the strict operation handlers, the production adapters and the labelled fixture. */
 export const PROVIDERS_PINNED_ARTIFACT = pinned("@aetheria/providers");
 
+/** The interaction archive (M06): the interaction core, its file store and its service. The `human-control-backend` module's row names it. */
+export const INTERACTION_PINNED_ARTIFACT = pinned("@aetheria/interaction");
+
 /** Every stamp the Backend gives the shared validator, by archive id. */
 export const PINNED_ARTIFACT_STAMPS: Readonly<Record<string, string>> = Object.freeze({
   [PINNED_ARTIFACT.package]: PINNED_ARTIFACT.stamp,
   [PROVIDERS_PINNED_ARTIFACT.package]: PROVIDERS_PINNED_ARTIFACT.stamp,
+  [INTERACTION_PINNED_ARTIFACT.package]: INTERACTION_PINNED_ARTIFACT.stamp,
 });

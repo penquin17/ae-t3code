@@ -213,6 +213,18 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,
   // AETHERIA-IP:IP-12 explicit scope for the read-only Aetheria composition status method (read-only, so the orchestration read scope)
   [AETHERIA_WS_METHODS.compositionStatus]: AuthOrchestrationReadScope,
+  // AETHERIA-IP:IP-20 explicit scopes for the XC-18 human-control methods: reads and the change stream need orchestration:read, the seven human actions orchestration:operate
+  [AETHERIA_WS_METHODS.interactionsSnapshot]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.interactionsChanges]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.planModeGet]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.tasksGet]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.interactionsAnswer]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.interactionsCancel]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.interactionsHold]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.interactionsClose]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.planDecide]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.planModeSet]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.authorizationGrant]: AuthOrchestrationOperateScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

@@ -15,6 +15,7 @@ import {
   installPiSelectionSeam,
   prepareAetheriaBackend,
   type AetheriaBackendService,
+  type HumanControlServiceFactory,
   type StoredEventLike,
 } from "@t3tools/aetheria-server";
 import { ThreadId } from "@t3tools/contracts";
@@ -27,8 +28,11 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
+import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import { layerFromBackend } from "./backendComposition.ts";
+import { makeThreadTurnDispatch } from "./humanControlDelivery.ts";
 
 const STATE_ROOT_ENV = "AETHERIA_STATE_ROOT";
 const PI_AGENT_DIR_ENV = "AETHERIA_PI_AGENT_DIR";
@@ -43,7 +47,12 @@ export class AetheriaBackend extends Context.Service<AetheriaBackend, AetheriaBa
  */
 export const makeLayer = (
   stateRoot: string,
-  options: { readonly attachmentsDir?: string; readonly piAgentDir?: string } = {},
+  options: {
+    readonly attachmentsDir?: string;
+    readonly piAgentDir?: string;
+    /** Builds the interaction service (M06). Absent: the module answers unavailable. */
+    readonly interactionFactory?: HumanControlServiceFactory;
+  } = {},
 ) =>
   Layer.effect(
     AetheriaBackend,
@@ -51,8 +60,24 @@ export const makeLayer = (
       const sink = yield* EventSink.EventSinkV2;
       const mcpSessions = yield* McpProviderSessions;
       const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
+      // M06 step 6: T3's own message dispatch and receipt store, adapted with the captured runtime like `credentialOf`. The production `layer`
+      // requires both (server.ts, IP-23); a bare layer without them runs with late-answer delivery off, which the interaction core keeps pending.
+      const threads = yield* Effect.serviceOption(ThreadManagementService.ThreadManagementService);
+      const receipts = yield* Effect.serviceOption(CommandReceiptStore.CommandReceiptStoreV2);
+      const turnDispatch =
+        Option.isSome(threads) && Option.isSome(receipts)
+          ? yield* makeThreadTurnDispatch(threads.value, receipts.value)
+          : undefined;
+      if (turnDispatch === undefined)
+        yield* Effect.logWarning(
+          "Aetheria late-answer delivery is off: T3's thread dispatch or command receipts are not available",
+        );
       const made = createAetheriaBackendService({
         stateRoot,
+        ...(turnDispatch === undefined ? {} : { turnDispatch }),
+        ...(options.interactionFactory === undefined
+          ? {}
+          : { interactionFactory: options.interactionFactory }),
         ...(options.attachmentsDir === undefined ? {} : { attachmentsDir: options.attachmentsDir }),
         ...(options.piAgentDir === undefined
           ? {}
@@ -135,6 +160,11 @@ export const makeLayer = (
         }),
         Effect.forkScoped,
       );
+      // M06: answers that were recorded but not yet delivered are retried once T3's dispatch exists (the core's `start` never dispatches). The
+      // core reads T3's receipt first, so an answer that already landed is only journalled as delivered, never sent twice.
+      yield* Effect.promise(async () => {
+        await service.interactions()?.redeliver();
+      }).pipe(Effect.ignore, Effect.forkScoped);
       return service;
     }),
   );
@@ -177,6 +207,8 @@ export const layer = whenStateRoot((stateRoot) =>
       if (Option.isNone(config))
         yield* Effect.logWarning("Aetheria snapshots are off: the server config is not available");
       const piAgentDir = yield* Config.String(PI_AGENT_DIR_ENV).pipe(Config.option);
+      // M06 step 6: T3's thread dispatch comes from the runtime services and the command receipt store from server.ts (IP-23); makeLayer reads both
+      // as optional so the existing bare-layer tests still build, and logs a warning when late-answer delivery is therefore off.
       return makeLayer(stateRoot, {
         ...(Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {}),
         ...(Option.isSome(piAgentDir) ? { piAgentDir: piAgentDir.value } : {}),

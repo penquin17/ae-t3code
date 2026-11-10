@@ -8,6 +8,11 @@ import {
 } from "./agentAwareness.ts";
 import { BACKEND_COMPOSITION_ID } from "./compositionId.ts";
 import {
+  HUMAN_CONTROL_BACKEND_ENTRY,
+  HUMAN_CONTROL_BACKEND_ID,
+  humanControlBackendModuleRow,
+} from "./humanControlRow.ts";
+import {
   PROVIDERS_BACKEND_ENTRY,
   PROVIDERS_BACKEND_ID,
   providersBackendModuleRow,
@@ -19,6 +24,7 @@ export { BACKEND_COMPOSITION_ID };
 export const BACKEND_ENTRY_ALLOWLIST: readonly string[] = Object.freeze([
   AGENT_AWARENESS_BACKEND_ENTRY,
   PROVIDERS_BACKEND_ENTRY,
+  HUMAN_CONTROL_BACKEND_ENTRY,
 ]);
 
 /**
@@ -28,7 +34,11 @@ export const BACKEND_ENTRY_ALLOWLIST: readonly string[] = Object.freeze([
 export function backendManifest(options: { readonly composition?: string } = {}) {
   return {
     schema: 1,
-    modules: [agentAwarenessBackendModuleRow(), providersBackendModuleRow()],
+    modules: [
+      agentAwarenessBackendModuleRow(),
+      providersBackendModuleRow(),
+      humanControlBackendModuleRow(),
+    ],
     compositions: [
       {
         id: options.composition ?? BACKEND_COMPOSITION_ID,
@@ -38,7 +48,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
             "The composition T3's server runs as the Aetheria Backend host. Its digest is published beside the server version and compared with the expected Backend digest of the same pinned build.",
           order: 2,
         },
-        modules: [AGENT_AWARENESS_BACKEND_ID, PROVIDERS_BACKEND_ID],
+        modules: [AGENT_AWARENESS_BACKEND_ID, PROVIDERS_BACKEND_ID, HUMAN_CONTROL_BACKEND_ID],
       },
     ],
   };
