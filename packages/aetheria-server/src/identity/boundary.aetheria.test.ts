@@ -29,6 +29,7 @@ describe("the identity module", () => {
       "feed.ts",
       "lifecycle.ts",
       "resolver.ts",
+      "resume.ts",
       "threadIndex.ts",
     ]);
   });

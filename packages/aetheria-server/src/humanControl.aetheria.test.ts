@@ -73,6 +73,10 @@ const makeFake = (options: FakeOptions = {}) => {
       note("answer", who, args);
       return { ok: true, value: record({ state: "answered" }) as never };
     },
+    reconcileWaits: async (sessionId) => {
+      note("reconcileWaits", sessionId);
+      return { ok: true, value: { continued: [] } };
+    },
     redeliver: async (sessionId) => {
       note("redeliver", sessionId);
       return { ok: true, value: { delivered: 0, failed: 0, pending: 0 } };

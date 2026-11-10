@@ -18,8 +18,11 @@ import * as Option from "effect/Option";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 
-/** Errors T3 raises before `commitCommand` (ThreadMessageIntake's own "not accepted" set); a failure outside it may follow a commit. */
-const NOT_ACCEPTED_TAGS: ReadonlySet<string> = new Set([
+/**
+ * Errors T3 raises before `commitCommand` (ThreadMessageIntake's own "not accepted" set); a failure outside it may follow a commit. A COPY, because the
+ * intake's function is not exported and the fork does not edit it: `humanControlDeliveryTags.aetheria.test.ts` fails when the two lists differ.
+ */
+export const NOT_ACCEPTED_TAGS: ReadonlySet<string> = new Set([
   "OrchestratorCommandRejectedError",
   "OrchestratorThreadAlreadyExistsError",
   "OrchestratorProjectionError",

@@ -23,6 +23,14 @@ export interface IdentityFeedOptions {
   readonly tracker: Pick<LifecycleTracker, "record">;
   /** T3's current MCP credential id for the thread (the id its bearer proves), or undefined when T3 holds none. */
   readonly credentialOf: (threadId: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * A thread attached to a provider session that is neither stopped nor failed (T3's `provider-session.attached`): the resume signal M06 reads.
+   * Called after the event's own mapping; it must not throw and is not awaited, so a slow consumer never holds the feed.
+   */
+  readonly onThreadAttached?: (event: {
+    readonly threadId: string;
+    readonly sequence: number;
+  }) => void;
 }
 
 export interface IdentityFeed {
@@ -161,8 +169,24 @@ export function createIdentityFeed(options: IdentityFeedOptions): IdentityFeed {
         const threadId = str(event.threadId);
         const payload = record(event.payload);
         switch (type) {
+          case "provider-session.attached": {
+            const outcomes = payload === undefined ? [] : await onSession(threadId, payload);
+            const status = str(payload?.status);
+            if (
+              threadId !== undefined &&
+              typeof stored.sequence === "number" &&
+              status !== "stopped" &&
+              status !== "error"
+            ) {
+              try {
+                options.onThreadAttached?.({ threadId, sequence: stored.sequence });
+              } catch {
+                /* a consumer's fault is not the feed's */
+              }
+            }
+            return outcomes;
+          }
           case "provider-session.updated":
-          case "provider-session.attached":
             return payload === undefined ? [] : await onSession(threadId, payload);
           case "provider-thread.updated":
             return payload === undefined ? [] : await onThread(threadId, payload);

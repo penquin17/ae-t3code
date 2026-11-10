@@ -86,6 +86,18 @@ export interface HumanControlService {
     who: ClientIdentity,
     args: Pick<InteractionsAnswerPayload, "interactionId" | "revision" | "answers">,
   ): Promise<InteractionActionResult>;
+  /** Ends each pending wait no live segment holds (`process-exit` for a session; `backend-restart` for none). Never re-asks. */
+  reconcileWaits(sessionId?: string): Promise<
+    | {
+        readonly ok: true;
+        // `unreconciled` is the archive's planned report of interactions it could not reconcile; absent until the archive carries it.
+        readonly value: {
+          readonly continued: readonly string[];
+          readonly unreconciled?: readonly string[];
+        };
+      }
+    | { readonly ok: false; readonly code: string; readonly detail?: string }
+  >;
   redeliver(sessionId?: string): Promise<
     | {
         readonly ok: true;

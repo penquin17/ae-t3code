@@ -20,6 +20,7 @@ import {
 } from "@t3tools/aetheria-server";
 import { ThreadId } from "@t3tools/contracts";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
+import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -31,6 +32,7 @@ import * as ServerConfig from "../config.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { layerFromBackend } from "./backendComposition.ts";
 import { makeThreadTurnDispatch } from "./humanControlDelivery.ts";
 
@@ -60,21 +62,29 @@ export const makeLayer = (
       const sink = yield* EventSink.EventSinkV2;
       const mcpSessions = yield* McpProviderSessions;
       const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
-      // M06 step 6: T3's own message dispatch and receipt store, adapted with the captured runtime like `credentialOf`. The production `layer`
-      // requires both (server.ts, IP-23); a bare layer without them runs with late-answer delivery off, which the interaction core keeps pending.
+      // M06 steps 6 and 13: T3's own message dispatch and receipt store, adapted with the captured runtime like `credentialOf`. This layer exists only
+      // when AETHERIA_STATE_ROOT is set, and then late-answer delivery is part of the Backend: a graph that lacks either service (server.ts IP-23
+      // dropped or merged away) fails here, at start, instead of silently leaving answered questions undelivered. Bare T3 never builds this layer.
       const threads = yield* Effect.serviceOption(ThreadManagementService.ThreadManagementService);
       const receipts = yield* Effect.serviceOption(CommandReceiptStore.CommandReceiptStoreV2);
-      const turnDispatch =
-        Option.isSome(threads) && Option.isSome(receipts)
-          ? yield* makeThreadTurnDispatch(threads.value, receipts.value)
-          : undefined;
-      if (turnDispatch === undefined)
-        yield* Effect.logWarning(
-          "Aetheria late-answer delivery is off: T3's thread dispatch or command receipts are not available",
+      if (Option.isNone(threads) || Option.isNone(receipts))
+        return yield* Effect.die(
+          new Error(
+            `The Aetheria Backend needs T3's ${[
+              Option.isNone(threads) ? "ThreadManagementService" : undefined,
+              Option.isNone(receipts) ? "CommandReceiptStoreV2" : undefined,
+            ]
+              .filter((name) => name !== undefined)
+              .join(
+                " and ",
+              )} to deliver late answers (server.ts, integration point IP-23); this server graph does not provide it`,
+          ),
         );
+      const turnDispatch = yield* makeThreadTurnDispatch(threads.value, receipts.value);
+      const startup = yield* Effect.serviceOption(ServerRuntimeStartup.ServerRuntimeStartup);
       const made = createAetheriaBackendService({
         stateRoot,
-        ...(turnDispatch === undefined ? {} : { turnDispatch }),
+        turnDispatch,
         ...(options.interactionFactory === undefined
           ? {}
           : { interactionFactory: options.interactionFactory }),
@@ -160,11 +170,23 @@ export const makeLayer = (
         }),
         Effect.forkScoped,
       );
-      // M06: answers that were recorded but not yet delivered are retried once T3's dispatch exists (the core's `start` never dispatches). The
-      // core reads T3's receipt first, so an answer that already landed is only journalled as delivered, never sent twice.
-      yield* Effect.promise(async () => {
-        await service.interactions()?.redeliver();
-      }).pipe(Effect.ignore, Effect.forkScoped);
+      // M06: answers that were recorded but not yet delivered are retried once T3's runtime accepts commands (the core's `start` never dispatches).
+      // The core reads T3's receipt first, so an answer that already landed is only journalled as delivered, never sent twice. A runtime that never
+      // becomes ready skips this retry (logged); the next session resume retries (the feed's resume signal, in the Backend service). Without the
+      // startup service (a bare layer) there is nothing to wait for.
+      yield* (Option.isSome(startup) ? startup.value.awaitCommandReady : Effect.void).pipe(
+        Effect.flatMap(() =>
+          Effect.promise(async () => {
+            await service.interactions()?.redeliver();
+          }),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Aetheria skipped the startup retry of undelivered answers", {
+            cause: Cause.pretty(cause),
+          }),
+        ),
+        Effect.forkScoped,
+      );
       return service;
     }),
   );
@@ -207,8 +229,8 @@ export const layer = whenStateRoot((stateRoot) =>
       if (Option.isNone(config))
         yield* Effect.logWarning("Aetheria snapshots are off: the server config is not available");
       const piAgentDir = yield* Config.String(PI_AGENT_DIR_ENV).pipe(Config.option);
-      // M06 step 6: T3's thread dispatch comes from the runtime services and the command receipt store from server.ts (IP-23); makeLayer reads both
-      // as optional so the existing bare-layer tests still build, and logs a warning when late-answer delivery is therefore off.
+      // M06 steps 6 and 13: T3's thread dispatch comes from the runtime services and the command receipt store from server.ts (IP-23); makeLayer
+      // requires both and fails the Backend start without them.
       return makeLayer(stateRoot, {
         ...(Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {}),
         ...(Option.isSome(piAgentDir) ? { piAgentDir: piAgentDir.value } : {}),

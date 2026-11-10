@@ -26,6 +26,7 @@ import {
 import { createPiSelectionSeam, type PiSelectionSeam } from "./routeSeam.ts";
 import { createSnapshotRetention } from "./snapshotRetention.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
+import { createResumeSignal } from "./identity/resume.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
 import { createLifecycleTracker, type LifecycleTracker } from "./identity/lifecycle.ts";
 import {
@@ -151,7 +152,6 @@ export function createAetheriaBackendService(
     reader: createIdentityReader({ stateRoot: options.stateRoot }),
     index,
   });
-  const feed = createIdentityFeed({ index, tracker, credentialOf: options.credentialOf });
 
   const config = parseAwarenessConfig(options.awareness);
   if (!config.ok)
@@ -222,6 +222,27 @@ export function createAetheriaBackendService(
                 index.bindingOfSession(target.sessionId) !== undefined &&
                 index.bindingOfSession(target.rootSessionId) !== undefined,
             }),
+  });
+  // M06 step 13: T3 attaching a bound thread to a provider session after the replay is a resume; the interaction service ends the waits no segment
+  // holds and retries undelivered late answers for that Pi session. The horizon is the one the board uses; the signal never fires before it is known.
+  let replayHorizon: number | undefined;
+  const resume = createResumeSignal({
+    sessionOf: (threadId) => {
+      const found = index.lookup(threadId);
+      return found.status === "ok" && index.bindingOfSession(found.binding.sessionId) !== undefined
+        ? found.binding.sessionId
+        : undefined;
+    },
+    target: () => humanControlRegistration.interactions(),
+    horizon: () => replayHorizon,
+  });
+  const feed = createIdentityFeed({
+    index,
+    tracker,
+    credentialOf: options.credentialOf,
+    onThreadAttached: (event) => {
+      void resume.attached(event);
+    },
   });
   const prepared = prepareAetheriaBackend({
     composition,
@@ -323,7 +344,10 @@ export function createAetheriaBackendService(
       }
     },
     noteFeed: (reason) => liveness.noteGap(reason),
-    setReplayHorizon: (sequence) => board.setReplayHorizon(sequence),
+    setReplayHorizon: (sequence) => {
+      replayHorizon = sequence;
+      board.setReplayHorizon(sequence);
+    },
     board,
     liveness,
     index,

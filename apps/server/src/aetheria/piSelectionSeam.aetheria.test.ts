@@ -17,7 +17,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
+import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as Live from "./aetheriaBackend.ts";
 
 const slot = (): any => (globalThis as Record<symbol, unknown>)[PI_SELECTION_SEAM_SLOT];
@@ -34,6 +36,9 @@ const doubles = Layer.mergeAll(
     stream: () => Stream.never,
   }),
   Layer.mock(McpProviderSessions)({ read: () => Effect.sync(() => undefined) }),
+  // M06 step 13: the Backend layer needs T3's delivery services (server.ts IP-23).
+  Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+  Layer.mock(CommandReceiptStore.CommandReceiptStoreV2)({}),
 );
 
 describe("the Backend layer and the Pi selection slot", () => {

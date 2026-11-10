@@ -7,6 +7,7 @@
 // the stream binds the index from `provider-thread.updated` with the CREDENTIAL id (not T3's runtime provider-session id); the composition
 // service carries the same digest the Backend validated; scope close drains once with a clean XC-7 report; with no `AETHERIA_STATE_ROOT`
 // nothing is registered (bare T3 unchanged). It does not show T3's real event emission or the full server graph; the native run does.
+/* oxlint-disable t3code/no-real-time-wait-in-tests -- Two step-13 cases assert that a forked startup retry has NOT run before T3 is command-ready (or ever, when readiness fails); an absence has no milestone to await, so those cases let 60 real ms pass before the check. */
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -21,7 +22,10 @@ import * as Stream from "effect/Stream";
 import type { AetheriaBackendService } from "@t3tools/aetheria-server";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
 
+import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { AetheriaBackendComposition } from "./backendComposition.ts";
 import * as Live from "./aetheriaBackend.ts";
 
@@ -84,7 +88,7 @@ const layerSink = (list: ReadonlyArray<unknown>) =>
     latestSequence: () => Effect.succeed(0),
     stream: () => Stream.fromIterable(list as never[]).pipe(Stream.concat(Stream.never)),
   });
-const layerCredentials = (credential: string | undefined) =>
+const layerMcpCredentials = (credential: string | undefined) =>
   Layer.mock(McpProviderSessions)({
     read: (threadId: string) =>
       Effect.succeed(
@@ -92,6 +96,34 @@ const layerCredentials = (credential: string | undefined) =>
           ? ({ providerSessionId: credential } as never)
           : undefined,
       ),
+  });
+/** T3's two delivery services, as server.ts provides them (IP-23); the Backend layer refuses to build without them. */
+const layerDeliveryServices = Layer.mergeAll(
+  Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+  Layer.mock(CommandReceiptStore.CommandReceiptStoreV2)({}),
+);
+const layerCredentials = (credential: string | undefined) =>
+  Layer.mergeAll(layerMcpCredentials(credential), layerDeliveryServices);
+
+/** A service whose only observed behaviour is how often `redeliver` ran (the Backend's startup retry of undelivered answers). */
+const recordingFactory = () => {
+  const redelivered: Array<string | undefined> = [];
+  const factory = (() =>
+    ({
+      start: async () => ({ ok: true, value: { continued: [] } }),
+      redeliver: async (sessionId?: string) => {
+        redelivered.push(sessionId);
+        return { ok: true, value: { delivered: 0, failed: 0, pending: 0 } };
+      },
+      onChange: () => () => {},
+      drain: async () => ({ released: [], stopped: [], transferred: [], stillLive: [] }),
+    }) as never) as never;
+  return { redelivered, factory };
+};
+const layerStartup = (ready: Effect.Effect<void, never>) =>
+  Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({
+    awaitCommandReady: ready as never,
+    markHttpListening: Effect.void,
   });
 
 const makeAgentDir = () => {
@@ -398,5 +430,126 @@ describe("registration is gated on AETHERIA_STATE_ROOT", () => {
       );
       expect(outcome.composition.digest).toEqual(outcome.service.digest());
     }),
+  );
+});
+
+describe("late-answer delivery is part of the Backend when AETHERIA_STATE_ROOT is set (M06 step 13, IP-23)", () => {
+  const withEnv = (env: Record<string, string>) =>
+    ConfigProvider.layer(ConfigProvider.fromEnv({ env }));
+  const mcpOnly = layerMcpCredentials(undefined);
+
+  it.live("fails the layer, loudly and naming IP-23, when T3's delivery services are missing", () =>
+    Effect.gen(function* () {
+      for (const missing of [
+        mcpOnly,
+        Layer.mergeAll(mcpOnly, Layer.mock(ThreadManagementService.ThreadManagementService)({})),
+        Layer.mergeAll(mcpOnly, Layer.mock(CommandReceiptStore.CommandReceiptStoreV2)({})),
+      ]) {
+        const exit = yield* Effect.exit(
+          Layer.build(
+            Live.makeLayer(makeRoot(false)).pipe(
+              Layer.provide(Layer.mergeAll(layerSink([]), missing)),
+            ),
+          ).pipe(Effect.scoped),
+        );
+        expect(exit._tag).toBe("Failure");
+        if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toContain("IP-23");
+      }
+    }),
+  );
+
+  it.live("fails the registered production layer the same way when the state root is set", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        Layer.build(
+          Live.layer.pipe(
+            Layer.provide(Layer.mergeAll(layerSink([]), mcpOnly)),
+            Layer.provide(withEnv({ AETHERIA_STATE_ROOT: makeRoot(false) })),
+          ),
+        ).pipe(Effect.scoped),
+      );
+      expect(exit._tag).toBe("Failure");
+    }),
+  );
+
+  it.live(
+    "leaves a bare T3 unchanged: no state root, no delivery services, nothing registered or required",
+    () =>
+      Effect.gen(function* () {
+        const context = yield* Layer.build(
+          Layer.mergeAll(Live.layer, Live.compositionLayer).pipe(
+            Layer.provide(Layer.mergeAll(layerSink([]), mcpOnly)),
+            Layer.provide(withEnv({})),
+          ),
+        ).pipe(Effect.scoped);
+        expect(Context.getOption(context, Live.AetheriaBackend)._tag).toBe("None");
+      }),
+  );
+
+  it.live("retries undelivered answers once T3's runtime is command-ready, not before", () =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const { redelivered, factory } = recordingFactory();
+      yield* Effect.scoped(
+        Layer.build(
+          Live.makeLayer(makeRoot(false), { interactionFactory: factory }).pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                layerSink([]),
+                layerCredentials(undefined),
+                layerStartup(Deferred.await(ready)),
+              ),
+            ),
+          ),
+        ).pipe(
+          Effect.flatMap(() =>
+            Effect.gen(function* () {
+              yield* Effect.sleep("60 millis");
+              expect(redelivered).toEqual([]);
+              yield* Deferred.succeed(ready, undefined);
+              yield* waitFor(() => redelivered.length === 1);
+              expect(redelivered).toEqual([undefined]);
+            }),
+          ),
+        ),
+      );
+    }),
+  );
+
+  it.live(
+    "skips the retry, and still starts, when the runtime never becomes ready; a bare layer retries at once",
+    () =>
+      Effect.gen(function* () {
+        const failing = recordingFactory();
+        yield* Effect.scoped(
+          Layer.build(
+            Live.makeLayer(makeRoot(false), { interactionFactory: failing.factory }).pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  layerSink([]),
+                  layerCredentials(undefined),
+                  layerStartup(Effect.die(new Error("runtime failed before command readiness"))),
+                ),
+              ),
+            ),
+          ).pipe(
+            Effect.flatMap((context) =>
+              Effect.gen(function* () {
+                yield* Effect.sleep("60 millis");
+                expect(Context.get(context, Live.AetheriaBackend).status().phase).toBe("running");
+                expect(failing.redelivered).toEqual([]);
+              }),
+            ),
+          ),
+        );
+        const bare = recordingFactory();
+        yield* Effect.scoped(
+          Layer.build(
+            Live.makeLayer(makeRoot(false), { interactionFactory: bare.factory }).pipe(
+              Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials(undefined))),
+            ),
+          ).pipe(Effect.flatMap(() => waitFor(() => bare.redelivered.length === 1))),
+        );
+      }),
   );
 });
