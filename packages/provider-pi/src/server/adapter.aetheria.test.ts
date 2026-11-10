@@ -78,6 +78,7 @@ const makeScriptedPi = Effect.gen(function* () {
     model: "base",
     thinking: "medium",
     sessionFile: FAKE_SESSION_FILE,
+    messageCount: 0,
   };
   let buffer = "";
   let failNextState = false;
@@ -108,7 +109,7 @@ const makeScriptedPi = Effect.gen(function* () {
             isCompacting: false,
             sessionFile: state.sessionFile,
             sessionId: "aetheria-session",
-            messageCount: 0,
+            messageCount: state.messageCount,
             pendingMessageCount: 0,
           },
         };
@@ -186,6 +187,10 @@ const makeScriptedPi = Effect.gen(function* () {
     /** Pi leaves the session file the adapter registered, as an in-session command of another extension could. */
     moveTo: (file: string) => {
       state.sessionFile = file;
+    },
+    /** Pi holds a conversation in memory, as after any turn that wrote a message. */
+    holdMessages: (count: number) => {
+      state.messageCount = count;
     },
     /** The next get_state answers with an error, once. */
     failNextState: () => {
@@ -540,7 +545,33 @@ describe("T3's Pi session replay (IP-18)", () => {
     existingProviderThread,
   });
 
-  it.effect("does not send switch_session when Pi is already on the thread's session file", () =>
+  it.effect("sends switch_session when Pi is on the file and holds a conversation", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeScriptedPi;
+      const { runtime, providerThread } = yield* openRuntime(fake);
+      fake.holdMessages(3);
+      const again = yield* runtime.ensureThread(resumeInput(providerThread));
+      assert.deepEqual(fake.switchTargets(), [FAKE_SESSION_FILE]);
+      assert.equal(again.nativeThreadRef?.nativeId, FAKE_SESSION_FILE);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("sends switch_session with no extra get_state once a prompt went to the file", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeScriptedPi;
+      const { runtime, providerThread, takeTerminal } = yield* openRuntime(fake);
+      yield* startTurn(runtime, providerThread, selection("default"));
+      yield* fake.nextPrompt;
+      yield* fake.settleTurn;
+      yield* takeTerminal;
+      const before = fake.commandTypes().length;
+      yield* runtime.ensureThread(resumeInput(providerThread));
+      assert.deepEqual(fake.switchTargets(), [FAKE_SESSION_FILE]);
+      assert.equal(fake.commandTypes()[before], "switch_session");
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("does not send switch_session when Pi is on the file and holds no messages", () =>
     Effect.gen(function* () {
       const fake = yield* makeScriptedPi;
       const { runtime, providerThread } = yield* openRuntime(fake);

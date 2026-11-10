@@ -590,6 +590,8 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       let threadState: PiThreadState | null = null;
       let registrationAttempted = false;
       let lastNativeThreadId: string | null = null;
+      // AETHERIA-IP:IP-18 true while the registered session has had no messages and no prompt sent.
+      let sessionUnwritten = false;
       let stopRequested = false;
       let unsolicitedActivityDetected = false;
       let pendingWake: PiWake | null = null;
@@ -637,6 +639,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       let rejectedHeldCount = 0;
 
       const sendPrompt = Effect.fnUntraced(function* (prompt: PiPromptSend) {
+        sessionUnwritten = false;
         if (nativeCompacting) {
           heldPrompts.push(prompt);
           return;
@@ -2334,13 +2337,16 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         const needsNewSession = resumeId == null && registrationAttempted;
         registrationAttempted = true;
         // AETHERIA-IP:IP-18 Pi gives a session file it never wrote a new session id, which loses the
-        // thread's identity: skip switch_session when Pi reports it is already on the file.
+        // thread's identity: skip switch_session only while no prompt went to the file and Pi reports
+        // it on the file with no messages. After any turn or rollback it reloads as upstream.
         let alreadyOnSession = false;
-        if (resumeId != null && resumeId === lastNativeThreadId) {
+        if (resumeId != null && resumeId === lastNativeThreadId && sessionUnwritten) {
           const current = yield* request({ type: "get_state" }).pipe(
             Effect.orElseSucceed(() => undefined),
           );
-          alreadyOnSession = recordString(current, "sessionFile") === resumeId;
+          alreadyOnSession =
+            recordString(current, "sessionFile") === resumeId &&
+            recordField(current, "messageCount") === 0;
         }
         if ((resumeId != null || needsNewSession) && !alreadyOnSession) {
           lastNativeThreadId = resumeId ?? lastNativeThreadId;
@@ -2394,6 +2400,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           return yield* protocolError("Pi did not create a distinct session file");
         }
         lastNativeThreadId = nativeId;
+        sessionUnwritten = recordField(stateData, "messageCount") === 0;
         const createdAt = yield* DateTime.now;
         const providerThread: OrchestrationV2ProviderThread =
           existing !== undefined
@@ -3107,6 +3114,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                           "Pi rollback ownership changed during its fork",
                         );
                       lastNativeThreadId = forkSessionFile;
+                      sessionUnwritten = false;
                       appliedModel = null;
                       appliedThinking = null;
                       appliedSessionName = null;
