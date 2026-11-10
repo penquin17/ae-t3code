@@ -2333,7 +2333,16 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         const resumeId = existing?.nativeThreadRef?.nativeId;
         const needsNewSession = resumeId == null && registrationAttempted;
         registrationAttempted = true;
-        if (resumeId != null || needsNewSession) {
+        // AETHERIA-IP:IP-18 Pi gives a session file it never wrote a new session id, which loses the
+        // thread's identity: skip switch_session when Pi reports it is already on the file.
+        let alreadyOnSession = false;
+        if (resumeId != null && resumeId === lastNativeThreadId) {
+          const current = yield* request({ type: "get_state" }).pipe(
+            Effect.orElseSucceed(() => undefined),
+          );
+          alreadyOnSession = recordString(current, "sessionFile") === resumeId;
+        }
+        if ((resumeId != null || needsNewSession) && !alreadyOnSession) {
           lastNativeThreadId = resumeId ?? lastNativeThreadId;
           // Failed lifecycle operations can still change native sessions; invalidate bindings and defaults.
           threadState = null;

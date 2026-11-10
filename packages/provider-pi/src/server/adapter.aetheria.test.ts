@@ -1,6 +1,7 @@
-// AETHERIA M09 step 11 (IP-17): the real adapter's startTurn over a scripted Pi that records every RPC command and
-// captures the model and effort in force when the prompt arrives. The policy is a recording stub; the scripted Pi never
-// clamps. Not shown: a real Pi or provider, or the real policy (aetheria-server and apps/server tests).
+// AETHERIA M09 step 11 (IP-17) and the fix round (IP-18): the real adapter over a scripted Pi that records every RPC
+// command and captures the model and effort in force when the prompt arrives. The policy is a recording stub; the
+// scripted Pi never clamps and keeps only a session file name. Not shown: a real Pi, provider or session file, or the real
+// policy (aetheria-server and apps/server tests).
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -72,8 +73,14 @@ const makeScriptedPi = Effect.gen(function* () {
   const commands: Array<PiRpcRecord> = [];
   const providerRequests: Array<ProviderRequest> = [];
   const prompts = yield* Queue.unbounded<ProviderRequest>();
-  const state = { provider: "xai", model: "base", thinking: "medium" };
+  const state = {
+    provider: "xai",
+    model: "base",
+    thinking: "medium",
+    sessionFile: FAKE_SESSION_FILE,
+  };
   let buffer = "";
+  let failNextState = false;
 
   const emit = (record: PiRpcRecord) =>
     Queue.offer(stdout, new TextEncoder().encode(`${encodeJsonLine(record)}\n`));
@@ -88,6 +95,10 @@ const makeScriptedPi = Effect.gen(function* () {
     };
     switch (record["type"]) {
       case "get_state":
+        if (failNextState) {
+          failNextState = false;
+          return { ...base, success: false, error: "state unavailable" };
+        }
         return {
           ...base,
           data: {
@@ -95,7 +106,7 @@ const makeScriptedPi = Effect.gen(function* () {
             thinkingLevel: state.thinking,
             isStreaming: false,
             isCompacting: false,
-            sessionFile: FAKE_SESSION_FILE,
+            sessionFile: state.sessionFile,
             sessionId: "aetheria-session",
             messageCount: 0,
             pendingMessageCount: 0,
@@ -108,6 +119,9 @@ const makeScriptedPi = Effect.gen(function* () {
       case "set_thinking_level":
         state.thinking = String(record["level"]);
         return base;
+      case "switch_session":
+        state.sessionFile = String(record["sessionPath"]);
+        return { ...base, data: { cancelled: false } };
       case "get_entries":
         return { ...base, data: { entries: [], leafId: null } };
       case "get_available_models":
@@ -169,6 +183,18 @@ const makeScriptedPi = Effect.gen(function* () {
     /** Waits for the next prompt command; the adapter sends it after startTurn returns. */
     nextPrompt: Queue.take(prompts),
     settleTurn,
+    /** Pi leaves the session file the adapter registered, as an in-session command of another extension could. */
+    moveTo: (file: string) => {
+      state.sessionFile = file;
+    },
+    /** The next get_state answers with an error, once. */
+    failNextState: () => {
+      failNextState = true;
+    },
+    /** Every command type in the order sent, without ids. */
+    commandTypes: () => commands.map((c) => String(c["type"])),
+    switchTargets: () =>
+      commands.filter((c) => c["type"] === "switch_session").map((c) => String(c["sessionPath"])),
     /** The model and effort commands, in the order sent, without ids. */
     selectionCommands: () =>
       commands
@@ -503,5 +529,64 @@ describe("T3's Pi selection seam (IP-17)", () => {
         assert.deepEqual(fake.selectionCommands(), []);
       }).pipe(Effect.scoped, Effect.provide(layerTest)),
     ),
+  );
+});
+
+describe("T3's Pi session replay (IP-18)", () => {
+  const resumeInput = (existingProviderThread: OrchestrationV2ProviderThread) => ({
+    threadId: THREAD_ID,
+    modelSelection: selection("default"),
+    runtimePolicy,
+    existingProviderThread,
+  });
+
+  it.effect("does not send switch_session when Pi is already on the thread's session file", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeScriptedPi;
+      const { runtime, providerThread } = yield* openRuntime(fake);
+      const again = yield* runtime.ensureThread(resumeInput(providerThread));
+      assert.deepEqual(fake.switchTargets(), []);
+      assert.equal(again.nativeThreadRef?.nativeId, FAKE_SESSION_FILE);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("sends switch_session when Pi has left that session file", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeScriptedPi;
+      const { runtime, providerThread } = yield* openRuntime(fake);
+      fake.moveTo("/fake/.pi/agent/sessions/--workspace--/0002_elsewhere.jsonl");
+      const again = yield* runtime.ensureThread(resumeInput(providerThread));
+      assert.deepEqual(fake.switchTargets(), [FAKE_SESSION_FILE]);
+      assert.equal(again.nativeThreadRef?.nativeId, FAKE_SESSION_FILE);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("sends switch_session as upstream does when Pi cannot say which file it is on", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeScriptedPi;
+      const { runtime, providerThread } = yield* openRuntime(fake);
+      fake.failNextState();
+      yield* runtime.ensureThread(resumeInput(providerThread));
+      assert.deepEqual(fake.switchTargets(), [FAKE_SESSION_FILE]);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect(
+    "sends switch_session first, with no extra get_state, for a thread this process was never on",
+    () =>
+      Effect.gen(function* () {
+        const fake = yield* makeScriptedPi;
+        const { runtime, providerThread } = yield* openRuntime(fake);
+        const older = "/fake/.pi/agent/sessions/--workspace--/0000_older.jsonl";
+        const before = fake.commandTypes().length;
+        yield* runtime.ensureThread(
+          resumeInput({
+            ...providerThread,
+            nativeThreadRef: { ...providerThread.nativeThreadRef!, nativeId: older },
+          }),
+        );
+        assert.deepEqual(fake.switchTargets(), [older]);
+        assert.equal(fake.commandTypes()[before], "switch_session");
+      }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 });

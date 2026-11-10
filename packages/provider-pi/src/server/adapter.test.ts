@@ -1634,7 +1634,13 @@ describe("PiAdapterV2", () => {
         runtimePolicy,
       });
       fake.vetoNextSwitch();
-      yield* runtime.resumeThread({ providerThread }).pipe(Effect.flip);
+      // AETHERIA-IP:IP-19 Pi is already on the registered file, which the adapter no longer replays;
+      // resume a thread on another file so the failed switch is still exercised.
+      const elsewhere = {
+        ...providerThread,
+        nativeThreadRef: { ...providerThread.nativeThreadRef!, nativeId: "/fake/elsewhere.jsonl" },
+      };
+      yield* runtime.resumeThread({ providerThread: elsewhere }).pipe(Effect.flip);
       const replacement = yield* runtime.ensureThread({
         threadId: THREAD_ID,
         modelSelection: modelSelection("default"),
@@ -1696,7 +1702,14 @@ describe("PiAdapterV2", () => {
         runtimePolicy,
       });
       fake.deferNextLifecycle("switch_session");
-      const resumed = yield* runtime.resumeThread({ providerThread }).pipe(Effect.forkChild);
+      // AETHERIA-IP:IP-19 Resume a thread on another file: Pi is already on the registered one.
+      const elsewhere = {
+        ...providerThread,
+        nativeThreadRef: { ...providerThread.nativeThreadRef!, nativeId: "/fake/elsewhere.jsonl" },
+      };
+      const resumed = yield* runtime
+        .resumeThread({ providerThread: elsewhere })
+        .pipe(Effect.forkChild);
       yield* fake.takeRequest("switch_session");
       yield* Fiber.interrupt(resumed);
       yield* takeEvent(
