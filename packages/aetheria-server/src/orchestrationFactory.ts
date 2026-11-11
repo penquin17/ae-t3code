@@ -67,6 +67,8 @@ export interface OrchestrationFactoryOptions {
   readonly newAttemptId?: (() => string) | undefined;
   /** Test seam: the Pi session id of a new child. Default: a random UUID, a shape Pi's `--session-id` and M03's store both accept. */
   readonly newSessionId?: (() => string) | undefined;
+  /** Test seam: the id of each message a control operation sends. Default: random. */
+  readonly newMessageId?: (() => string) | undefined;
 }
 
 const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
@@ -81,9 +83,6 @@ const message = (error: unknown): string =>
 /** Operations whose service logic is not built in this slice. They answer unavailable; the module maps that onto the XC-6 `unavailable` reply. */
 const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOperation>([
   "children.fork",
-  "children.message",
-  "children.list",
-  "children.interrupt",
   "children.close",
   "children.await-report",
   "children.cancel",
@@ -117,6 +116,7 @@ export function createOrchestrationFactory(
 
     const newAttemptId = options.newAttemptId ?? (() => `attempt-${NodeCrypto.randomUUID()}`);
     const newSessionId = options.newSessionId ?? (() => NodeCrypto.randomUUID());
+    const newMessageId = options.newMessageId ?? (() => `m05-message-${NodeCrypto.randomUUID()}`);
 
     const watchRoot = (state: Running, rootThreadId: string): void => {
       if (state.watchers.has(rootThreadId)) return;
@@ -177,6 +177,10 @@ export function createOrchestrationFactory(
         availability: null,
         newAttemptId,
         newSessionId,
+        sessionOfThread: deps.sessionOfThread,
+        threadOfSession: deps.threadOfSession,
+        lineage: deps.lineage,
+        newMessageId,
       });
       state = { store, identity, children, watchers };
       try {
@@ -242,36 +246,42 @@ export function createOrchestrationFactory(
       return result as OrchestrationOutcome;
     };
 
-    /** XC-10: is this Pi session a child of the caller's root, and what is it doing. Owned is false only when the evidence says so; otherwise unknown. */
-    const status = async (
+    /**
+     * The control operations (step 10) run in the archive's service, decided from M03's records and T3's lineage and status. The caller is the carrier's session and root
+     * and nothing else; the arguments were decoded strictly by the module and name neither.
+     */
+    const control = async (
       state: Running,
+      operation: "children.message" | "children.list" | "children.interrupt" | "children.status",
       who: OrchestrationCaller,
       args: unknown,
     ): Promise<OrchestrationOutcome> => {
-      const childSessionId = (args as { childSessionId?: unknown }).childSessionId;
-      if (!text(childSessionId)) return unavailable("no child session was named");
-      const done = (owned: boolean | "unknown", childState: string): OrchestrationOutcome => ({
-        ok: true,
-        value: { owned, state: childState },
-      });
-      const read = state.identity.read(childSessionId);
-      if (read.state === "absent") return done(false, "unknown");
-      if (read.state === "retired") return done(false, "closed");
-      if (read.state !== "active") return done("unknown", "unknown");
-      const record = read.record as { kind?: unknown; rootSessionId?: unknown } | undefined;
-      if (record?.kind !== "child" || !text(record.rootSessionId)) return done(false, "unknown");
-      if (record.rootSessionId !== who.rootSessionId) return done(false, "unknown");
-      const threadId = deps.threadOfSession(childSessionId);
-      if (threadId === undefined) return done(true, "unknown");
-      const route = state.store.readChild(threadId);
-      if (route.status === "ok" && route.record.closed) return done(true, "closed");
-      if (route.status !== "ok") return done(true, "unknown");
-      try {
-        const answer = await deps.threads.status({ threadId });
-        if (!answer.ok) return done(true, "unknown");
-        return done(true, answer.status.activity);
-      } catch {
-        return done(true, "unknown");
+      const caller = { sessionId: who.sessionId, rootSessionId: who.rootSessionId };
+      switch (operation) {
+        case "children.message":
+          return (await state.children.messageChild({
+            caller,
+            args: args as { target: string; content: string },
+          })) as OrchestrationOutcome;
+        case "children.list":
+          return (await state.children.listChildren({
+            caller,
+            args: args as { scope: "children" | "descendants" },
+          })) as OrchestrationOutcome;
+        case "children.interrupt":
+          return (await state.children.interruptChild({
+            caller,
+            args: args as { target: string },
+          })) as OrchestrationOutcome;
+        case "children.status": {
+          // XC-10: asked about a child's Pi session id; the root is the carrier's.
+          const childSessionId = (args as { childSessionId?: unknown }).childSessionId;
+          if (!text(childSessionId)) return unavailable("no child session was named");
+          return (await state.children.childStatus({
+            rootSessionId: who.rootSessionId,
+            childSessionId,
+          })) as OrchestrationOutcome;
+        }
       }
     };
 
@@ -280,14 +290,14 @@ export function createOrchestrationFactory(
       if (draining || state === undefined)
         return Promise.resolve(unavailable("the orchestration service is not running"));
       if (NOT_BUILT.has(operation))
-        return Promise.resolve(unavailable(`${operation} is not built yet (Plan steps 10 to 20)`));
+        return Promise.resolve(unavailable(`${operation} is not built yet (Plan steps 11 to 20)`));
       attempts += 1;
       const ticket = attempts;
       const work = (async (): Promise<OrchestrationOutcome> => {
         try {
           return operation === "children.spawn"
             ? await spawn(state, who, args, handleOptions?.signal)
-            : await status(state, who, args);
+            : await control(state, operation as Parameters<typeof control>[1], who, args);
         } catch (error) {
           return unavailable(`${operation} failed: ${message(error)}`);
         }

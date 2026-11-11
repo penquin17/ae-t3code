@@ -57,6 +57,7 @@ interface Fake {
   readonly subscriptions: Set<unknown>;
   emit(event: ChildTurnCompletedEvent): void;
   readonly requestedSessionIds: string[];
+  readonly turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }>;
   failNext: { create?: boolean; release?: boolean; bindAs?: (chosen: string) => string };
 }
 function fakeThreads(): Fake {
@@ -72,6 +73,8 @@ function fakeThreads(): Fake {
   }>();
   const failNext: Fake["failNext"] = {};
   const requestedSessionIds: string[] = [];
+  const turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }> =
+    [];
   const port: ChildThreadPort = {
     createChildThread: async (input) => {
       calls.push("create");
@@ -104,8 +107,16 @@ function fakeThreads(): Fake {
       return { ok: true, accepted: true };
     },
     forkThread: async () => ({ ok: false, reason: "fork-failed" }),
-    startTurn: async () => ({ ok: false, reason: "delivery-unavailable" }),
-    interrupt: async () => ({ ok: true, accepted: true }),
+    startTurn: async ({ threadId, content, delivery, messageId }) => {
+      calls.push("startTurn");
+      turns.push({ threadId, content, delivery, messageId });
+      return { ok: true, accepted: true, messageId };
+    },
+    interrupt: async ({ threadId }) => {
+      calls.push("interrupt");
+      if (activity.has(threadId)) activity.set(threadId, "idle");
+      return { ok: true, accepted: true };
+    },
     status: async ({ threadId }) => ({
       ok: true,
       status: { activity: activity.get(threadId) ?? "unknown", queued: 0, resident: true },
@@ -133,6 +144,7 @@ function fakeThreads(): Fake {
     subscriptions,
     failNext,
     requestedSessionIds,
+    turns,
     emit: (event) => {
       for (const entry of subscriptions) entry.handler(event);
     },
@@ -190,8 +202,17 @@ function world(stateRoot = scratch()): World {
     },
     resume: { resumed: async () => undefined },
     sessionOfThread: (threadId) =>
-      threadId.startsWith("thread-child") ? `pi-${threadId}` : undefined,
-    threadOfSession: (sessionId) => (sessionId.startsWith("pi-") ? sessionId.slice(3) : undefined),
+      threadId === CALLER_THREAD
+        ? MAIN
+        : threadId.startsWith("thread-child")
+          ? `pi-${threadId}`
+          : undefined,
+    threadOfSession: (sessionId) =>
+      sessionId === MAIN
+        ? CALLER_THREAD
+        : sessionId.startsWith("pi-")
+          ? sessionId.slice(3)
+          : undefined,
     lineageSessionOf: () => "unknown",
     spawnAuthorizer: {
       authorize: async (input) => {
@@ -454,11 +475,16 @@ describe("children.status", () => {
 });
 
 describe("the operations that are not built", () => {
-  const unbuilt = ORCHESTRATION_OPERATIONS.filter(
-    (name) => name !== "children.spawn" && name !== "children.status",
-  );
-  it("are fifteen and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
-    expect(unbuilt).toHaveLength(15);
+  const built = [
+    "children.spawn",
+    "children.status",
+    "children.message",
+    "children.list",
+    "children.interrupt",
+  ];
+  const unbuilt = ORCHESTRATION_OPERATIONS.filter((name) => !built.includes(name));
+  it("are twelve and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
+    expect(unbuilt).toHaveLength(12);
     const w = world();
     const { service } = await started(w);
     for (const name of unbuilt) {
@@ -482,13 +508,140 @@ describe("the operations that are not built", () => {
       args,
     });
     const operations = registration.operations ?? {};
-    expect(await operations["children.list"]!(context({ scope: "children" }))).toMatchObject({
+    expect(
+      await operations["children.close"]!(context({ target: "thread-child-1" })),
+    ).toMatchObject({
       status: "unavailable",
       code: "ORCHESTRATION_UNAVAILABLE",
     });
     expect(await operations["children.spawn"]!(context({ ...SPAWN }))).toMatchObject({
       status: "done",
     });
+    await registration.activation.drain("test");
+  });
+});
+
+/** M03's `main` record as the Agent host writes it for the caller's session: the control operations read the caller's own identity too. */
+const writeMainRecord = (stateRoot: string, sessionId: string) => {
+  NodeFS.mkdirSync(NodePath.join(stateRoot, "identity"), { recursive: true, mode: 0o700 });
+  NodeFS.writeFileSync(
+    NodePath.join(stateRoot, "identity", `${sessionId}.json`),
+    JSON.stringify({
+      formatVersion: 1,
+      state: "active",
+      attemptId: `main-${sessionId}`,
+      writer: "agent-host",
+      acceptedPrompt: true,
+      record: {
+        sessionId,
+        kind: "main",
+        rootSessionId: sessionId,
+        parentChain: [],
+        role: null,
+        roleOrigin: null,
+        roleDigest: null,
+        authoritySource: "main",
+      },
+    }),
+    { mode: 0o600 },
+  );
+};
+
+describe("the control operations (step 10) through the factory", () => {
+  const childRow = (): ChildLineageThread => ({
+    threadId: "thread-child-1",
+    parentThreadId: CALLER_THREAD,
+    rootThreadId: ROOT_THREAD,
+    relationshipToParent: "subagent",
+    sessionId: "pi-thread-child-1",
+    closed: false,
+  });
+
+  it("message, list, interrupt and status run in the real service with the carrier's caller only", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w);
+    ok(
+      await service.handle("children.spawn", who, { ...SPAWN, mode: "continuable", label: "scan" }),
+    );
+    w.lineage.threads = [childRow()];
+    w.fake.activity.set("thread-child-1", "idle");
+
+    const listed = ok(await service.handle("children.list", who, { scope: "children" }));
+    expect(listed).toEqual({
+      rows: [
+        {
+          childId: "thread-child-1",
+          parentId: CALLER_THREAD,
+          depth: 1,
+          role: "reader",
+          mode: "continuable",
+          label: "scan",
+          state: "idle",
+          lastOutcome: null,
+          route: 1,
+        },
+      ],
+      diagnostics: [],
+    });
+
+    const sent = ok(
+      await service.handle("children.message", who, { target: "thread-child-1", content: "next" }),
+    );
+    expect(w.fake.turns).toEqual([
+      {
+        threadId: "thread-child-1",
+        content: "next",
+        delivery: "queue",
+        messageId: sent["messageId"],
+      },
+    ]);
+    w.fake.activity.set("thread-child-1", "running");
+    ok(
+      await service.handle("children.message", who, { target: "thread-child-1", content: "more" }),
+    );
+    expect(w.fake.turns.at(-1)?.delivery).toBe("steer");
+
+    expect(
+      ok(await service.handle("children.interrupt", who, { target: "thread-child-1" })),
+    ).toEqual({
+      accepted: true,
+    });
+    expect(
+      ok(await service.handle("children.status", who, { childSessionId: "pi-thread-child-1" })),
+    ).toEqual({ owned: true, state: "idle" });
+  });
+
+  it("a stranger session and a forged target get the refusals, and the arguments can name no caller", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    writeMainRecord(w.stateRoot, "other-main");
+    const { service } = await started(w);
+    ok(await service.handle("children.spawn", who, SPAWN));
+    w.fake.activity.set("thread-child-1", "idle");
+    const other = { sessionId: "other-main", rootSessionId: "other-main", kind: "main" };
+    expect(
+      await service.handle("children.message", other, { target: "thread-child-1", content: "x" }),
+    ).toMatchObject({ ok: false, code: "CHILD_NOT_OWNED" });
+    expect(
+      await service.handle("children.interrupt", other, { target: "thread-child-1" }),
+    ).toMatchObject({ ok: false, code: "NOT_AUTHORIZED" });
+    expect(w.fake.turns).toEqual([]);
+    // The module's strict decoders refuse caller-claiming keys before the service runs (orchestration.aetheria.test.ts); through the wire a forged `sessionId` throws.
+    await service.drain();
+    const registration = createOrchestrationBackendRegistration({
+      create: () => createOrchestrationFactory({ callerContext: callerOk })(w.deps),
+    });
+    await registration.activation.start({ id: "orchestration-backend" });
+    expect(() =>
+      registration.operations?.["children.message"]?.({
+        caller: { threadId: CALLER_THREAD, providerSessionId: "c", providerInstanceId: "pi" },
+        sessionId: MAIN,
+        kind: "main",
+        rootSessionId: MAIN,
+        args: { target: "thread-child-1", content: "x", sessionId: "other-main" },
+      }),
+    ).toThrow();
     await registration.activation.drain("test");
   });
 });
