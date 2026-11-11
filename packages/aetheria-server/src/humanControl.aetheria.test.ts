@@ -104,6 +104,9 @@ const makeFake = (options: FakeOptions = {}) => {
     },
     setPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     grant: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    inheritPlanMode: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    createAuthorization: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
+    awaitInteraction: async () => ({ ok: false, code: "INTERACTION_UNAVAILABLE" }) as never,
     verifyHumanOrigin: async (originId, expect) => {
       note("verifyHumanOrigin", originId, expect);
       return originId === "org-unreadable"

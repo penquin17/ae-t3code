@@ -2720,12 +2720,23 @@ describe.skipIf(MISSING.length > 0)(
         runProblems: (dir: string, options: Json) => string[];
       };
       const inventory = JSON.parse(NodeFS.readFileSync(INVENTORY, "utf8")) as { rows: Json[] };
-      const rowOf = (id: string) => inventory.rows.find((r) => r.native?.caseId === id) ?? null;
+      // The CASE row of an id (scenario, forgery, grant or drill), not a done-when row that also cites it: only the case row carries the kind and `nativeExpects`.
+      const rowOf = (id: string) => inventory.rows.find((r) => r.caseId === id) ?? null;
       const known = [...ALL_CASES];
       const required = known.filter((id) => writtenIds.has(id));
       // A run of a single case (-t) still validates the shape of what ran; a full run must have written all 34.
+      // `rowRequirements: false`: an inventory row's `nativeExpects` (the extra fields its NATIVE claim needs, e.g. a task view read on the installed stack, a second
+      // real root, the graceful-stop cause) is a rule for native evidence. These in-process documents are harness results on other worlds (a modelled fork, a
+      // service restart over one state root), never an inventory pass, so they are held to the contract's shape, status and unchanged rules but not to the native fields.
       const problems = validate
-        .runProblems(run.dir, { required, known, rowOf, profile: "native", canaries: [CANARY] })
+        .runProblems(run.dir, {
+          required,
+          known,
+          rowOf,
+          profile: "native",
+          canaries: [CANARY],
+          rowRequirements: false,
+        })
         .filter((p) => !/missing case file/.test(p));
       expect(problems).toEqual([]);
       if (required.length === ALL_CASES.length)

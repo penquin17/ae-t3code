@@ -37,7 +37,7 @@
     "@aetheria/interaction": {
       "archive": "artifacts/aetheria-interaction-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:c3c59d59afc5898c5c8799d992f1735a80d186a3c3d4e48dc5948ccb8f3535b8"
+      "stamp": "sha256:59822ce839d64af78741baf86af04fd74d13c5a0fbd1325bad2c0e1fcb3e68de"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",

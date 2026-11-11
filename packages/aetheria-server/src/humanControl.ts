@@ -23,6 +23,7 @@ import {
   type InteractionAwaitResult,
   type InteractionCreateArgs,
   type InteractionCreateResult,
+  type InteractionRecord,
   type InteractionReleaseResult,
   type InteractionsAnswerPayload,
   type InteractionsCancelPayload,
@@ -78,6 +79,18 @@ export interface HumanControlDrainReport {
   readonly stillLive: readonly string[];
 }
 
+/** The archive's `Outcome<T, C>` for the direct API: a value, or one of the named canonical codes with an optional detail. */
+export type DirectOutcome<T, C extends string> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly code: C; readonly detail?: string };
+type PlanModeValue = Extract<PlanModeGetResult, { readonly ok: true }>["value"];
+/** The archive's `CreateAuthorizationInput`: the session (C1 derives the root), the text the human will see, and what is authorized. */
+export interface CreateAuthorizationInput {
+  readonly sessionId: string;
+  readonly text: string;
+  readonly subject: AuthorizationGrantPayload["subject"];
+}
+
 /**
  * The interaction service as the step-5 archive announces it (`@aetheria/interaction/backend` `InteractionService`), restricted to what the Backend
  * wiring calls. Replies are the wire shapes of the contracts, which the archive's outcomes match field for field.
@@ -117,6 +130,29 @@ export interface HumanControlService {
   getTasks(sessionId: string): Promise<TasksGetResult>;
   /** Client-only: returns the origin id to the client, never to an Agent. */
   grant(who: ClientIdentity, args: AuthorizationGrantPayload): Promise<AuthorizationGrantResult>;
+  /**
+   * The archive's Backend-only direct API (`InteractionDirectApi`), declared here with its exact signatures so the Backend's in-process consumers call
+   * the one running service through this port, without a cast. None is an XC-6 or client operation (no Agent route reaches them) and none writes a
+   * human decision; the replies are the wire shapes of the contracts, which the archive's outcomes match field for field.
+   *
+   * M05 calls this inside spawn and fork and rolls back on failure: a fork copies the parent's mode, a spawn starts inactive.
+   */
+  inheritPlanMode(
+    parentSessionId: string,
+    childSessionId: string,
+    relation: "fork" | "spawn",
+  ): Promise<DirectOutcome<PlanModeValue, "INTERACTION_UNAVAILABLE">>;
+  /** Only a Backend service may create an `authorization` interaction (M07); `subject.revision` is the digest of the content that service holds. */
+  createAuthorization(
+    input: CreateAuthorizationInput,
+  ): Promise<
+    DirectOutcome<InteractionRecord, "INTERACTION_UNAVAILABLE" | "INTERACTION_GRANT_INVALID">
+  >;
+  /** One bounded segment: settles within the segment bound with the interaction's current state. */
+  awaitInteraction(
+    interactionId: string,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<DirectOutcome<InteractionRecord, "INTERACTION_NOT_FOUND" | "INTERACTION_UNAVAILABLE">>;
   /** XC-17, read-only: the verdict on one origin; `{ok:false}` is unavailable, which a caller reads as "not a human decision". Writes nothing. */
   verifyHumanOrigin(
     originId: string,
