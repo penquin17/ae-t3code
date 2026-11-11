@@ -31,6 +31,7 @@
     "@noble/hashes": "catalog:",
     "@pierre/diffs": "catalog:",
     "@pierre/trees": "1.0.0-beta.6",
+    "@t3tools/aetheria-design": "workspace:*",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/provider-core": "workspace:*",
@@ -117,5 +118,6 @@
     "tailwindcss": "^4.0.0",
     "vite": "catalog:",
     "vite-plus": "catalog:"
-  }
+  },
+  "aetheriaIp": "AETHERIA-IP:IP-28 the Aetheria look package (@t3tools/aetheria-design) is a workspace dependency of the web app, imported once from src/main.tsx"
 }

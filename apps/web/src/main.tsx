@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import "@fontsource-variable/inter";
 import "./index.css";
+import "@t3tools/aetheria-design/aetheria.css"; // AETHERIA-IP:IP-27 the one Aetheria stylesheet, after T3's own so the default appearance is Aetheria
 
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
 import { isElectron } from "./env";
