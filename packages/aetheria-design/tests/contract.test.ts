@@ -11,10 +11,12 @@ const packageRoot = NodeURL.fileURLToPath(new URL("..", import.meta.url));
 const read = (...parts: string[]) =>
   NodeFS.readFileSync(NodePath.join(packageRoot, ...parts), "utf8");
 
-// SHA-256 of tokens/aetheria.tokens.json as ported on 2026-11-12 from
-// dsh/packages/aetheria-design/tokens/aetheria.tokens.json at outer commit 875f88ad.
-const PORTED_TOKEN_SOURCE_SHA256 =
-  "39d2cbf54c9cdca4dda035b489926c747073b282db7c76d06d88cd92327ffa08";
+// Canonical-JSON SHA-256 (sorted keys, no whitespace) of the one-time port of
+// dsh/packages/aetheria-design/tokens/aetheria.tokens.json at outer commit 875f88ad, whose own byte hash is
+// 39d2cbf54c9cdca4dda035b489926c747073b282db7c76d06d88cd92327ffa08. The fork's formatter rewrites the copy's
+// whitespace on commit, so the pinned hash is of the content, not of the bytes.
+const PORTED_TOKEN_CANONICAL_SHA256 =
+  "d4f1251ded833f262ff4d6a090f2e84f31f0ea101af1a402458cd125a32bc054";
 
 const FOREGROUND_ON_PRIMARY = "semantic.color.label.primary";
 const HOVER = "semantic.opacity.hover";
@@ -55,12 +57,59 @@ const EXPECTED_MAPPING: ReadonlyArray<readonly [string, string, string | null, s
   ["--sidebar-border", "semantic.color.border", null, "#E2E8F0", "#334155"],
 ];
 
-describe("the ported token source", () => {
-  it("is byte-identical to the one-time port, historical font and DSH metadata included", () => {
-    const bytes = NodeFS.readFileSync(NodePath.join(packageRoot, "tokens", "aetheria.tokens.json"));
-    expect(NodeCrypto.createHash("sha256").update(bytes).digest("hex")).toBe(
-      PORTED_TOKEN_SOURCE_SHA256,
+/** The JSON value with keys sorted at every level and no whitespace: the same hash however the file is formatted. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
     );
+    return `{${entries.map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+const canonicalSha256 = (value: unknown) =>
+  NodeCrypto.createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+
+describe("the ported token source", () => {
+  const source: unknown = JSON.parse(read("tokens", "aetheria.tokens.json"));
+
+  it("carries the one-time port's content, historical font and DSH metadata included, however it is formatted", () => {
+    expect(canonicalSha256(source)).toBe(PORTED_TOKEN_CANONICAL_SHA256);
+  });
+
+  it("notices a changed value, a removed key and a reordered list", () => {
+    const edit = (change: (copy: Record<string, any>) => void) => {
+      const copy = JSON.parse(JSON.stringify(source)) as Record<string, any>;
+      change(copy);
+      return canonicalSha256(copy);
+    };
+    expect(edit(() => {})).toBe(PORTED_TOKEN_CANONICAL_SHA256);
+    expect(edit((copy) => (copy.primitive.blue["600"].$value = "#2563EC"))).not.toBe(
+      PORTED_TOKEN_CANONICAL_SHA256,
+    );
+    expect(edit((copy) => delete copy.semantic.font)).not.toBe(PORTED_TOKEN_CANONICAL_SHA256);
+    expect(edit((copy) => copy.semantic.color.bg.base.$extensions.aetheria.dsw.push("x"))).not.toBe(
+      PORTED_TOKEN_CANONICAL_SHA256,
+    );
+  });
+
+  it("is independent of key order and whitespace", () => {
+    const reverseKeys = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(reverseKeys);
+      if (value !== null && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .reverse()
+            .map(([key, child]) => [key, reverseKeys(child)]),
+        );
+      }
+      return value;
+    };
+    const reordered = JSON.stringify(reverseKeys(source), null, 7);
+    expect(reordered).not.toBe(JSON.stringify(source, null, 2));
+    expect(canonicalSha256(JSON.parse(reordered))).toBe(canonicalSha256(source));
   });
 });
 

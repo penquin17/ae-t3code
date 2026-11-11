@@ -2,7 +2,7 @@
 
 This package gives T3's web app Aetheria's look through one generated stylesheet. It ports the palette, motion, accessibility and brand rules of Aetheria's accepted guideline and leaves out everything that needs the DSH host: the component library, the host's style mounting and its variable mapping are not part of it. Where this file and `tokens/aetheria.tokens.json` disagree about a value, the token file is right and this file has a bug.
 
-Status: accepted values from the user's review of 2026-11-03 (Y4's blues with the neutral, state, space and radius scales). The token source is a byte-identical copy of the legacy DSH package's file, ported once; its historical font and DSH metadata stay in it unused. Its `$stylesRevisions` hash describes the legacy DSH stylesheet, not this package's output.
+Status: accepted values from the user's review of 2026-11-03 (Y4's blues with the neutral, state, space and radius scales). The token source is a one-time copy of the legacy DSH package's file with the same content (the package's formatter may change its whitespace, so the contract test pins a hash of the parsed content with sorted keys, not of the bytes); its historical font and DSH metadata stay in it unused. Its `$stylesRevisions` hash describes the legacy DSH stylesheet, not this package's output.
 
 ## Scope and decisions
 
