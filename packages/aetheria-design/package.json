@@ -11,11 +11,13 @@
   },
   "scripts": {
     "build": "node scripts/build-tokens.ts",
+    "build:icons": "node scripts/build-icons.ts",
     "typecheck": "tsc --noEmit",
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "playwright": "1.60.0",
     "vite-plus": "catalog:"
   }
 }

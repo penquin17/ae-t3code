@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "T3 Code",
-  "short_name": "T3 Code",
+  "name": "Aetheria",
+  "short_name": "Aetheria",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -9,14 +9,15 @@
   "theme_color": "#161616",
   "icons": [
     {
-      "src": "/favicon-32x32.png",
+      "src": "/aetheria/favicon-32x32.png",
       "sizes": "32x32",
       "type": "image/png"
     },
     {
-      "src": "/apple-touch-icon.png",
+      "src": "/aetheria/apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png"
     }
-  ]
+  ],
+  "aetheriaIp": "AETHERIA-IP:IP-37 the app is named Aetheria and its icons are the generated Aetheria set in /aetheria/"
 }

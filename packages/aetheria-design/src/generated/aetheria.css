@@ -156,3 +156,14 @@
   --sidebar-row-selected: var(--ae-color-bg-base);
   --sidebar-border: var(--ae-color-border);
 }
+
+/* The slogan in the new-thread hero: one line at every width, sized from the viewport. */
+[data-aetheria-headline] {
+  margin: 0 0 0.5rem;
+  font-size: min(26px, calc(8vw - 4px));
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-align: center;
+  white-space: nowrap;
+}

@@ -35,7 +35,8 @@ export function threadNotificationTag(environmentId: EnvironmentId, threadId: Th
   return hash.toString(16).padStart(16, "0");
 }
 
-let originalFavicon: HTMLLinkElement | undefined;
+// AETHERIA-IP:IP-38 every icon link is kept (not just the first), so a page that declares several (the adaptive SVG and its fallbacks) shows the badge alone and gets them all back in place.
+let originalFavicons: HTMLLinkElement[] = [];
 let badgeFavicon: HTMLLinkElement | undefined;
 
 export function setNotificationBadge(count: number) {
@@ -61,20 +62,22 @@ export function setNotificationBadge(count: number) {
   if (!bridge) {
     if (image) {
       if (!badgeFavicon) {
-        originalFavicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]') ?? undefined;
+        originalFavicons = [...document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]')];
         badgeFavicon = document.createElement("link");
         badgeFavicon.rel = "icon";
         badgeFavicon.type = "image/png";
         badgeFavicon.sizes.value = "64x64";
-        originalFavicon?.remove();
-        document.head.append(badgeFavicon);
+        const [first, ...rest] = originalFavicons;
+        if (first) first.replaceWith(badgeFavicon);
+        else document.head.append(badgeFavicon);
+        for (const link of rest) link.remove();
       }
       badgeFavicon.href = image;
     } else if (badgeFavicon) {
-      badgeFavicon.remove();
+      if (originalFavicons.length > 0) badgeFavicon.replaceWith(...originalFavicons);
+      else badgeFavicon.remove();
       badgeFavicon = undefined;
-      if (originalFavicon) document.head.append(originalFavicon);
-      originalFavicon = undefined;
+      originalFavicons = [];
     }
   }
   void bridge?.setNotificationBadge({ count, image }).catch(() => undefined);

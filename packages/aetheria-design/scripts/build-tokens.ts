@@ -53,6 +53,20 @@ const OMITTED_SEGMENTS = new Set(["font", "transcript"]);
 // The default appearance: no palette id, or the empty one. Specificity (0,3,0) beats T3's :root rules in both modes.
 const DEFAULT_APPEARANCE = ':root:not([data-theme-id]):not([data-theme-id=""])';
 
+// The slogan in the empty-draft hero (M10a): the accepted size, on one line from 1280 down to 320 px.
+const HEADLINE_RULE = `
+/* The slogan in the new-thread hero: one line at every width, sized from the viewport. */
+[data-aetheria-headline] {
+  margin: 0 0 0.5rem;
+  font-size: min(26px, calc(8vw - 4px));
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-align: center;
+  white-space: nowrap;
+}
+`;
+
 class TokenError extends Error {}
 const fail = (message: string): never => {
   throw new TokenError(message);
@@ -338,6 +352,7 @@ export function buildOutputs(
     `   A selected or custom palette matches none of these selectors, so it keeps control. */\n` +
     `${DEFAULT_APPEARANCE},\n${DEFAULT_APPEARANCE} [data-app-sidebar] {\n` +
     `${declarations(mapped.map((entry) => [entry.variable, entry.reference] as const))}\n}\n`;
+  css += HEADLINE_RULE;
 
   const tsHeader = `// ${header}\n`;
   const namesTs = `${tsHeader}export const tokenNames = [\n${emitted.map((token) => `  ${JSON.stringify(cssName(token))},`).join("\n")}\n] as const;\n`;

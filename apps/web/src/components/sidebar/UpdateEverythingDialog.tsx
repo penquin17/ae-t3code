@@ -127,6 +127,7 @@ function UpdateEverythingDialogContent({
 
   return (
     <>
+      {/* AETHERIA-IP:IP-33 the version line and product column name Aetheria; the dialog's actions are untouched. */}
       <AlertDialogHeader className="shrink-0">
         <AlertDialogTitle>
           {title ?? `Update ${updating.length} ${updating.length === 1 ? "machine" : "machines"}?`}
@@ -134,7 +135,7 @@ function UpdateEverythingDialogContent({
         <AlertDialogDescription>
           {version !== null ? (
             <>
-              T3 Code <span className="font-mono text-xs">{version}</span>
+              Aetheria <span className="font-mono text-xs">{version}</span>
             </>
           ) : null}
           {version !== null && providerCount > 0 ? " · " : null}
@@ -154,7 +155,7 @@ function UpdateEverythingDialogContent({
           <div className="grid grid-cols-[minmax(4rem,max-content)_max-content_minmax(min-content,1fr)_max-content] gap-x-4 text-sm">
             <div className="col-span-full grid grid-cols-subgrid border-b pb-1.5 text-muted-foreground text-xs">
               <span>Machine</span>
-              <span>T3 Code</span>
+              <span>Aetheria</span>
               <span>Providers</span>
               <span />
             </div>

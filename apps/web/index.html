@@ -7,13 +7,17 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#000000" />
-    <link rel="icon" href="/favicon.ico" sizes="48x48" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- AETHERIA-IP:IP-36 Aetheria's tab title, icon links and default-appearance splash colours; every icon file is generated into /aetheria/. -->
+    <link rel="icon" href="/aetheria/aetheria-favicon.svg" type="image/svg+xml" sizes="any" />
+    <link rel="icon" href="/aetheria/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/aetheria/favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/aetheria/favicon-16x16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="/aetheria/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
-        const DARK_BACKGROUND = "#000000";
+        const DARK_BACKGROUND = "#0f172a";
         const CUSTOM_THEMES_STORAGE_KEY = "t3code:themes:v1";
         const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "t3code:theme-follow-system";
         const THEME_APPEARANCE_MODE_STORAGE_KEY = "t3code:theme-appearance-mode";
@@ -21,13 +25,13 @@
         const SPLASH_COLORS = {
           light: {
             background: "#ffffff",
-            foreground: "#262626",
-            accent: "#4f46e5",
+            foreground: "#0f172a",
+            accent: "#2563eb",
           },
           dark: {
-            background: "#000000",
-            foreground: "#f5f5f5",
-            accent: "#818cf8",
+            background: "#0f172a",
+            foreground: "#f8fafc",
+            accent: "#60a5fa",
           },
         };
         // These are the runtime defaults used to complete a custom palette
@@ -397,14 +401,14 @@
 
       body {
         background: #ffffff;
-        color: #262626;
+        color: #0f172a;
         font-family:
           -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif;
       }
 
       html.dark body {
-        background: #000000;
-        color: #f5f5f5;
+        background: #0f172a;
+        color: #f8fafc;
       }
 
       #boot-shell {
@@ -447,7 +451,7 @@
       }
 
       #boot-error {
-        --boot-error-fg: #262626;
+        --boot-error-fg: #0f172a;
         --boot-error-bg: #ffffff;
         --boot-error-line: color-mix(in srgb, currentColor 12%, transparent);
         display: flex;
@@ -461,8 +465,8 @@
       }
 
       html.dark #boot-error {
-        --boot-error-fg: #f5f5f5;
-        --boot-error-bg: #000000;
+        --boot-error-fg: #f8fafc;
+        --boot-error-bg: #0f172a;
       }
 
       html[data-theme-selected="true"] #boot-error {
@@ -668,13 +672,13 @@
         white-space: nowrap;
       }
     </style>
-    <title>T3 Code (Beta)</title>
+    <title>Aetheria — Knowledge comes together</title>
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="T3 Code splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3 Code" />
+        <div id="boot-shell-card" aria-label="Aetheria splash screen">
+          <img id="boot-shell-logo" src="/aetheria/apple-touch-icon.png" alt="Aetheria" />
         </div>
       </div>
     </div>

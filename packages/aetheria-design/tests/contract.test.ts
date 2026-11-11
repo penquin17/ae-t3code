@@ -204,6 +204,16 @@ describe("the consumed stylesheet", () => {
     expect(css).not.toMatch(/@import|url\(|!important/);
   });
 
+  it("styles the new-thread slogan through its data hook alone, at the accepted size, on one line", () => {
+    const start = css.indexOf("[data-aetheria-headline] {");
+    expect(start, "the headline rule").toBeGreaterThan(-1);
+    const rule = css.slice(start, css.indexOf("}", start));
+    expect(rule).toContain("font-size: min(26px, calc(8vw - 4px));");
+    expect(rule).toContain("white-space: nowrap;");
+    expect(rule).not.toMatch(/overflow|text-overflow|ellipsis/);
+    expect(css.split("[data-aetheria-headline]")).toHaveLength(2);
+  });
+
   it("gates every T3 variable to the default appearance, the sidebar subtree included", () => {
     expect(css).toContain(`${gate},\n${gate} [data-app-sidebar] {`);
     const block = css.slice(css.indexOf(`${gate},`));

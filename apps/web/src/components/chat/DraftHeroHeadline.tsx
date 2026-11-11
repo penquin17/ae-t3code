@@ -1,4 +1,5 @@
 import type { DraftId } from "~/composerDraftStore";
+import { AetheriaHeadline } from "~/aetheria/AetheriaHeadline";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -413,6 +414,8 @@ export function DraftHeroHeadline({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
+      {/* AETHERIA-IP:IP-35 Aetheria's slogan heads the empty-draft hero; the project controls below are unchanged. */}
+      <AetheriaHeadline />
       {hasResolvedProject && !isScratchDraft ? (
         <DraftHeroProjectHeading projectName={activeProjectTitle ?? "Choose a project"}>
           {projectSelector}

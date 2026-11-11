@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { T3Wordmark } from "../T3Wordmark";
+import { AetheriaWordmark } from "../../aetheria/AetheriaWordmark";
 
 export function StandalonePage({ children }: { readonly children: ReactNode }) {
   return (
@@ -11,6 +11,7 @@ export function StandalonePage({ children }: { readonly children: ReactNode }) {
   );
 }
 
+// AETHERIA-IP:IP-34 the standalone page header shows the Aetheria mark and name, not T3's.
 export function StandalonePageHeader({
   context,
   title,
@@ -23,10 +24,7 @@ export function StandalonePageHeader({
   return (
     <>
       <div className="flex items-baseline justify-between gap-3 text-muted-foreground">
-        <span className="flex items-baseline gap-1.5" role="img" aria-label="T3 Code">
-          <T3Wordmark className="h-3 w-auto shrink-0 text-foreground" aria-hidden />
-          <span className="text-lg font-medium tracking-tight">Code</span>
-        </span>
+        <AetheriaWordmark className="text-lg font-medium tracking-tight text-foreground" />
         {context ? <span className="text-sm">{context}</span> : null}
       </div>
       <h1 className="mt-6 text-xl leading-tight font-semibold">{title}</h1>

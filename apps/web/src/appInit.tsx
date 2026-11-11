@@ -21,6 +21,7 @@ import { startDesktopUpdateLaunchNotice } from "./components/sidebar/updateEvery
 import { startSlowRpcRequestToasts } from "./components/SlowRpcRequestToastCoordinator";
 import { startThreadNotifications } from "./components/ThreadNotificationCoordinator";
 import { startGuideRunNotifications } from "./components/pullRequest/guide/PullRequestGuideRunCoordinator";
+import { startAetheriaDocumentTitle } from "./aetheria/documentTitle";
 import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "./branding";
 import { resolveServerBackedAppDisplayName } from "./branding.logic";
 import { isElectron } from "./env";
@@ -116,7 +117,12 @@ function startClientAppearance(): void {
   apply();
 }
 
-function startDocumentTitle(): void {
+function startDocumentTitle(router: AppRouter): void {
+  // AETHERIA-IP:IP-30 the web title is Aetheria's (default or open thread); the desktop shell keeps T3's server-backed name.
+  if (!isElectron) {
+    startAetheriaDocumentTitle(appAtomRegistry, router);
+    return;
+  }
   appAtomRegistry.subscribe(
     primaryServerConfigAtom,
     (config) => {
@@ -179,7 +185,7 @@ export function startAppServices(): AppRouter {
   installDesktopPasteAsText(window.desktopBridge, window);
 
   startClientAppearance();
-  startDocumentTitle();
+  startDocumentTitle(router);
   startEnvironmentThemeRepaint();
   startBrowserChromeThemeSync(router);
   startDefaultThemeAdoption();
