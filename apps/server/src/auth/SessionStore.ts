@@ -414,6 +414,11 @@ export class SessionStore extends Context.Service<
       sessionId: AuthSessionId,
       proofKeyThumbprint?: string,
     ) => Effect.Effect<void, SessionCredentialVerificationError>;
+    // AETHERIA-IP:IP-26 read-only: the session ids a live socket accepted on `sessionId` is on NOW (see currentChain below)
+    readonly currentChain: (
+      sessionId: AuthSessionId,
+      proofKeyThumbprint?: string,
+    ) => Effect.Effect<ReadonlyArray<AuthSessionId>, SessionCredentialVerificationError>;
     readonly revoke: (
       sessionId: AuthSessionId,
     ) => Effect.Effect<boolean, SessionCredentialInternalError>;
@@ -1099,6 +1104,47 @@ const make = Effect.gen(function* () {
     );
   });
 
+  // AETHERIA-IP:IP-26 The chain a live socket accepted on `sessionId` is on at this moment, as ids, oldest first, the session itself first. It is awaitInvalidation's walk without the
+  // wait: starting at the original, an expired session is followed to the newest session for the same DPoP key (the process-local `latestSessionByProofKey`) when that session is the
+  // same subject and keeps every scope, and the walk stops at the first revoked or unexpired one. Nothing is written or published. The caller reads the rows itself, so it decides
+  // what revoked or expired means. Without a proof key, or after a process restart (the map is empty, and so are the sockets), the chain is the session alone.
+  const currentChain: SessionStore["Service"]["currentChain"] = Effect.fn(
+    "SessionStore.currentChain",
+  )(function* (sessionId, proofKeyThumbprint) {
+    const readRow = (id: AuthSessionId) =>
+      authSessions
+        .getById({ sessionId: id })
+        .pipe(
+          Effect.mapError(
+            (cause) => new SessionCredentialVerificationError({ sessionId: id, cause }),
+          ),
+        );
+    const chain: Array<AuthSessionId> = [sessionId];
+    const original = yield* readRow(sessionId);
+    if (Option.isNone(original)) return chain;
+    let current = original.value;
+    while (true) {
+      if (current.revokedAt !== null) return chain;
+      const now = yield* DateTime.now;
+      if (current.expiresAt.epochMilliseconds > now.epochMilliseconds) return chain;
+      const successorId =
+        proofKeyThumbprint === undefined
+          ? undefined
+          : latestSessionByProofKey.get(proofKeyThumbprint);
+      if (successorId === undefined || successorId === current.sessionId) return chain;
+      const successor = yield* readRow(successorId);
+      if (
+        Option.isNone(successor) ||
+        successor.value.subject !== original.value.subject ||
+        !original.value.scopes.every((scope) => successor.value.scopes.includes(scope))
+      ) {
+        return chain;
+      }
+      chain.push(successorId);
+      current = successor.value;
+    }
+  });
+
   return SessionStore.of({
     cookieName,
     legacyCookieName,
@@ -1108,6 +1154,8 @@ const make = Effect.gen(function* () {
     verifyWebSocketToken,
     listActive,
     awaitInvalidation,
+    // AETHERIA-IP:IP-26
+    currentChain,
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },

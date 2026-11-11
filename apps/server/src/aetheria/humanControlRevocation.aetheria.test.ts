@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalRandom:off globalDate:off tryCatchInEffectGen:off preferSchemaOverJson:off anyUnknownInErrorContext:off runEffectInsideEffect:off
 /* oxlint-disable t3code/no-manual-effect-runtime-in-tests, t3code/no-real-time-wait-in-tests -- the stores are real layers built by hand over one SQLite file; a short expiry is waited out. */
-// AETHERIA M06 Review 2 repair (C7, decision "m06-revocation"): over the real SessionStore on one SQLite file and the real Backend, a session revoked by a SEPARATE store
-// (the `t3` CLI process) is refused on every call with INTERACTION_ORIGIN_NOT_HUMAN, writes nothing, and leaves a second device working; expired sessions and open streams too.
-// Not shown: a real WebSocket, the CLI process itself, or a DPoP renewal chain (see humanControlRpc.ts).
+// AETHERIA M06 (C7, m06-revocation and m06-u2-dpop): a session revoked by a SEPARATE store (the `t3` CLI) is refused on every call and writes nothing; a renewed DPoP
+// session follows T3's chain through the IP-26 seam, and a plain session is untouched. Real SessionStores on one SQLite file and the real Backend.
+// Not shown: a real WebSocket, the CLI process, or a link that was current only in the past.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -347,6 +347,323 @@ describe("a revoked device is refused on every human-control call (C7, m06-revoc
     expect(out.expired).toMatchObject({ ok: false, code: "INTERACTION_NOT_FOUND" });
     expect(out.seen).toEqual([]);
     expect(out.endedAfterPush).toBe(true);
+  });
+});
+
+const DPOP = "dpop-access-token" as const;
+const KEY = "jkt-device-1";
+const pause = (ms: number) =>
+  Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+describe("a DPoP session that T3 renewed is refused once its renewal chain is revoked (C7, review 3 U2)", () => {
+  it("refuses an action after a SEPARATE store revoked only the successor of an expired original, and writes nothing", async () => {
+    const stateRoot = newDir("m06-dpop-state-");
+    const service = await startBackend(stateRoot);
+    live.push(service);
+    const backend = Option.some(service);
+    const question = await ask(service, "call-dpop");
+    const baseDir = newDir("m06-dpop-t3-");
+
+    const out = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* Layer.build(yield* storeLayer(baseDir));
+          const cli = yield* Layer.build(yield* storeLayer(baseDir));
+          const store = SessionStoreOf(server);
+          // The device's first token is short; T3's renewal is a second session for the same subject and DPoP key.
+          const original = yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.millis(500),
+          });
+          const successor = yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.hours(1),
+          });
+          const other = yield* store.issue({ subject: "device-2", scopes });
+          // The socket was accepted on the ORIGINAL session and keeps its actor for its whole life.
+          const actor = yield* connectionActor({
+            sessionId: original.sessionId,
+            scopes,
+            proofKeyThumbprint: KEY,
+          }).pipe(Effect.provide(server));
+          const otherActor = yield* connectionActor({ sessionId: other.sessionId, scopes }).pipe(
+            Effect.provide(server),
+          );
+          const payload = {
+            interactionId: question.interactionId,
+            revision: question.revision,
+            answers: ANSWER,
+          };
+
+          const beforeExpiry = yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+          yield* pause(650); // the original has expired; T3 would now carry the socket on the successor
+          const renewedRead = yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+          const journalBefore = journalOf(stateRoot);
+
+          yield* SessionStoreOf(cli).revoke(successor.sessionId); // the `t3` CLI revokes the device's current session
+          const refused = yield* interactionsAnswer(backend, actor, payload);
+          const read = yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+          const journalAfter = journalOf(stateRoot);
+          const secondDevice = yield* interactionsAnswer(backend, otherActor, payload);
+          return {
+            beforeExpiry,
+            renewedRead,
+            refused,
+            read,
+            journalBefore,
+            journalAfter,
+            secondDevice,
+          };
+        }).pipe(Effect.provide(NODE)),
+      ),
+    );
+
+    expect(out.beforeExpiry).toMatchObject({ ok: true, value: { rootSessionId: ROOT } });
+    // A live successor keeps the socket working: T3's renewal is not an outage.
+    expect(out.renewedRead).toMatchObject({ ok: true, value: { rootSessionId: ROOT } });
+    expect(out.refused).toMatchObject({ ok: false, code: REVOKED });
+    expect(out.read).toMatchObject({ ok: false, code: "INTERACTION_NOT_FOUND" });
+    expect(out.journalAfter).toBe(out.journalBefore);
+    expect(out.secondDevice).toMatchObject({ ok: true, value: { state: "answered" } });
+  });
+
+  it("refuses an expired DPoP original that has no live renewal, and does not count another subject's or a narrower session as its renewal", async () => {
+    const stateRoot = newDir("m06-dpop-exp-state-");
+    const service = await startBackend(stateRoot);
+    live.push(service);
+    const backend = Option.some(service);
+    const question = await ask(service, "call-dpop-expired");
+    const baseDir = newDir("m06-dpop-exp-t3-");
+
+    const out = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* Layer.build(yield* storeLayer(baseDir));
+          const store = SessionStoreOf(server);
+          const original = yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.millis(5),
+          });
+          // Live DPoP sessions that are NOT its renewal: another subject, and the same subject with fewer scopes (T3 closes a socket for that too).
+          yield* store.issue({
+            subject: "someone-else",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: "jkt-other",
+            ttl: Duration.hours(1),
+          });
+          yield* store.issue({
+            subject: "paired-device",
+            scopes: [AuthOrchestrationReadScope],
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.hours(1),
+          });
+          const actor = yield* connectionActor({
+            sessionId: original.sessionId,
+            scopes,
+            proofKeyThumbprint: KEY,
+          }).pipe(Effect.provide(server));
+          yield* pause(60);
+          const journalBefore = journalOf(stateRoot);
+          const refused = yield* interactionsAnswer(backend, actor, {
+            interactionId: question.interactionId,
+            revision: question.revision,
+            answers: ANSWER,
+          });
+          const read = yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+          return { refused, read, journalBefore, journalAfter: journalOf(stateRoot) };
+        }).pipe(Effect.provide(NODE)),
+      ),
+    );
+
+    expect(out.refused).toMatchObject({ ok: false, code: REVOKED });
+    expect(out.read).toMatchObject({ ok: false, code: "INTERACTION_NOT_FOUND" });
+    expect(out.journalAfter).toBe(out.journalBefore);
+  });
+
+  it("keeps an unexpired DPoP original working while only its successor is revoked (T3 moves the socket only when the original expires)", async () => {
+    const stateRoot = newDir("m06-dpop-early-state-");
+    const service = await startBackend(stateRoot);
+    live.push(service);
+    const backend = Option.some(service);
+    await ask(service, "call-dpop-early"); // a root the connection can reach exists
+    const baseDir = newDir("m06-dpop-early-t3-");
+
+    const out = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* Layer.build(yield* storeLayer(baseDir));
+          const cli = yield* Layer.build(yield* storeLayer(baseDir));
+          const store = SessionStoreOf(server);
+          const original = yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.hours(1),
+          });
+          const successor = yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.hours(2),
+          });
+          const actor = yield* connectionActor({
+            sessionId: original.sessionId,
+            scopes,
+            proofKeyThumbprint: KEY,
+          }).pipe(Effect.provide(server));
+          yield* SessionStoreOf(cli).revoke(successor.sessionId);
+          return yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+        }).pipe(Effect.provide(NODE)),
+      ),
+    );
+
+    expect(out).toMatchObject({ ok: true, value: { rootSessionId: ROOT } });
+  });
+
+  // Review 3 U2, the exact path (decision m06-u2-dpop): the approximate "any usable renewal" rule could not close this.
+  it("does not let another live DPoP session of the same subject keep a revoked successor's connection active", async () => {
+    const stateRoot = newDir("m06-dpop-mask-state-");
+    const service = await startBackend(stateRoot);
+    live.push(service);
+    const backend = Option.some(service);
+    const question = await ask(service, "call-dpop-mask");
+    const baseDir = newDir("m06-dpop-mask-t3-");
+
+    const out = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* Layer.build(yield* storeLayer(baseDir));
+          const cli = yield* Layer.build(yield* storeLayer(baseDir));
+          const store = SessionStoreOf(server);
+          const original = yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.millis(300),
+          });
+          const successor = yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: KEY,
+            ttl: Duration.hours(1),
+          });
+          // Same subject, DPoP, every scope, live and issued later, but another device's key: not the renewal T3 follows.
+          yield* store.issue({
+            subject: "paired-device",
+            scopes,
+            method: DPOP,
+            proofKeyThumbprint: "jkt-device-2",
+            ttl: Duration.hours(1),
+          });
+          const actor = yield* connectionActor({
+            sessionId: original.sessionId,
+            scopes,
+            proofKeyThumbprint: KEY,
+          }).pipe(Effect.provide(server));
+          yield* pause(450);
+          const renewedRead = yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+          yield* SessionStoreOf(cli).revoke(successor.sessionId);
+          const journalBefore = journalOf(stateRoot);
+          const refused = yield* interactionsAnswer(backend, actor, {
+            interactionId: question.interactionId,
+            revision: question.revision,
+            answers: ANSWER,
+          });
+          return { renewedRead, refused, journalBefore, journalAfter: journalOf(stateRoot) };
+        }).pipe(Effect.provide(NODE)),
+      ),
+    );
+
+    expect(out.renewedRead).toMatchObject({ ok: true });
+    expect(out.refused).toMatchObject({ ok: false, code: REVOKED });
+    expect(out.journalAfter).toBe(out.journalBefore);
+  });
+
+  it("follows the newest renewal when the first renewal expired too, and refuses once that current session is revoked", async () => {
+    const baseDir = newDir("m06-dpop-chain-t3-");
+    const fake = countingService();
+    const backend = Option.some({ interactions: () => fake.service }) as never;
+    const out = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* Layer.build(yield* storeLayer(baseDir));
+          const cli = yield* Layer.build(yield* storeLayer(baseDir));
+          const store = SessionStoreOf(server);
+          const issue = (ttl: number) =>
+            store.issue({
+              subject: "paired-device",
+              scopes,
+              method: DPOP,
+              proofKeyThumbprint: KEY,
+              ttl: Duration.millis(ttl),
+            });
+          const first = yield* issue(150);
+          yield* issue(150);
+          const actor = yield* connectionActor({
+            sessionId: first.sessionId,
+            scopes,
+            proofKeyThumbprint: KEY,
+          }).pipe(Effect.provide(server));
+          yield* pause(250); // the first and the second have both expired
+          const third = yield* issue(60_000); // the current session, the end of the chain
+          const onThird = yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+          yield* SessionStoreOf(cli).revoke(third.sessionId);
+          const revoked = yield* interactionsSnapshot(backend, actor, { rootSessionId: ROOT });
+          return { onThird, revoked };
+        }).pipe(Effect.provide(NODE)),
+      ),
+    );
+    expect(out.onThird).toMatchObject({ ok: true });
+    expect(out.revoked).toMatchObject({ ok: false, code: "INTERACTION_NOT_FOUND" });
+  });
+});
+
+describe("the current-chain seam of T3's SessionStore changes nothing for a bare T3 (Aetheria IP-26)", () => {
+  it("answers just the session for a plain session, never writes, and a connection actor built without the stores has no check", async () => {
+    const baseDir = newDir("m06-bare-t3-");
+    const fake = countingService();
+    const backend = Option.some({ interactions: () => fake.service }) as never;
+    const out = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* Layer.build(yield* storeLayer(baseDir));
+          const store = SessionStoreOf(server);
+          const plain = yield* store.issue({ subject: "browser", scopes });
+          const before = yield* store.listActive();
+          const chain = yield* store.currentChain(plain.sessionId);
+          const withKey = yield* store.currentChain(plain.sessionId, "jkt-nobody");
+          const missing = yield* store.currentChain(
+            "00000000-0000-4000-8000-000000000000" as never,
+          );
+          const after = yield* store.listActive();
+          // No SessionStore or repository in scope: the connection actor is the plain actor and calls reach the service.
+          const bare = yield* connectionActor({ sessionId: "anything", scopes });
+          const reply = yield* interactionsSnapshot(backend, bare, { rootSessionId: ROOT });
+          return { plain: plain.sessionId, chain, withKey, missing, before, after, reply };
+        }).pipe(Effect.provide(NODE)),
+      ),
+    );
+    expect(out.chain).toEqual([out.plain]);
+    expect(out.withKey).toEqual([out.plain]);
+    expect(out.missing).toEqual(["00000000-0000-4000-8000-000000000000"]);
+    expect(out.after).toEqual(out.before);
+    expect(out.reply).toMatchObject({ ok: true });
+    expect(fake.calls).toEqual(["snapshot"]);
   });
 });
 

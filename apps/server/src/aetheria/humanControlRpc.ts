@@ -22,8 +22,14 @@
 // state, and every call below runs it first: one primary-key read of the persistent `auth_sessions` row (T3's AuthSessionRepository.getById, never the in-memory cache). A
 // revoked or missing row, or an expired non-DPoP session, is refused before the service is called, so nothing is written: an action answers `INTERACTION_ORIGIN_NOT_HUMAN`, a
 // read `INTERACTION_NOT_FOUND`, and a stream ends. A session state that cannot be read is `INTERACTION_UNAVAILABLE` (nothing written either), never a pass. An actor built without
-// the repository in scope (a unit test's) has no check. A DPoP session's expiry is left to T3, whose renewal chain moves a live socket to its successor; revocation of the
-// original is still checked, revocation of only a successor is not (T3's own awaitInvalidation reads the chain).
+// the repository in scope (a unit test's) has no check. A DPoP socket may outlive its session: T3's renewal chain (SessionStore.awaitInvalidation) moves it to a successor once the
+// original expires, so the actor keeps the ORIGINAL id and the DPoP key it was accepted with. The check asks the session store's read-only seam for the chain the socket is on NOW (the
+// original, then the newest session for its key when the original expired, as awaitInvalidation walks it; the seam is the one marked T3 addition for this, registered as IP-26),
+// reads every id of the chain from the persistent rows, and refuses when any is revoked or missing or when the END of the chain has expired. A successor revoked by a separate
+// process therefore refuses, and another live session of the same subject does not stand in for it. The chain lives only in the server process's memory, as do its sockets: after a
+// restart no socket survives, and a chain that cannot be resolved is the session alone (an expired one with no renewal is refused as expired, which is also when T3 closes the socket);
+// a read that fails is INTERACTION_UNAVAILABLE. One gap remains: T3 follows the newest session at the moment each link expires, so a link that was current only in the past and
+// has since expired is not in a later snapshot, and revoking exactly that link is not seen (T3's own live waiter would close the socket).
 //
 // Tasks. `tasks.get` reads the Backend's derived task view after the same checks, then checks access to the root the service derived for it.
 import type {
@@ -54,6 +60,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 
+import * as SessionStore from "../auth/SessionStore.ts";
 import { AuthSessionRepository } from "../persistence/AuthSessions.ts";
 
 type Backend = Option.Option<Pick<AetheriaBackendService, "interactions">>;
@@ -74,27 +81,35 @@ type Standing = "active" | "revoked" | "unreadable";
 /** Per actor, the check of its device session. An actor with no entry has no check (see the header). */
 const standings = new WeakMap<ClientActor, Effect.Effect<Standing>>();
 
-/** One primary-key read of the session's row from T3's persistent store, decided by the row alone. */
-const readStanding = (
-  repository: AuthSessionRepository["Service"],
-  sessionId: string,
-): Effect.Effect<Standing> =>
-  repository.getById({ sessionId: sessionId as AuthSessionId }).pipe(
-    Effect.flatMap((row): Effect.Effect<Standing> =>
-      Option.isNone(row) || row.value.revokedAt !== null
-        ? Effect.succeed("revoked")
-        : row.value.method === "dpop-access-token"
-          ? Effect.succeed("active")
-          : DateTime.now.pipe(
-              Effect.map((now): Standing =>
-                row.value.expiresAt.epochMilliseconds <= now.epochMilliseconds
-                  ? "revoked"
-                  : "active",
-              ),
-            ),
-    ),
-    Effect.orElseSucceed((): Standing => "unreadable"),
-  );
+/** What the connection's device session stands on: the T3 session store when it is in scope (the live renewal chain), else the persistent rows alone. */
+type Sessions = SessionStore.SessionStore["Service"] | undefined;
+
+/**
+ * The connection's standing from T3's persistent rows. The ids come from the session store's `currentChain` seam: the session the socket was accepted on and, for a DPoP socket whose
+ * original expired, the renewal T3 moved it to (the end of the chain). Every id is read fresh from `auth_sessions` and none of them may be revoked or missing, as T3's own
+ * `awaitInvalidation` decides; the last one must not have expired. So a revocation by a separate process of ANY session of the chain, or an expiry with no renewal, refuses. A chain that
+ * cannot be resolved or a row that cannot be read is `unreadable`, never a pass.
+ */
+const readStanding = Effect.fn("AetheriaHumanControl.readStanding")(
+  function* (
+    repository: AuthSessionRepository["Service"],
+    sessions: Sessions,
+    session: { readonly sessionId: string; readonly proofKeyThumbprint?: string | undefined },
+  ): Effect.fn.Return<Standing, unknown> {
+    const own = session.sessionId as AuthSessionId;
+    const chain =
+      sessions === undefined
+        ? [own]
+        : yield* sessions.currentChain(own, session.proofKeyThumbprint);
+    const rows = yield* Effect.forEach(chain, (id) => repository.getById({ sessionId: id }));
+    if (rows.some((row) => Option.isNone(row) || row.value.revokedAt !== null)) return "revoked";
+    const end = rows.at(-1);
+    if (end === undefined || Option.isNone(end)) return "revoked";
+    const now = yield* DateTime.now;
+    return end.value.expiresAt.epochMilliseconds > now.epochMilliseconds ? "active" : "revoked";
+  },
+  Effect.orElseSucceed((): Standing => "unreadable"),
+);
 
 const standingOf = (actor: ClientActor): Effect.Effect<Standing> =>
   standings.get(actor) ?? Effect.succeed("active");
@@ -108,16 +123,22 @@ export const connectionActor = Effect.fn("AetheriaHumanControl.connectionActor")
   function* (session: {
     readonly sessionId: string;
     readonly scopes: ReadonlyArray<string>;
+    /** The DPoP key of the session the socket was accepted on, when it has one: the seam follows T3's renewal for it. */
+    readonly proofKeyThumbprint?: string | undefined;
   }): Effect.fn.Return<ClientActor> {
     const now = yield* DateTime.now;
     const repository = yield* Effect.serviceOption(AuthSessionRepository);
+    const sessions = yield* Effect.serviceOption(SessionStore.SessionStore);
     const actor: ClientActor = {
       clientSessionId: session.sessionId,
       grantedScopes: [...session.scopes],
       authenticatedAt: DateTime.formatIso(now),
     };
     if (Option.isSome(repository))
-      standings.set(actor, readStanding(repository.value, session.sessionId));
+      standings.set(
+        actor,
+        readStanding(repository.value, Option.getOrUndefined(sessions), session),
+      );
     return actor;
   },
 );
