@@ -24,6 +24,7 @@ import {
   HUMAN_CONTROL_BACKEND_ENTRY,
   createHumanControlBackendRegistration,
 } from "./humanControl.ts";
+import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import {
   PROVIDERS_BACKEND_ENTRY,
   PROVIDERS_BACKEND_ID,
@@ -64,6 +65,7 @@ function prepare(
         now: () => Date.parse(ISO),
       }),
       createHumanControlBackendRegistration({}),
+      createOrchestrationBackendRegistration({}),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);
@@ -82,6 +84,7 @@ describe("the second pinned archive", () => {
       "@aetheria/awareness",
       "@aetheria/evidence",
       "@aetheria/interaction",
+      "@aetheria/orchestration",
       "@aetheria/providers",
     ]);
     expect(Object.keys(declared).sort()).toEqual(["archive", "stamp", "version"]);
@@ -117,6 +120,7 @@ describe("the providers module's descriptor", () => {
       AGENT_AWARENESS_BACKEND_ENTRY,
       PROVIDERS_BACKEND_ENTRY,
       HUMAN_CONTROL_BACKEND_ENTRY,
+      "aetheria:orchestration-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(PROVIDERS_BACKEND_ENTRY).toBe("aetheria:providers-backend");
@@ -145,11 +149,13 @@ describe("the providers module's descriptor", () => {
       "agent-awareness-backend",
       "providers-backend",
       "human-control-backend",
+      "orchestration-backend",
     ]);
     expect(m.compositions[0]?.modules).toEqual([
       "agent-awareness-backend",
       "providers-backend",
       "human-control-backend",
+      "orchestration-backend",
     ]);
     expect(m.compositions[0]?.id).toBe(BACKEND_COMPOSITION_ID);
   });
@@ -166,6 +172,7 @@ describe("the providers module's descriptor", () => {
         createAgentAwarenessBackendRegistration(),
         createProvidersBackendRegistration({ composition: BACKEND_COMPOSITION_ID }),
         createHumanControlBackendRegistration({}),
+        createOrchestrationBackendRegistration({}),
       ],
     });
     expect(result.outcome === "refused" && result.faults.map((f) => f.code)).toEqual([
@@ -276,6 +283,7 @@ describe("production mode over the real archive", () => {
     const report = await backend.dispose("test");
     expect(report).toMatchObject({ ok: true, stillLive: [], failed: [], unobserved: [] });
     expect(report.order).toEqual([
+      "orchestration-backend",
       "human-control-backend",
       "providers-backend",
       "agent-awareness-backend",

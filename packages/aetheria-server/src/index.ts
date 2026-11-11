@@ -42,6 +42,59 @@ export {
   type ThreadTurnDispatch,
 } from "./humanControl.ts";
 export {
+  ORCHESTRATION_BACKEND_ENTRY,
+  ORCHESTRATION_BACKEND_ID,
+  ORCHESTRATION_UNAVAILABLE_CODE,
+  createOrchestrationBackendRegistration,
+  orchestrationBackendModuleRow,
+  type OrchestrationBackendRegistration,
+  type OrchestrationCaller,
+  type OrchestrationDrainReport,
+  type OrchestrationOutcome,
+  type OrchestrationRegistrationOptions,
+  type OrchestrationService,
+  type OrchestrationServiceDeps,
+  type OrchestrationServiceFactory,
+} from "./orchestration.ts";
+export {
+  createOrchestrationFactory,
+  type CallerContextPort,
+  type CallerContextResult,
+  type OrchestrationFactoryOptions,
+} from "./orchestrationFactory.ts";
+export {
+  THREAD_PORT_CALLS,
+  type ChildLineageReader,
+  type ChildLineageThread,
+  type ChildModelSelection,
+  type ChildRestartNote,
+  type ChildThreadLineage,
+  type ChildThreadPort,
+  type ChildThreadStatus,
+  type ChildTurnCompletedEvent,
+  type ChildTurnOutcome,
+  type CompletionWake,
+  type CreateChildThreadInput,
+  type DelegatedCompletionState,
+  type PlanModeInheritPort,
+  type PortResult,
+  type ResumeBarrierPort,
+} from "./orchestrationPorts.ts";
+export {
+  GENERIC_SPAWN_TOOL,
+  createSpawnAuthorizer,
+  type SpawnAuthorization,
+  type SpawnAuthorizerOptions,
+  type SpawnAuthorizerPort,
+  type SpawnLaunchFacts,
+  type SpawnRoute,
+} from "./spawnAuthorizer.ts";
+export {
+  createProductionProjectRootCache,
+  createProjectRootCache,
+  type ProjectRootCache,
+} from "./projectRoot.ts";
+export {
   PI_SELECTION_SEAM_SLOT,
   createPiSelectionSeam,
   installPiSelectionSeam,

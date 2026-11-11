@@ -12,13 +12,16 @@
 // half Backend. A start that does not report `started` fails the layer the same way.
 import {
   createAetheriaBackendService,
+  createOrchestrationFactory,
   installPiSelectionSeam,
   prepareAetheriaBackend,
   type AetheriaBackendService,
   type HumanControlServiceFactory,
+  type OrchestrationServiceFactory,
   type StoredEventLike,
 } from "@t3tools/aetheria-server";
 import { ThreadId } from "@t3tools/contracts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
@@ -31,10 +34,16 @@ import * as Stream from "effect/Stream";
 import * as ServerConfig from "../config.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { layerFromBackend } from "./backendComposition.ts";
+import { makeCallerContext } from "./callerContext.ts";
 import { makeThreadTurnDispatch } from "./humanControlDelivery.ts";
+import { makeLaunchFacts } from "./launchFacts.ts";
+import { makeLineageReader } from "./lineageReader.ts";
+import { makeChildThreadPort } from "./threadPort.ts";
 
 const STATE_ROOT_ENV = "AETHERIA_STATE_ROOT";
 const PI_AGENT_DIR_ENV = "AETHERIA_PI_AGENT_DIR";
@@ -58,6 +67,11 @@ export const makeLayer = (
     readonly checkout?: string;
     /** Builds the interaction service (M06). Absent: the module answers unavailable. */
     readonly interactionFactory?: HumanControlServiceFactory;
+    /**
+     * Builds the children service (M05). Absent: the production join `createOrchestrationFactory` over the orchestration archive is used when T3's managed-work
+     * services exist (a test seam otherwise); without them the orchestration module answers unavailable.
+     */
+    readonly orchestrationFactory?: OrchestrationServiceFactory;
   } = {},
 ) =>
   Layer.effect(
@@ -86,9 +100,81 @@ export const makeLayer = (
         );
       const turnDispatch = yield* makeThreadTurnDispatch(threads.value, receipts.value);
       const startup = yield* Effect.serviceOption(ServerRuntimeStartup.ServerRuntimeStartup);
+      // M05 step 6 (C10): T3 as the children service sees it. A graph without these services leaves the module registered but unavailable (logged), because
+      // managed work is not part of late-answer delivery and must not stop the Backend; nothing is stubbed.
+      const orchestrator = yield* Effect.serviceOption(Orchestrator.OrchestratorV2);
+      const providerSessions = yield* Effect.serviceOption(
+        ProviderSessionManager.ProviderSessionManagerV2,
+      );
+      const ids = yield* Effect.serviceOption(IdAllocator.IdAllocatorV2);
+      let indexOf: (() => AetheriaBackendService["index"] | undefined) | undefined;
+      const sessionIndex = () => indexOf?.();
+      const managedWork =
+        Option.isSome(orchestrator) && Option.isSome(providerSessions) && Option.isSome(ids)
+          ? {
+              childThreads: yield* makeChildThreadPort({
+                threads: threads.value,
+                orchestrator: orchestrator.value,
+                sessions: providerSessions.value,
+                sink,
+                ids: ids.value,
+              }),
+              childLineage: yield* makeLineageReader(threads.value, (threadId) => {
+                const found = sessionIndex()?.lookup(threadId);
+                return found === undefined
+                  ? "unknown"
+                  : found.status === "ok"
+                    ? found.binding.sessionId
+                    : found.status === "absent"
+                      ? null
+                      : "unknown";
+              }),
+              launchFacts: yield* makeLaunchFacts(
+                orchestrator.value,
+                (sessionId) => sessionIndex()?.bindingOfSession(sessionId)?.threadId,
+              ),
+            }
+          : undefined;
+      if (managedWork === undefined)
+        yield* Effect.logWarning(
+          "Aetheria managed work is unavailable: the server graph lacks the orchestrator, provider session manager or id allocator",
+        );
+      // M05 step 9 (C10): the join to the archive's children service. The caller is the carrier's session; its thread and working folder come from M04's index and
+      // its active run and node from T3's projection, never from an argument. Built only when T3's services exist, or the module stays unavailable.
+      const orchestrationFactory =
+        options.orchestrationFactory ??
+        (Option.isSome(orchestrator) && managedWork !== undefined
+          ? createOrchestrationFactory({
+              callerContext: yield* makeCallerContext(orchestrator.value, (sessionId) => {
+                const binding = sessionIndex()?.bindingOfSession(sessionId);
+                return binding === undefined
+                  ? undefined
+                  : { threadId: binding.threadId, workingFolder: binding.workingFolder };
+              }),
+              onBoot: (report) => {
+                void runPromise(
+                  (report.lineage === "unavailable" ? Effect.logWarning : Effect.logInfo)(
+                    "Aetheria managed work boot reconciliation",
+                    {
+                      lineage: report.lineage,
+                      closed: report.closed.length,
+                      retired: report.retired.length,
+                      unconfirmed: report.unconfirmed.length,
+                      unknown: report.unknown.length,
+                      leftover: report.leftover.length,
+                      orphanRecords: report.orphanRecords.length,
+                      problems: report.problems.length,
+                    },
+                  ),
+                ).catch(() => undefined);
+              },
+            })
+          : undefined);
       const made = createAetheriaBackendService({
         stateRoot,
         turnDispatch,
+        ...managedWork,
+        ...(orchestrationFactory === undefined ? {} : { orchestrationFactory }),
         ...(options.checkout === undefined ? {} : { checkout: options.checkout }),
         ...(options.interactionFactory === undefined
           ? {}
@@ -120,6 +206,7 @@ export const makeLayer = (
         );
       }
       const { service } = made;
+      indexOf = () => service.index;
       yield* Effect.acquireRelease(
         Effect.promise(() => service.start()).pipe(
           Effect.flatMap((result) =>

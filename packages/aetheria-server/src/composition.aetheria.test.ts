@@ -8,6 +8,7 @@ import { BACKEND_COMPOSITION_ID, backendManifest } from "./composition.ts";
 import { prepareAetheriaBackend } from "./aetheriaBackend.ts";
 import { AGENT_AWARENESS_BACKEND_ID, agentAwarenessBackendModuleRow } from "./agentAwareness.ts";
 import { humanControlBackendModuleRow } from "./humanControlRow.ts";
+import { orchestrationBackendModuleRow } from "./orchestrationRow.ts";
 import { providersBackendModuleRow } from "./providers.ts";
 import { PINNED_ARTIFACT } from "./index.ts";
 
@@ -26,7 +27,12 @@ describe("the Backend composition", () => {
     expect(manifest.compositions).toEqual([
       expect.objectContaining({
         id: BACKEND_COMPOSITION_ID,
-        modules: [AGENT_AWARENESS_BACKEND_ID, "providers-backend", "human-control-backend"],
+        modules: [
+          AGENT_AWARENESS_BACKEND_ID,
+          "providers-backend",
+          "human-control-backend",
+          "orchestration-backend",
+        ],
       }),
     ]);
     expect(manifest.compositions[0]).not.toHaveProperty("extends");
@@ -34,6 +40,7 @@ describe("the Backend composition", () => {
       agentAwarenessBackendModuleRow(),
       providersBackendModuleRow(),
       humanControlBackendModuleRow(),
+      orchestrationBackendModuleRow(),
     ]);
     expect(BACKEND_COMPOSITION_ID).toBe("aetheria-backend");
   });

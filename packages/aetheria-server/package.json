@@ -16,6 +16,7 @@
     "@aetheria/awareness": "file:./artifacts/aetheria-awareness-0.1.0.tgz",
     "@aetheria/evidence": "file:./artifacts/aetheria-evidence-0.1.0.tgz",
     "@aetheria/interaction": "file:./artifacts/aetheria-interaction-0.1.0.tgz",
+    "@aetheria/orchestration": "file:./artifacts/aetheria-orchestration-0.1.0.tgz",
     "@aetheria/providers": "file:./artifacts/aetheria-providers-0.1.0.tgz",
     "@t3tools/aetheria-contracts": "workspace:*"
   },
@@ -38,6 +39,11 @@
       "archive": "artifacts/aetheria-interaction-0.1.0.tgz",
       "version": "0.1.0",
       "stamp": "sha256:59822ce839d64af78741baf86af04fd74d13c5a0fbd1325bad2c0e1fcb3e68de"
+    },
+    "@aetheria/orchestration": {
+      "archive": "artifacts/aetheria-orchestration-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:dd5fa4cbe7b3674d675517977f794ef924bbaa138707168952d56935ec7c53cb"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",

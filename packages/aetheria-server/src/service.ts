@@ -23,6 +23,16 @@ import {
   type HumanControlServiceFactory,
   type ThreadTurnDispatch,
 } from "./humanControl.ts";
+import {
+  createOrchestrationBackendRegistration,
+  type OrchestrationService,
+  type OrchestrationServiceFactory,
+} from "./orchestration.ts";
+import { createChildStatus } from "./orchestrationChildStatus.ts";
+import type { ChildLineageReader, ChildThreadPort } from "./orchestrationPorts.ts";
+import { createSpawnAuthorizer, type SpawnAuthorizerOptions } from "./spawnAuthorizer.ts";
+import { createResumeBarrier } from "./orchestrationResume.ts";
+import { createProductionProjectRootCache } from "./projectRoot.ts";
 import { createPiSelectionSeam, type PiSelectionSeam } from "./routeSeam.ts";
 import { createSnapshotRetention } from "./snapshotRetention.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
@@ -62,6 +72,10 @@ export interface AetheriaBackendServiceOptions {
   readonly stateRoot: string;
   /** T3's current MCP credential id for a thread (the id its bearer proves), or undefined when T3 holds none. */
   readonly credentialOf: (threadId: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * Test seam: another working-folder-to-project-root rule for the thread index. Absent in production, which derives the root with M03's `deriveProject` for each
+   * working folder it observes (projectRoot.ts) and reads `null` for a folder it could not derive.
+   */
   readonly projectRootOf?: (workingFolder: string) => string | null;
   /**
    * The Aetheria checkout (`AETHERIA_CHECKOUT`, the value the server's Pi child also receives): the source of the CURRENT role catalog and of the home
@@ -84,8 +98,22 @@ export interface AetheriaBackendServiceOptions {
   readonly git?: GitPort;
   /** Test seam for the state-root owner lock: the process probe, this process's identity, the takeover bound. Absent in production. */
   readonly ownerLock?: Pick<OwnerLockOptions, "probe" | "self" | "staleAfterMs">;
-  /** The owned-child status of XC-10. Absent in production (M05): `assign` is unavailable. Only a test supplies it. */
+  /**
+   * Test seam: another owned-child status for XC-10. Absent in production, which asks the running children service (orchestrationChildStatus.ts): `assign` is
+   * unavailable while that service is not running or the ownership is unknown.
+   */
   readonly childStatus?: BoardRuntimeOptions["childStatus"];
+  /**
+   * T3 as the children service sees it, adapted by the host that assembles the Backend (M05 step 6; the apps/server wrapper, with the captured Effect runtime).
+   * Absent, or without `orchestrationFactory`: the orchestration module is registered and answers unavailable for every operation.
+   */
+  readonly childThreads?: ChildThreadPort;
+  /** T3's record of a caller's launch facts (the thread's model, runtime and interaction modes): the child's routes and modes. Absent: every spawn is refused as unavailable. */
+  readonly launchFacts?: SpawnAuthorizerOptions["launchFacts"];
+  /** Boot's lineage listing over T3's thread shells (apps/server lineageReader.ts). Absent: boot reconciliation sees lineage as unavailable, never as empty. */
+  readonly childLineage?: ChildLineageReader;
+  /** Builds the children service (M05 steps 5 and 7). Absent until the orchestration archive is packed: the module answers unavailable, never a stub success. */
+  readonly orchestrationFactory?: OrchestrationServiceFactory;
   /**
    * The composition to prepare. Default: the production `aetheria-backend`. Another id is a scripted test composition built from the same rows;
    * it is the only place a fixture may run. Ignored when `manifest` is given (the manifest names its own composition then).
@@ -155,6 +183,11 @@ export interface AetheriaBackendService {
     listener: Parameters<HumanControlService["onChange"]>[0],
     onEnd: () => void,
   ): (() => void) | undefined;
+  /**
+   * The ONE children service (M05), shared by the XC-6 operations and the Backend's direct calls (`admitTurn`, `interruptTurn`, `subscribeSettled`,
+   * `cancelTree`); undefined before start and after drain, or while no service is configured. A caller that finds it undefined answers unavailable.
+   */
+  orchestration(): OrchestrationService | undefined;
 }
 
 export type CreateServiceResult =
@@ -164,9 +197,12 @@ export type CreateServiceResult =
 export function createAetheriaBackendService(
   options: AetheriaBackendServiceOptions,
 ): CreateServiceResult {
+  // M05 step 6 (D14): the index's rule is synchronous, M03's derivation is not. Production precomputes the canonical root of each working folder the Backend
+  // observes (see `ingest`) before the index binds it; the index reads the precomputed answer.
+  const projectRoots = createProductionProjectRootCache({ checkout: options.checkout });
   const index = createThreadIndex({
     stateRoot: options.stateRoot,
-    ...(options.projectRootOf === undefined ? {} : { projectRootOf: options.projectRootOf }),
+    projectRootOf: options.projectRootOf ?? projectRoots.projectRootOf,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const tracker = createLifecycleTracker({ index });
@@ -210,6 +246,8 @@ export function createAetheriaBackendService(
       };
     return service.questionEvidence(args);
   };
+  // M05 step 6 (D13): the production XC-10 child status asks the running children service, looked up at each call (the module starts later than the board).
+  let orchestrationNow: () => OrchestrationService | undefined = () => undefined;
   const board = createBoardRuntime({
     stateRoot: options.stateRoot,
     index,
@@ -217,7 +255,8 @@ export function createAetheriaBackendService(
     config: config.config,
     now: options.now ?? Date.now,
     git: options.git ?? createGit(),
-    childStatus: options.childStatus,
+    childStatus:
+      options.childStatus ?? createChildStatus({ index, service: () => orchestrationNow() }),
     questionEvidence,
   });
 
@@ -282,6 +321,65 @@ export function createAetheriaBackendService(
             }),
   });
   interactionsNow = () => humanControlRegistration.interactions();
+  // M05 step 6 (C2 "on resume"): the barrier the children service awaits before it releases a session's deliveries; M06's resume handling is tracked into it below.
+  const resumeBarrier = createResumeBarrier();
+  const sessionOfThread = (threadId: string): string | undefined => {
+    const found = index.lookup(threadId);
+    return found.status === "ok" && index.bindingOfSession(found.binding.sessionId) !== undefined
+      ? found.binding.sessionId
+      : undefined;
+  };
+  const threadOfSession = (sessionId: string): string | undefined =>
+    index.bindingOfSession(sessionId)?.threadId;
+  const lineageSessionOf = (threadId: string): string | null | "unknown" => {
+    const found = index.lookup(threadId);
+    return found.status === "ok"
+      ? found.binding.sessionId
+      : found.status === "absent"
+        ? null
+        : "unknown";
+  };
+  // M03's verdict on a spawn, from the carrier-verified session and the index's working folder. Without launch facts from T3 it refuses (unavailable).
+  const spawnAuthorizer = createSpawnAuthorizer({
+    reader: identityReader,
+    checkout: options.checkout,
+    launchFacts: options.launchFacts ?? (async () => undefined),
+    env: options.auditRoles?.env,
+    homedir: options.auditRoles?.homedir,
+  });
+  const childThreads = options.childThreads;
+  const orchestrationFactory = options.orchestrationFactory;
+  // The module is configured only when BOTH the factory and T3's thread port exist; otherwise it answers unavailable (no stub success).
+  const orchestrationRegistration = createOrchestrationBackendRegistration({
+    create:
+      orchestrationFactory === undefined || childThreads === undefined
+        ? undefined
+        : () =>
+            orchestrationFactory({
+              stateRoot: options.stateRoot,
+              now: options.now ?? Date.now,
+              threads: childThreads,
+              planMode: {
+                // Looked up at each call: the interaction service is not running before start and after drain, and that is unavailable, never a guess.
+                inheritPlanMode: async (parent, child, kind) => {
+                  const interactions = humanControlRegistration.interactions();
+                  if (interactions === undefined)
+                    return { ok: false, code: "INTERACTION_UNAVAILABLE" };
+                  const outcome = await interactions.inheritPlanMode(parent, child, kind);
+                  return outcome.ok ? { ok: true } : { ok: false, code: outcome.code };
+                },
+              },
+              resume: resumeBarrier,
+              sessionOfThread,
+              threadOfSession,
+              lineageSessionOf,
+              spawnAuthorizer,
+              lineage: options.childLineage ?? {
+                listChildThreads: async () => ({ ok: false, reason: "unavailable" }),
+              },
+            }),
+  });
+  orchestrationNow = () => orchestrationRegistration.service();
   // M06 step 13: T3 attaching a bound thread to a provider session after the replay is a resume; the interaction service ends the waits no segment
   // holds and retries undelivered late answers for that Pi session. The horizon is the one the board uses; the signal never fires before it is known.
   let replayHorizon: number | undefined;
@@ -300,12 +398,19 @@ export function createAetheriaBackendService(
     tracker,
     credentialOf: options.credentialOf,
     onThreadAttached: (event) => {
-      void resume.attached(event);
+      const handling = resume.attached(event);
+      const sessionId = sessionOfThread(event.threadId);
+      if (sessionId !== undefined) void resumeBarrier.track(sessionId, handling);
     },
   });
   const prepared = prepareAetheriaBackend({
     composition,
-    registrations: [registration, providersRegistration, humanControlRegistration],
+    registrations: [
+      registration,
+      providersRegistration,
+      humanControlRegistration,
+      orchestrationRegistration,
+    ],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
   if (prepared.outcome === "refused") return { outcome: "refused", faults: prepared.faults };
@@ -381,6 +486,15 @@ export function createAetheriaBackendService(
     async ingest(stored) {
       try {
         const event = stored?.event;
+        // M05 step 6 (D14): the working folder of a provider session is a fact of this event; its canonical project root is derived (and refreshed, on launch and on
+        // resume alike) BEFORE the feed hands the folder to the index's synchronous rule. A folder that cannot be derived stays `null`.
+        if (
+          event?.type === "provider-session.attached" ||
+          event?.type === "provider-session.updated"
+        ) {
+          const cwd = (event.payload as { readonly cwd?: unknown } | undefined)?.cwd;
+          if (typeof cwd === "string") await projectRoots.observe(cwd);
+        }
         if (
           event !== undefined &&
           typeof stored.sequence === "number" &&
@@ -419,6 +533,7 @@ export function createAetheriaBackendService(
       providersRegistration.openSnapshot(sessionId, snapshotId),
     interactions: () => humanControlRegistration.interactions(),
     watchInteractions: (listener, onEnd) => humanControlRegistration.watch(listener, onEnd),
+    orchestration: () => orchestrationRegistration.service(),
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

@@ -27,10 +27,12 @@ import {
   EVIDENCE_LIBRARY_EXPORTS,
   INTERACTION_LIBRARY_EXPORTS,
   LIBRARY_EXPORTS,
+  ORCHESTRATION_LIBRARY_EXPORTS,
   PROVIDERS_LIBRARY_EXPORTS,
 } from "./library.ts";
 import * as evidenceEntry from "@aetheria/evidence/backend";
 import * as interactionEntry from "@aetheria/interaction/backend";
+import * as orchestrationEntry from "@aetheria/orchestration/backend";
 import * as providersEntry from "@aetheria/providers/backend";
 
 const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -55,8 +57,17 @@ describe("the pinned archive", () => {
       "@aetheria/awareness",
       "@aetheria/evidence",
       "@aetheria/interaction",
+      "@aetheria/orchestration",
       "@aetheria/providers",
     ]);
+    // M05 step 9: the fifth archive is a dependency by file and declared with the same three fields.
+    expect(manifest.dependencies["@aetheria/orchestration"]).toBe(
+      "file:./artifacts/aetheria-orchestration-0.1.0.tgz",
+    );
+    expect(manifest.aetheriaArtifacts["@aetheria/orchestration"]).toMatchObject({
+      archive: "artifacts/aetheria-orchestration-0.1.0.tgz",
+      version: "0.1.0",
+    });
     expect(Object.keys(declared).sort()).toEqual(["archive", "stamp", "version"]);
     expect(declared).toMatchObject({
       archive: "artifacts/aetheria-awareness-0.1.0.tgz",
@@ -102,6 +113,7 @@ describe("the artifact boundary", () => {
             "@aetheria/providers/backend",
             "@aetheria/interaction/backend",
             "@aetheria/evidence/backend",
+            "@aetheria/orchestration/backend",
           ]).toContain(specifier);
         }
         expect(specifier).not.toMatch(/packages\/aetheria-|apps\/aetheria|(\.\.\/){3,}/);
@@ -123,6 +135,12 @@ describe("the artifact boundary", () => {
     for (const name of PROVIDERS_LIBRARY_EXPORTS)
       expect(typeof (providersEntry as Record<string, unknown>)[name]).toBe("function");
     expect(providersEntry.PROVIDERS_BACKEND_ENTRY).toBe("@aetheria/providers/backend");
+  });
+
+  it("finds every name the orchestration module takes on the real orchestration archive's Backend entry", () => {
+    for (const name of ORCHESTRATION_LIBRARY_EXPORTS)
+      expect(typeof (orchestrationEntry as Record<string, unknown>)[name], name).toBe("function");
+    expect(orchestrationEntry.MANAGED_WORK_BACKEND_ENTRY).toBe("aetheria:orchestration-backend");
   });
 
   it("does not export the Agent host adapters or any identity writer through the Backend entry", () => {
@@ -155,6 +173,7 @@ describe("the Backend agent-awareness module", () => {
       AGENT_AWARENESS_BACKEND_ENTRY,
       "aetheria:providers-backend",
       "aetheria:human-control-backend",
+      "aetheria:orchestration-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(agentAwarenessBackendModuleRow()).toMatchObject({

@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "package": "@aetheria/orchestration",
+  "version": "0.1.0",
+  "archive": "aetheria-orchestration-0.1.0.tgz",
+  "sha256": "dd5fa4cbe7b3674d675517977f794ef924bbaa138707168952d56935ec7c53cb",
+  "stamp": "sha256:dd5fa4cbe7b3674d675517977f794ef924bbaa138707168952d56935ec7c53cb"
+}

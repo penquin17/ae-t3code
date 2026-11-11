@@ -1526,6 +1526,9 @@ importers:
       '@aetheria/interaction':
         specifier: file:./artifacts/aetheria-interaction-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz
+      '@aetheria/orchestration':
+        specifier: file:./artifacts/aetheria-orchestration-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz
       '@aetheria/providers':
         specifier: file:./artifacts/aetheria-providers-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz
@@ -2576,6 +2579,11 @@ packages:
 
   '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz':
     resolution: {integrity: sha512-kqQHj/Wj6L2igAdwn94PtFj0yxA9rFv6LNu4deYPn4g5D/2LmLJ310C7S5ZwND0MYFRu8mnZcyrxmtou5AdMCA==, tarball: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@aetheria/orchestration@file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz':
+    resolution: {integrity: sha512-0LDJ/go8MsIMVxYQTKvWRXw+62dUPxK0X43/9EPMXkLBtIcmfRR001yVosGrpSB0nxsMZl1h2JFf3H7c1AABTA==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
@@ -12598,6 +12606,8 @@ snapshots:
   '@aetheria/evidence@file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz': {}
 
   '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz': {}
+
+  '@aetheria/orchestration@file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz': {}
 
   '@aetheria/providers@file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz': {}
 

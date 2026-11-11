@@ -1,7 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off
 // AETHERIA — the one import site of the pinned library archives (design M02 D7/C3; M09 A15; M06 step 6).
-// It names exactly three specifiers, `@aetheria/awareness/backend`, `@aetheria/providers/backend` and `@aetheria/interaction/backend`,
-// the Backend-only entries of the archives declared in package.json; a test checks that no other module imports an `@aetheria/*` package.
+// It names exactly five specifiers, `@aetheria/awareness/backend`, `@aetheria/providers/backend`, `@aetheria/interaction/backend`, `@aetheria/evidence/backend`
+// and `@aetheria/orchestration/backend` (M05 step 9), the Backend-only entries of the archives declared in package.json; a test checks that no other module
+// imports an `@aetheria/*` package.
 import {
   createFxAv,
   createPiAuthPort,
@@ -70,6 +71,20 @@ import {
   createInteractionService,
 } from "@aetheria/interaction/backend";
 import { auditHistory } from "@aetheria/evidence/backend";
+import {
+  CHILD_WRITER,
+  createChildIdentityWriter,
+  createChildService,
+  createIdentityStore,
+  nodeStoreDeps,
+  openOrchestrationStore,
+  reconcileChildren,
+  type BootReport,
+  type CallerContext,
+  type ChildService,
+  type ManagedIdentityWriter,
+  type OrchestrationStore,
+} from "@aetheria/orchestration/backend";
 import * as NodeCrypto from "node:crypto";
 
 import {
@@ -181,6 +196,30 @@ export const readAuditHistory: AuditPort["history"] = (input) =>
     role: input.role,
     signal: input.signal,
   });
+
+export {
+  CHILD_WRITER,
+  createChildIdentityWriter,
+  createChildService,
+  createIdentityStore,
+  nodeStoreDeps,
+  openOrchestrationStore,
+  reconcileChildren,
+};
+export type { BootReport, CallerContext, ChildService, ManagedIdentityWriter, OrchestrationStore };
+
+/**
+ * The runtime functions the orchestration factory (orchestrationFactory.ts) calls; a test checks each exists on the installed orchestration archive's
+ * Backend entry. `CHILD_WRITER` is a value, the writer name `managed-work` M03's store is built with; it is checked separately.
+ */
+export const ORCHESTRATION_LIBRARY_EXPORTS = [
+  "createChildIdentityWriter",
+  "createChildService",
+  "createIdentityStore",
+  "nodeStoreDeps",
+  "openOrchestrationStore",
+  "reconcileChildren",
+] as const;
 
 /** The runtime functions the human-control module calls; a test checks each exists on the installed interaction archive's Backend entry. */
 export const INTERACTION_LIBRARY_EXPORTS = [
