@@ -808,6 +808,12 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  // AETHERIA-IP:IP-24 a subagent or fork child is never re-run after a restart, whatever the project setting says: its run is cut, it waits for a
+  // message, and a partial run's side effects do not repeat. Main threads keep the setting (M05 R2, design D9/D19 seam b).
+  const isChildLineage = (thread: ProjectionStore.ProjectionRuntimeRecoveryState["thread"]) =>
+    thread.lineage?.relationshipToParent === "subagent" ||
+    thread.lineage?.relationshipToParent === "fork";
+
   const reconcile = Effect.fn("ProviderRuntimeRecoveryService.reconcile")(function* (
     trigger: "startup" | "shutdown",
   ) {
@@ -836,6 +842,8 @@ export const make = Effect.gen(function* () {
         ),
       );
       const enabled =
+        // AETHERIA-IP:IP-24 a child is never continued after a restart (see isChildLineage)
+        !isChildLineage(projection.thread) &&
         continueAfterRestart !== null &&
         resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
           .continueThreadsAfterServerUpdate;
@@ -872,6 +880,8 @@ export const make = Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const projection = yield* projections.getRuntimeRecoveryProjection(threadId);
         if (
+          // AETHERIA-IP:IP-24 a child is never prepared for continuation (see isChildLineage)
+          isChildLineage(projection.thread) ||
           !resolveProjectSettings(enabled, projection.thread.projectId).settings
             .continueThreadsAfterServerUpdate
         )
