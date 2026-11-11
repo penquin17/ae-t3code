@@ -179,7 +179,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             interactionMode: projection.thread.interactionMode,
             cwd: folder,
           });
-          // AETHERIA-IP:IP-25 ask the Pi adapter to launch this thread's Pi with the id the service already activated an identity under. The adapter takes it once, at
+          // Integration point IP-25 (marked in provider-pi's adapter.ts): ask the Pi adapter to launch this thread's Pi with the id the service already activated an identity under. The adapter takes it once, at
           // the launch inside `open`; whatever it did not take is withdrawn below, so no request outlives this call.
           requestPiSessionId(threadId, requestedSessionId);
           const runtime = yield* sessions.open({
