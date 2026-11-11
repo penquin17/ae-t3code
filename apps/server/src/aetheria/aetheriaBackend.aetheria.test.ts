@@ -24,6 +24,8 @@ import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSe
 
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { AetheriaBackendComposition } from "./backendComposition.ts";
@@ -549,6 +551,61 @@ describe("late-answer delivery is part of the Backend when AETHERIA_STATE_ROOT i
               Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials(undefined))),
             ),
           ).pipe(Effect.flatMap(() => waitFor(() => bare.redelivered.length === 1))),
+        );
+      }),
+  );
+
+  // M05 step 9, native round 1: the production graph (server.ts, `RuntimeLayer.layerProduction`) exports the Orchestrator, the provider session manager and
+  // ThreadManagementService to this layer but NOT the id allocator, which that module provides only to the layers inside it. A layer that asked for the allocator
+  // from its context therefore never configured managed work in production while every test (which supplied the allocator itself) passed. These cases build the layer
+  // from exactly the services the production runtime exports, and from a graph that lacks one of them. They do not build the whole server graph.
+  const productionExports = (omit?: "orchestrator") =>
+    Layer.mergeAll(
+      layerMcpCredentials(undefined),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({
+        listProjectThreads: () => Effect.succeed([]) as never,
+      }),
+      Layer.mock(CommandReceiptStore.CommandReceiptStoreV2)({}),
+      Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
+      omit === "orchestrator" ? Layer.empty : Layer.mock(Orchestrator.OrchestratorV2)({}),
+    );
+  const managedWorkConfigured = (omit?: "orchestrator") =>
+    Effect.scoped(
+      Layer.build(
+        Live.makeLayer(makeRoot(false)).pipe(
+          Layer.provide(Layer.mergeAll(layerSink([]), productionExports(omit))),
+        ),
+      ).pipe(
+        Effect.flatMap((context) =>
+          waitFor(
+            () => Context.get(context, Live.AetheriaBackend).status().phase === "running",
+          ).pipe(
+            Effect.map(
+              () => Context.get(context, Live.AetheriaBackend).orchestration() !== undefined,
+            ),
+          ),
+        ),
+      ),
+    );
+
+  it.live(
+    "configures managed work from the services the production runtime exports, with no id allocator among them",
+    () =>
+      Effect.gen(function* () {
+        expect(yield* managedWorkConfigured()).toBe(true);
+      }),
+  );
+
+  it.live(
+    "a graph that lacks the orchestrator leaves managed work unavailable (the Backend still runs), and says which service is missing",
+    () =>
+      Effect.gen(function* () {
+        expect(yield* managedWorkConfigured("orchestrator")).toBe(false);
+        expect(Live.managedWorkMissing({ orchestrator: false, sessions: true, ids: true })).toEqual(
+          ["OrchestratorV2"],
+        );
+        expect(Live.managedWorkMissing({ orchestrator: true, sessions: true, ids: true })).toEqual(
+          [],
         );
       }),
   );

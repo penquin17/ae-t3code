@@ -137,7 +137,11 @@ export const makeLayer = (
           : undefined;
       if (managedWork === undefined)
         yield* Effect.logWarning(
-          "Aetheria managed work is unavailable: the server graph lacks the orchestrator, provider session manager or id allocator",
+          `Aetheria managed work is unavailable: the server graph lacks ${managedWorkMissing({
+            orchestrator: Option.isSome(orchestrator),
+            sessions: Option.isSome(providerSessions),
+            ids: Option.isSome(ids),
+          }).join(", ")}`,
         );
       // M05 step 9 (C10): the join to the archive's children service. The caller is the carrier's session; its thread and working folder come from M04's index and
       // its active run and node from T3's projection, never from an argument. Built only when T3's services exist, or the module stays unavailable.
@@ -281,7 +285,23 @@ export const makeLayer = (
       );
       return service;
     }),
+  ).pipe(
+    // The runtime's id allocator is stateless (`Layer.succeed`) and `RuntimeLayer.layerProduction` provides it only to the layers inside it, so it is NOT in this
+    // layer's context in the server graph; the Orchestrator, the provider session manager and ThreadManagementService are. Supplying it here makes the instance
+    // irrelevant: any allocator derives the same ids.
+    Layer.provide(IdAllocator.layer),
   );
+
+/** The services managed work needs from T3's runtime and which of them the graph does not give, by name (the warning must say, or a missing service hides). */
+export const managedWorkMissing = (have: {
+  readonly orchestrator: boolean;
+  readonly sessions: boolean;
+  readonly ids: boolean;
+}): string[] => [
+  ...(have.orchestrator ? [] : ["OrchestratorV2"]),
+  ...(have.sessions ? [] : ["ProviderSessionManagerV2"]),
+  ...(have.ids ? [] : ["IdAllocatorV2"]),
+];
 
 /** The digest of the composition the Backend validates, with no dependency, for the descriptor and the connection gates. */
 const compositionLayerFor = Layer.unwrap(
