@@ -65,6 +65,8 @@ export interface OrchestrationFactoryOptions {
   readonly onBoot?: ((report: BootReport) => void) | undefined;
   /** Test seam: attempt ids. Default: random ids that M03's store accepts as attempt names. */
   readonly newAttemptId?: (() => string) | undefined;
+  /** Test seam: the Pi session id of a new child. Default: a random UUID, a shape Pi's `--session-id` and M03's store both accept. */
+  readonly newSessionId?: (() => string) | undefined;
 }
 
 const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
@@ -114,6 +116,7 @@ export function createOrchestrationFactory(
     let bootThreads: readonly ChildLineageThread[] = [];
 
     const newAttemptId = options.newAttemptId ?? (() => `attempt-${NodeCrypto.randomUUID()}`);
+    const newSessionId = options.newSessionId ?? (() => NodeCrypto.randomUUID());
 
     const watchRoot = (state: Running, rootThreadId: string): void => {
       if (state.watchers.has(rootThreadId)) return;
@@ -173,6 +176,7 @@ export function createOrchestrationFactory(
         authorizer: deps.spawnAuthorizer,
         availability: null,
         newAttemptId,
+        newSessionId,
       });
       state = { store, identity, children, watchers };
       try {

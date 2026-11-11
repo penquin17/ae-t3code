@@ -94,12 +94,14 @@ export interface ChildThreadPort {
     >
   >;
   /**
-   * R1: opens the child's provider session, ensures the thread on the held row and persists that binding BEFORE release, so the real Pi session id exists with
-   * no provider request. Idempotent: a repeat returns the same session id and never makes a second one. Never starts a turn.
+   * R1 as decided 2026-11-12: opens the child's provider session WITH the Pi session id the service chose (`piSessionId`; IP-25 asks the Pi adapter for Pi's
+   * `--session-id`), ensures the thread on the held row and persists that binding BEFORE release, so no provider request exists. The answer names the session
+   * actually bound; the service rolls back when it is not the requested one. Idempotent: a repeat returns the same session id and never makes a second one. Never starts a turn.
    */
   bindChildSession(input: {
     readonly threadId: string;
     readonly heldMessageId: string;
+    readonly piSessionId: string;
   }): Promise<
     PortResult<
       { readonly piSessionId: string },

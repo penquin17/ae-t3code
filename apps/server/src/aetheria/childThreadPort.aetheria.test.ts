@@ -51,6 +51,8 @@ import { makeChildThreadPort, piSessionIdOf, terminalOutcomeOf } from "./threadP
 const driver = ProviderDriverKind.make("codex");
 const instanceId = ProviderInstanceId.make("codex");
 const modelSelection = { instanceId, model: "test-model" };
+/** The Pi session id the children service chose for the child and asks the Pi adapter to open the session with. */
+const CHOSEN = "0197d3c0-aaaa-7000-8000-00000000cafe";
 
 /** A scripted provider reporting Pi-style session file names (`<time>_<id>.jsonl`), one fresh id per ensureThread. */
 const scriptedProvider = Effect.fn("childThreadPort.scriptedProvider")(function* (name: string) {
@@ -59,6 +61,8 @@ const scriptedProvider = Effect.fn("childThreadPort.scriptedProvider")(function*
   const log = {
     opened: [] as Array<{ threadId: string; cwd: string | null }>,
     ensured: [] as string[],
+    /** What the session-id slot held for each ensureThread (IP-25): the id the Backend adapter requested for that launch, or undefined. */
+    requested: [] as Array<string | undefined>,
     ensuredCwd: new Map<string, string | null>(),
     started: [] as ProviderAdapter.ProviderAdapterV2TurnInput[],
   };
@@ -72,7 +76,11 @@ const scriptedProvider = Effect.fn("childThreadPort.scriptedProvider")(function*
       Effect.gen(function* () {
         log.opened.push({ threadId: `${input.threadId}`, cwd: input.runtimePolicy?.cwd ?? null });
         const now = yield* DateTime.now;
-        const thread = (threadId: ThreadId, providerSessionId: typeof input.providerSessionId) => {
+        const thread = (
+          threadId: ThreadId,
+          providerSessionId: typeof input.providerSessionId,
+          requested?: string,
+        ) => {
           counter += 1;
           return {
             id: ProviderThreadId.make(`provider-thread:${threadId}`),
@@ -83,7 +91,7 @@ const scriptedProvider = Effect.fn("childThreadPort.scriptedProvider")(function*
             ownerNodeId: null,
             nativeThreadRef: {
               driver,
-              nativeId: `/sessions/2026-11-11_0197d3c0-0000-7000-8000-00000000000${counter}.jsonl`,
+              nativeId: `/sessions/2026-11-11_${requested ?? `0197d3c0-0000-7000-8000-00000000000${counter}`}.jsonl`,
               strength: "strong" as const,
             },
             nativeConversationHeadRef: null,
@@ -117,9 +125,19 @@ const scriptedProvider = Effect.fn("childThreadPort.scriptedProvider")(function*
             Effect.sync(() => {
               log.ensured.push(`${threadId}`);
               log.ensuredCwd.set(`${threadId}`, runtimePolicy?.cwd ?? null);
+              // Pi opens a session with the id the Pi adapter was asked for (IP-25); this provider reads the same slot the adapter reads, so it honours a request as Pi does.
+              const seam = (
+                globalThis as Record<
+                  symbol,
+                  { readonly take: (id: string) => string | undefined } | undefined
+                >
+              )[Symbol.for("aetheria.pi.session-id-seam")];
+              const requested = seam?.take(`${threadId}`);
+              log.requested.push(requested);
+              return requested;
             }).pipe(
-              Effect.map(() => {
-                const fresh = thread(threadId, input.providerSessionId);
+              Effect.map((requested) => {
+                const fresh = thread(threadId, input.providerSessionId, requested);
                 return existingProviderThread === undefined
                   ? fresh
                   : {
@@ -305,12 +323,18 @@ it.effect(
           port.bindChildSession({
             threadId: created.threadId,
             heldMessageId: created.heldMessageId,
+            piSessionId: CHOSEN,
           }),
         );
         assert.isTrue(bound.ok, JSON.stringify(bound));
         if (!bound.ok) return;
-        // (The scripted provider numbers sessions in the order it creates them; the parent holds an earlier one.)
-        assert.match(bound.piSessionId, /^0197d3c0-0000-7000-8000-00000000000\d$/);
+        // The id the service chose is requested for the session's launch (IP-25) and is the id the provider opens; the request is gone afterwards.
+        assert.equal(bound.piSessionId, CHOSEN);
+        assert.deepEqual(
+          script.log.requested.filter((id) => id !== undefined),
+          [CHOSEN],
+          "only the child's launch carried a request (the parent's own ensureThread asked for none)",
+        );
         // NOT shown: that the working folder reaches the provider. Observed with this scripted provider: T3 served the child from the parent's already-open
         // provider session, and the ensureThread the adapter called did not carry the child's folder (`ensuredCwd` below records what the provider saw). Whether
         // a real Pi child session is created in the given folder is a question for the real-Pi slice (step 9), not answered here.
@@ -319,9 +343,15 @@ it.effect(
           port.bindChildSession({
             threadId: created.threadId,
             heldMessageId: created.heldMessageId,
+            piSessionId: CHOSEN,
           }),
         );
         assert.isTrue(repeat.ok && repeat.piSessionId === bound.piSessionId);
+        assert.deepEqual(
+          script.log.requested.filter((id) => id !== undefined),
+          [CHOSEN],
+          "a repeat opens no second session and requests nothing",
+        );
         assert.equal(script.log.ensured.filter((id) => id === created.threadId).length, 1);
         assert.isUndefined(script.log.started.find((turn) => turn.threadId === created.threadId));
         const persisted = yield* orchestrator.getThreadProjection(ThreadId.make(created.threadId));
@@ -378,9 +408,22 @@ it.effect("refuses an unknown parent and reports a bind it cannot do, never succ
       );
       assert.isFalse(lost.ok);
       const noThread = yield* Effect.promise(() =>
-        port.bindChildSession({ threadId: "thread:nobody", heldMessageId: "message:none" }),
+        port.bindChildSession({
+          threadId: "thread:nobody",
+          heldMessageId: "message:none",
+          piSessionId: CHOSEN,
+        }),
       );
       assert.isFalse(noThread.ok);
+      // A bind that fails leaves no request behind for a later launch of that thread (IP-25).
+      assert.isUndefined(
+        (
+          globalThis as Record<
+            symbol,
+            { readonly take: (id: string) => string | undefined } | undefined
+          >
+        )[Symbol.for("aetheria.pi.session-id-seam")]?.take("thread:nobody"),
+      );
       const noRelease = yield* Effect.promise(() =>
         port.releaseFirstTurn({ threadId: "thread:nobody", heldMessageId: "message:none" }),
       );
@@ -410,6 +453,7 @@ it.effect(
           port.bindChildSession({
             threadId: created.threadId,
             heldMessageId: created.heldMessageId,
+            piSessionId: CHOSEN,
           }),
         );
         yield* Effect.promise(() =>

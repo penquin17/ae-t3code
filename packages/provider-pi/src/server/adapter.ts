@@ -306,6 +306,24 @@ function providerRef(
 
 const PI_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
+// AETHERIA-IP:IP-25 the Aetheria Backend may ask for the Pi session id of ONE thread's next launch (a held child whose identity is activated under that id first), through
+// an in-process slot only it can fill; absent on bare T3. A user's own `--session-id` launch argument stays refused by resolvePiLaunchArgs. The slot is read once per launch
+// and the id must be one Pi itself accepts (its own session-id rule), or nothing is added and Pi chooses as before.
+const AETHERIA_SESSION_ID_SEAM = Symbol.for("aetheria.pi.session-id-seam");
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$/;
+const withAetheriaSessionId = <L extends { readonly args: ReadonlyArray<string> }>(
+  launch: L,
+  threadId: string,
+): L => {
+  const seam = (
+    globalThis as Record<symbol, { readonly take: (id: string) => string | undefined } | undefined>
+  )[AETHERIA_SESSION_ID_SEAM];
+  const requested = seam?.take(threadId);
+  return requested !== undefined && PI_SESSION_ID_PATTERN.test(requested)
+    ? { ...launch, args: [...launch.args, "--session-id", requested] }
+    : launch;
+};
+
 // AETHERIA-IP:IP-17 optional route policy, installed in-process by the Aetheria Backend; absent on bare T3.
 // The adapter decides nothing: it asks for the effort, refuses on a refusal, and otherwise sends as before.
 const AETHERIA_SELECTION_SEAM = Symbol.for("aetheria.pi.selection-seam");
@@ -524,13 +542,17 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       if (!resolvedLaunchArgs.ok) {
         return yield* protocolError(resolvedLaunchArgs.message);
       }
-      const launch = buildPiRpcLaunch({
-        launchArgs: resolvedLaunchArgs.args,
-        environment: options.environment,
-        mcpSession,
-        extensionPath,
-        runtimeMode: input.runtimePolicy.runtimeMode,
-      });
+      // AETHERIA-IP:IP-25 the Backend's requested Pi session id for this thread, if any, as Pi's own --session-id
+      const launch = withAetheriaSessionId(
+        buildPiRpcLaunch({
+          launchArgs: resolvedLaunchArgs.args,
+          environment: options.environment,
+          mcpSession,
+          extensionPath,
+          runtimeMode: input.runtimePolicy.runtimeMode,
+        }),
+        input.threadId,
+      );
       const scopedLaunch = yield* agentScope.wrap({
         command: options.settings.binaryPath || "pi",
         args: launch.args,

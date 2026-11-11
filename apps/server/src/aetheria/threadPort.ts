@@ -40,6 +40,7 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { requestPiSessionId, withdrawPiSessionIdRequest } from "./piSessionIdSeam.ts";
 
 export interface ChildThreadPortServices {
   readonly threads: ThreadManagementService.ThreadManagementService["Service"];
@@ -156,7 +157,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
-    bindChildSession: ({ threadId }) =>
+    bindChildSession: ({ threadId, piSessionId: requestedSessionId }) =>
       runPromise(
         Effect.gen(function* () {
           const projection = yield* projectionOf(threadId);
@@ -178,6 +179,9 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             interactionMode: projection.thread.interactionMode,
             cwd: folder,
           });
+          // AETHERIA-IP:IP-25 ask the Pi adapter to launch this thread's Pi with the id the service already activated an identity under. The adapter takes it once, at
+          // the launch inside `open`; whatever it did not take is withdrawn below, so no request outlives this call.
+          requestPiSessionId(threadId, requestedSessionId);
           const runtime = yield* sessions.open({
             threadId: ThreadId.make(threadId),
             providerSessionId: providerThread.providerSessionId,
@@ -211,6 +215,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           heldFolders.delete(threadId);
           return { ok: true as const, piSessionId: sessionId };
         }).pipe(
+          Effect.ensuring(Effect.sync(() => withdrawPiSessionIdRequest(threadId))),
           Effect.catchCause((cause) =>
             Effect.succeed(
               fail(

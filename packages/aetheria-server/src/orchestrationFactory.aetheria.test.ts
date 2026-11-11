@@ -56,7 +56,8 @@ interface Fake {
   readonly activity: Map<string, "running" | "idle" | "unknown">;
   readonly subscriptions: Set<unknown>;
   emit(event: ChildTurnCompletedEvent): void;
-  failNext: { create?: boolean; release?: boolean };
+  readonly requestedSessionIds: string[];
+  failNext: { create?: boolean; release?: boolean; bindAs?: (chosen: string) => string };
 }
 function fakeThreads(): Fake {
   let counter = 0;
@@ -70,6 +71,7 @@ function fakeThreads(): Fake {
     handler: (event: ChildTurnCompletedEvent) => void;
   }>();
   const failNext: Fake["failNext"] = {};
+  const requestedSessionIds: string[] = [];
   const port: ChildThreadPort = {
     createChildThread: async (input) => {
       calls.push("create");
@@ -89,9 +91,11 @@ function fakeThreads(): Fake {
         heldMessageId: `held-${counter}`,
       };
     },
-    bindChildSession: async ({ threadId }) => {
+    // Pi opens the session with the id it was asked for; `bindAs` scripts a Pi that does not.
+    bindChildSession: async ({ piSessionId }) => {
       calls.push("bind");
-      return { ok: true, piSessionId: `pi-${threadId}` };
+      requestedSessionIds.push(piSessionId);
+      return { ok: true, piSessionId: failNext.bindAs?.(piSessionId) ?? piSessionId };
     },
     releaseFirstTurn: async ({ threadId }) => {
       calls.push("release");
@@ -128,6 +132,7 @@ function fakeThreads(): Fake {
     activity,
     subscriptions,
     failNext,
+    requestedSessionIds,
     emit: (event) => {
       for (const entry of subscriptions) entry.handler(event);
     },
@@ -151,6 +156,7 @@ interface World {
   readonly planModeCalls: string[];
   readonly authorizerSeen: Array<{ callerSessionId: string; workingFolder: string }>;
   readonly options: { planModeFails: boolean; verdict: SpawnAuthorization };
+  readonly identityAtCreate: string[][];
 }
 function world(stateRoot = scratch()): World {
   const fake = fakeThreads();
@@ -158,6 +164,18 @@ function world(stateRoot = scratch()): World {
   const planModeCalls: string[] = [];
   const authorizerSeen: World["authorizerSeen"] = [];
   const options = { planModeFails: false, verdict: allowed };
+  // What the identity folder held when each thread was created: the child's record must already be there.
+  const identityAtCreate: string[][] = [];
+  const create = fake.port.createChildThread;
+  fake.port.createChildThread = async (input) => {
+    const folder = NodePath.join(stateRoot, "identity");
+    identityAtCreate.push(
+      NodeFS.existsSync(folder)
+        ? NodeFS.readdirSync(folder).filter((name) => name.endsWith(".json"))
+        : [],
+    );
+    return create(input);
+  };
   const deps: OrchestrationServiceDeps = {
     stateRoot,
     now: () => 1_700_000_000_000,
@@ -191,7 +209,16 @@ function world(stateRoot = scratch()): World {
           : { ok: true, threads: lineage.threads },
     },
   };
-  return { stateRoot, fake, deps, lineage, planModeCalls, authorizerSeen, options };
+  return {
+    stateRoot,
+    fake,
+    deps,
+    lineage,
+    planModeCalls,
+    authorizerSeen,
+    options,
+    identityAtCreate,
+  };
 }
 
 const callerOk: CallerContextPort = async (sessionId) =>
@@ -211,10 +238,12 @@ const SPAWN = { role: "reader", prompt: "do the task", mode: "one-shot" } as con
 async function started(w: World, callerContext: CallerContextPort = callerOk) {
   const boots: unknown[] = [];
   let n = 0;
+  let m = 0;
   const service = createOrchestrationFactory({
     callerContext,
     onBoot: (report) => boots.push(report),
     newAttemptId: () => `attempt-${++n}`,
+    newSessionId: () => `pi-thread-child-${++m}`,
   })(w.deps);
   const result = await service.start();
   expect(result).toEqual({ ok: true });
@@ -232,6 +261,9 @@ describe("children.spawn through the real children service", () => {
     const value = ok(await service.handle("children.spawn", who, SPAWN));
     expect(value).toMatchObject({ childId: "thread-child-1", route: 1, allRoutesOut: false });
     expect(w.fake.calls).toEqual(["create", "bind", "release"]);
+    // The identity is already active under the chosen id when the thread is created (native round 3), and Pi is asked to open the session with that id.
+    expect(w.identityAtCreate).toEqual([["pi-thread-child-1.json"]]);
+    expect(w.fake.requestedSessionIds).toEqual(["pi-thread-child-1"]);
     expect(w.planModeCalls).toEqual([`${MAIN}>pi-thread-child-1:spawn`]);
     // The parent run and node and the working folder come from the context port, never from the arguments.
     expect(w.fake.created[0]).toMatchObject({
@@ -323,6 +355,26 @@ describe("children.spawn through the real children service", () => {
     });
     expect(w.fake.releases).toEqual([]);
     expect(w.fake.closed).toEqual(["thread-child-1"]);
+  });
+
+  it("a Pi that opens another session than the one asked for is rolled back: thread closed, the chosen record retired, no release, no identity for the other id", async () => {
+    const w = world();
+    w.fake.failNext.bindAs = () => "pi-some-other-session";
+    const { service } = await started(w);
+    const outcome = await service.handle("children.spawn", who, SPAWN);
+    expect(outcome).toMatchObject({
+      ok: false,
+      code: "CHILD_START_FAILED",
+      cause: "session-id-mismatch",
+    });
+    expect(w.fake.releases).toEqual([]);
+    expect(w.fake.closed).toEqual(["thread-child-1"]);
+    const read = (id: string) =>
+      JSON.parse(NodeFS.readFileSync(NodePath.join(w.stateRoot, "identity", `${id}.json`), "utf8"));
+    expect(read("pi-thread-child-1").state).toBe("retired");
+    expect(
+      NodeFS.existsSync(NodePath.join(w.stateRoot, "identity", "pi-some-other-session.json")),
+    ).toBe(false);
   });
 
   it("parallel attempts see each other: the admission limit is exact and nothing queues", async () => {
