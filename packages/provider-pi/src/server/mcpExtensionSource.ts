@@ -256,6 +256,10 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // Read per turn: Pi applies command-line flag values after the extension has loaded.
   const orchestrationDisabled = () =>
     typeof pi.getFlag === "function" && pi.getFlag(${JSON.stringify(AETHERIA_DISABLE_T3_ORCHESTRATION_FLAG)}) === true;
+  // AETHERIA-IP:IP-4 With the flag set, the T3 tools that create, launch or schedule a thread or run are never offered: not re-registered, not re-activated below. Aetheria's host
+  // carries the same list (packages/aetheria-pi host.ts T3_WITHHELD_TOOL_NAMES), withdraws them from the active set and refuses a call by name; a test checks the two lists agree.
+  const AETHERIA_WITHHELD_T3_TOOLS = ["delegate_task", "task_status", "create_threads", "t3_thread_launch", "schedule_task", "run_scheduled_task_now", "t3_thread_send", "t3_thread_send_attachments", "t3_thread_transfer"];
+  const aetheriaWithheld = (name) => orchestrationDisabled() && AETHERIA_WITHHELD_T3_TOOLS.includes(name);
 
   // RPC has no trust prompt, so Pi skips an untrusted folder's protected resources. Session
   // replacement reruns this factory without project_trust, and T3 drops notices outside a turn,
@@ -392,6 +396,8 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     readOnlyMcpTools.clear();
     for (const tool of catalog) {
       const name = tool.name;
+      // AETHERIA-IP:IP-4 a re-registration with the flag set skips the withheld tools (the first registration, at load, precedes Pi applying flag values).
+      if (aetheriaWithheld(name)) continue;
       for (const prefix of prefixes) {
         if (tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(\`\${prefix}\${name}\`);
         const exposure = prefix === "mcp__t3_code__" ? "hidden" :
@@ -459,7 +465,8 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     // Pi still applies --tools/--exclude-tools to this active loadout.
     const required = [
       ...(hasToolSearch ? ["tool_search"] : []),
-      ...(ctx.model?.api === "openai-completions" ? catalog.map((tool) => "mcp__t3-code__" + tool.name) : []),
+      // AETHERIA-IP:IP-4 the withheld tools are not eagerly re-activated with the flag set.
+      ...(ctx.model?.api === "openai-completions" ? catalog.filter((tool) => !aetheriaWithheld(tool.name)).map((tool) => "mcp__t3-code__" + tool.name) : []),
     ];
     const missing = required.filter((name) => !active.includes(name));
     if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
