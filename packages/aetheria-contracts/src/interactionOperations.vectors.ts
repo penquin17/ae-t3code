@@ -662,6 +662,20 @@ export const interactionVectors: Readonly<Record<string, InteractionVectorSet>> 
       },
       { name: "answered question delivered", value: questionAnswered },
       {
+        // A late answer: the store keeps why the wait ended as history (packages/aetheria-interaction core and codec).
+        name: "late-answered question keeps its continued cause",
+        value: { ...questionAnswered, continuedCause: "process-exit" },
+      },
+      {
+        name: "late-cancelled question keeps its continued cause",
+        value: {
+          ...questionPending,
+          state: "cancelled",
+          resolution: { type: "cancelled", originId: "org_1" },
+          continuedCause: "backend-restart",
+        },
+      },
+      {
         name: "answered question whose delivery failed",
         value: { ...questionAnswered, delivery: { status: "failed", code: "DISPATCH_REJECTED" } },
       },

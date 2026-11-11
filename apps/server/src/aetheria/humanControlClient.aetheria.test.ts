@@ -7,7 +7,16 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { AETHERIA_WS_METHODS } from "@t3tools/aetheria-contracts";
+import {
+  AETHERIA_WS_METHODS,
+  InteractionActionResult,
+  InteractionsSnapshotResult,
+} from "@t3tools/aetheria-contracts";
+import * as Schema from "effect/Schema";
+
+// The wire encodes every reply with the contract; the handler tests call the handlers directly, so these replay that encoding.
+const encodeActionReply = Schema.encodeUnknownSync(InteractionActionResult);
+const encodeSnapshotReply = Schema.encodeUnknownSync(InteractionsSnapshotResult);
 import {
   createAetheriaBackendService,
   type AetheriaBackendService,
@@ -274,6 +283,65 @@ describe("the change stream", () => {
       latest.value.version,
     );
     await stream.stop();
+  });
+
+  it("a late answer to a question whose wait the Backend's stop ended is served over the wire: the answer reply and the snapshot both carry the record with its continued cause", async () => {
+    const stateRoot = newStateRoot();
+    const first = await world(stateRoot);
+    const a = await first.ask(ROOT_A, "call-late");
+    // A wait in flight when the Backend stops is lost to the host stop, so the question is continued (cause host-stop) after the restart.
+    const segment = first.service
+      .interactions()!
+      .awaitSegment(
+        { sessionId: ROOT_A, rootSessionId: ROOT_A },
+        { interactionId: a.interactionId },
+      );
+    await settle(100);
+    await first.service.dispose("restart");
+    await segment.catch(() => undefined);
+
+    const second = await world(stateRoot);
+    const actor = await client("client-1");
+    const listed = await run(
+      interactionsSnapshot(second.backend, actor, { rootSessionId: ROOT_A }),
+    );
+    expect(listed).toMatchObject({ ok: true });
+    const continued = listed.value.interactions.find(
+      (r: Json) => r.interactionId === a.interactionId,
+    );
+    expect(continued).toMatchObject({ state: "continued" });
+    expect(continued.continuedCause).toBeDefined();
+
+    const answered = await run(
+      interactionsAnswer(second.backend, actor, {
+        interactionId: a.interactionId,
+        revision: continued.revision,
+        answers: ANSWER,
+      }),
+    );
+    expect(answered).toMatchObject({
+      ok: true,
+      value: { state: "answered", continuedCause: continued.continuedCause },
+    });
+    // The handler tests call the handlers directly; the wire also ENCODES each reply with the contract, which is where a late-answered record failed natively.
+    expect(() => encodeActionReply(answered)).not.toThrow();
+    const after = await run(interactionsSnapshot(second.backend, actor, { rootSessionId: ROOT_A }));
+    expect(after).toMatchObject({ ok: true });
+    expect(() => encodeSnapshotReply(after)).not.toThrow();
+    expect(
+      after.value.interactions.find((r: Json) => r.interactionId === a.interactionId),
+    ).toMatchObject({
+      state: "answered",
+      continuedCause: continued.continuedCause,
+    });
+    const again = await run(
+      interactionsAnswer(second.backend, actor, {
+        interactionId: a.interactionId,
+        revision: continued.revision,
+        answers: ANSWER,
+      }),
+    );
+    expect(again).toMatchObject({ ok: false, code: "INTERACTION_ALREADY_SETTLED" });
   });
 
   it("does not let the version go backward across a Backend restart", async () => {

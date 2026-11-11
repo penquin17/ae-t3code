@@ -177,8 +177,13 @@ const recordIsConsistent = Schema.makeFilter<typeof InteractionRecordShape.Type>
   if (record.delivery !== undefined && record.state !== "answered") {
     return "only an answered interaction has a delivery";
   }
-  if ((record.continuedCause !== undefined) !== (record.state === "continued")) {
-    return "a continued cause belongs to the continued state only";
+  // A continued record names why its wait ended, and a record settled after it keeps that cause as history (as the store does);
+  // only a pending record, whose wait has not ended, carries none.
+  if (record.state === "continued" && record.continuedCause === undefined) {
+    return "a continued record names why its wait ended";
+  }
+  if (record.state === "pending" && record.continuedCause !== undefined) {
+    return "a pending record has no continued cause";
   }
   if (record.kind !== "authorization" && record.askCallId === undefined) {
     return "an asked interaction names its ask call";
