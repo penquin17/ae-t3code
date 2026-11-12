@@ -30,9 +30,11 @@ import {
   createChildService,
   createIdentityStore,
   nodeStoreDeps,
+  openJobsStore,
   openOrchestrationStore,
   reconcileChildren,
   type BootReport,
+  type JobsStore,
   type CallerContext,
   type ChildService,
   type ManagedIdentityWriter,
@@ -112,6 +114,7 @@ const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOper
 
 interface Running {
   readonly store: OrchestrationStore;
+  readonly jobs: JobsStore;
   readonly identity: ManagedIdentityWriter;
   readonly children: ChildService;
   readonly watchers: Map<string, { unsubscribe(): void }>;
@@ -178,12 +181,21 @@ export function createOrchestrationFactory(
       const opened = openOrchestrationStore(nodeStoreDeps(), { stateRoot: deps.stateRoot });
       if (!opened.ok) return { ok: false, code: opened.code, detail: opened.reason };
       const { store } = opened;
+      // The job store (C9, step 15): the same refusal rules as the orchestration store. It holds the jobs' records and their embedded outbox entries; it is opened here so the outbox can
+      // deliver a job's notice, and the `jobs.*` operations stay unavailable until step 16 builds them.
+      const jobsOpened = openJobsStore(nodeStoreDeps(), { stateRoot: deps.stateRoot });
+      if (!jobsOpened.ok) {
+        store.close();
+        return { ok: false, code: jobsOpened.code, detail: jobsOpened.reason };
+      }
+      const jobs = jobsOpened.store;
       let identity: ManagedIdentityWriter;
       try {
         identity = createChildIdentityWriter(
           createIdentityStore({ stateRoot: deps.stateRoot, writer: CHILD_WRITER }),
         );
       } catch (error) {
+        jobs.close();
         store.close();
         return { ok: false, code: "IDENTITY_STORE_UNAVAILABLE", detail: message(error) };
       }
@@ -195,6 +207,11 @@ export function createOrchestrationFactory(
         identity,
         planMode: deps.planMode,
         store,
+        jobs,
+        // The outbox derives a message id from its keys. T3's command id derives from that id, but the adapter has no test of the replay against T3's real services yet, so an unsettled
+        // attempt is not retried blind: it waits for a receipt (see the outbox) and stays `delivery-uncertain` until then.
+        sha256Hex: nodeStoreDeps().sha256Hex,
+        inboxDedupEstablished: false,
         clock: { now: deps.now },
         authorizer: deps.spawnAuthorizer,
         availability: null,
@@ -206,7 +223,7 @@ export function createOrchestrationFactory(
         newMessageId,
         newThreadId,
       });
-      state = { store, identity, children, watchers };
+      state = { store, jobs, identity, children, watchers };
       try {
         const report = await reconcileChildren({
           threads,
@@ -215,11 +232,14 @@ export function createOrchestrationFactory(
           identity,
         });
         options.onBoot?.(report);
-        // Step 13: a child T3 cut at the restart becomes idle (interrupted, backend-restarted) and its parent is told once. Boot's own pre-acceptance cleanup ran first.
+        // Step 15: a volatile outbox entry that never became final is dropped before anything is delivered.
+        children.reconcileOutbox();
+        // Step 13: a child T3 cut at the restart becomes idle (interrupted, backend-restarted) and its parent is told once. Boot's own pre-acceptance cleanup ran first. The delivery
+        // seam is the outbox (step 15): the notice is an entry of the child under child:<id>:restart:<bootEpoch>, repeat-safe.
         const restarted = await children.reconcileRestarts({
           bootEpoch: deps.now(),
           afterResume: (sessionId) => deps.resume.resumed(sessionId),
-          ...(options.notifyRestart === undefined ? {} : { notify: options.notifyRestart }),
+          notify: options.notifyRestart ?? children.restartNotify,
         });
         options.onRestart?.(restarted);
         for (const thread of bootThreads)
@@ -227,6 +247,7 @@ export function createOrchestrationFactory(
             watchRoot(state, thread.rootThreadId);
       } catch (error) {
         for (const watcher of watchers.values()) watcher.unsubscribe();
+        jobs.close();
         store.close();
         return { ok: false, code: "BOOT_RECONCILIATION_FAILED", detail: message(error) };
       }
@@ -420,6 +441,7 @@ export function createOrchestrationFactory(
           }
         }
         state.watchers.clear();
+        state.jobs.close();
         state.store.close();
       }
       return { stopped: [], stillLive };

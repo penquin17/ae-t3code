@@ -928,13 +928,13 @@ describe("restart reconciliation of a cut child (step 13)", () => {
     closed: false,
   });
 
-  it("a child whose run T3 cut is settled interrupted / backend-restarted at start, takes a message, and its notice waits for the outbox seam, then goes out once under its key", async () => {
+  it("a child whose run T3 cut is settled interrupted / backend-restarted at start, takes a message, and its notice is an OUTBOX entry: held while the parent cannot take it, then delivered once under its key", async () => {
     const w = world();
     writeMainRecord(w.stateRoot, MAIN);
     const first = await started(w);
     ok(await first.service.handle("children.spawn", who, { ...SPAWN, mode: "continuable" }));
     await first.service.drain();
-    // The restart: T3 cut the run and went idle; the Backend starts again over the same state root.
+    // The restart: T3 cut the run and went idle; the Backend starts again over the same state root. The parent's status cannot be read yet (unknown), so the notice is held.
     w.lineage.threads = [childRow()];
     w.fake.activity.set("thread-child-1", "idle");
     w.fake.lastRuns.set("thread-child-1", {
@@ -966,24 +966,42 @@ describe("restart reconciliation of a cut child (step 13)", () => {
     ).toBeDefined();
     expect(w.fake.turns.map((t) => t.delivery)).toEqual(["queue"]);
     await second.service.drain();
-    // Step 15 fills the seam: the next start delivers the pending notice once, under the original key.
-    const delivered: string[] = [];
-    const third = await started(w, callerOk, {
-      notifyRestart: async (notice) => {
-        delivered.push(notice.key);
-        return { ok: true };
-      },
-    });
-    expect(delivered).toEqual([reports[0]?.notices.pending[0]]);
+    // Step 15 fills the seam with the outbox: the parent can take a message now, so the next start delivers the pending notice once, under the original key (child:<id>:restart:<epoch>).
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    const key = reports[0]?.notices.pending[0] as string;
+    const third = await started(w, callerOk, { onRestart: (r) => void reports.push(r) });
+    expect(reports[1]?.notices.sent).toEqual([key]);
+    const toParent = w.fake.turns.filter((t) => t.threadId === CALLER_THREAD);
+    expect(toParent).toHaveLength(1);
+    expect(toParent[0]?.content).toMatch(/restart/i);
     await third.service.drain();
-    const fourth = await started(w, callerOk, {
+    const fourth = await started(w, callerOk, { onRestart: (r) => void reports.push(r) });
+    expect(reports[2]?.notices).toEqual({ sent: [], byT3: [], pending: [] });
+    expect(w.fake.turns.filter((t) => t.threadId === CALLER_THREAD)).toHaveLength(1);
+    await fourth.service.drain();
+    // The seam can still be replaced: an explicit `notifyRestart` is used instead of the outbox.
+    const delivered: string[] = [];
+    const fifth = await started(w, callerOk, {
       notifyRestart: async (notice) => {
         delivered.push(notice.key);
         return { ok: true };
       },
     });
-    expect(delivered).toHaveLength(1);
-    await fourth.service.drain();
+    expect(delivered).toEqual([]);
+    await fifth.service.drain();
+  });
+
+  it("opens the job store beside the orchestration store (jobs/FORMAT declared) and closes both at drain", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w);
+    expect(
+      JSON.parse(NodeFS.readFileSync(NodePath.join(w.stateRoot, "jobs", "FORMAT"), "utf8")),
+    ).toEqual({ store: "aetheria-jobs", formatVersion: 1 });
+    await service.drain();
+    // Closed: a second Backend over the same root can open both writers again.
+    const again = await started(w);
+    await again.service.drain();
   });
 });
 

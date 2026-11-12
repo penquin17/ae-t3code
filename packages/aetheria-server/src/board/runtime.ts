@@ -3,7 +3,7 @@
 // identity and the thread binding, liveness read only from this Backend's own run, and the XC-6 operations that use them (M09 step 17 adds
 // `board.record-shell`, a shell change shown to peers as not guarded).
 // Evidence from before this Backend started is unknown: an observation counts only if its producing event is newer than the replay horizon.
-// Unreadable board or liveness is `unavailable`; production `assign` answers unavailable naming XC-10 (M05).
+// Unreadable board or liveness is `unavailable`; `assign` asks the owned-child status of XC-10 (M05, `orchestrationChildStatus.ts`) and answers unavailable naming XC-10 when that cannot be read.
 // M06 step 26: `resolve` decides on the interaction service's `questionEvidence` (XC-8), called in process with the root, the cited call id and the
 // caller as asker; an absent, stopped or unreadable provider is unavailable naming XC-8, and advice that points at `resolve` is told only with a provider.
 // Step 22: when liveness reports a bound main session stopped or crashed, its board session is closed by the one close policy (`reconcileBoard`
@@ -72,7 +72,7 @@ export interface BoardRuntimeOptions {
   readonly config: AwarenessConfig;
   readonly now: () => number;
   readonly git: GitPort;
-  /** The owned-child status of XC-10. Absent in production (M05): `assign` answers unavailable. A test supplies it. */
+  /** The owned-child status of XC-10. The service supplies M05's production reader (`orchestrationChildStatus.ts`); absent, `assign` answers unavailable. A test supplies its own. */
   readonly childStatus?:
     | ((rootId: string, childId: string) => ChildStatus | Promise<ChildStatus>)
     | undefined;

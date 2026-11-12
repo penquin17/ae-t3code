@@ -101,6 +101,7 @@ export type OrchestrationDirectApi = Pick<
   | "interruptTurn"
   | "subscribeSettled"
   | "closeChild"
+  | "interruptChild"
   | "cancelTree"
   | "cancelParentTurn"
   | "listChildren"
