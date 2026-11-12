@@ -29,7 +29,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import { resolvePiLaunchArgs } from "../../../../packages/provider-pi/src/server/mcpInjection.ts";
-import { requestPiSessionId, withdrawPiSessionIdRequest } from "./piSessionIdSeam.ts";
+import { forkSlotKey, requestPiSessionId, withdrawPiSessionIdRequest } from "./piSessionIdSeam.ts";
 import {
   FAUX,
   PROVIDER_SESSION_ID,
@@ -212,6 +212,29 @@ describe("real Pi: a held child's session opens with the requested id, and the A
       yield* openAndEnsure(t);
       assert.notInclude(t.launches[0]?.args ?? [], "--session-id");
     }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
+  it.live(
+    "a fork's request (key `fork:<threadId>`) is not consumed by the same thread's own open launch, and is withdrawable",
+    () =>
+      Effect.gen(function* () {
+        const s = yield* scratch();
+        const chosen = NodeCrypto.randomUUID();
+        requestPiSessionId(forkSlotKey(THREAD), chosen);
+        yield* openAndEnsure(s);
+        assert.notInclude(
+          s.launches[0]?.args ?? [],
+          "--session-id",
+          "the thread's own launch asks for its plain key",
+        );
+        const seam = (
+          globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>
+        )[Symbol.for("aetheria.pi.session-id-seam")];
+        assert.equal(seam?.take(forkSlotKey(THREAD)), chosen, "the fork's request was still there");
+        requestPiSessionId(forkSlotKey(THREAD), chosen);
+        withdrawPiSessionIdRequest(forkSlotKey(THREAD));
+        assert.isUndefined(seam?.take(forkSlotKey(THREAD)));
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 
   it("a user's own --session-id launch argument is still refused (the block is for users and stays)", () => {

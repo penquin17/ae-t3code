@@ -40,7 +40,7 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
-import { requestPiSessionId, withdrawPiSessionIdRequest } from "./piSessionIdSeam.ts";
+import { forkSlotKey, requestPiSessionId, withdrawPiSessionIdRequest } from "./piSessionIdSeam.ts";
 
 export interface ChildThreadPortServices {
   readonly threads: ThreadManagementService.ThreadManagementService["Service"];
@@ -286,9 +286,34 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
-    forkThread: ({ parentThreadId, sourcePoint, targetThreadId }) =>
+    // T3's `thread.fork` creates only the fork THREAD: the Pi session copy is made when its first turn starts (`PiAdapter.forkThread`, `pi --fork <file>`). The Backend's chosen session
+    // id is asked for in the IP-25 slot under `fork:<threadId>` (not the plain thread id, which the thread's own open launch would consume), so the copy is made under that id and the
+    // identity can be activated before it exists. The request is withdrawn when the fork fails or the thread is closed first.
+    forkThread: ({ parentThreadId, sourcePoint, targetThreadId, piSessionId }) =>
       runPromise(
         Effect.gen(function* () {
+          // A run prefix is accepted only at the parent's LATEST completed run (T3's own `latest_stable` rule: completed, with a checkpoint). Pi's copy at any earlier run opens a session
+          // with an id of its own, which the identity cannot be activated under first, so an earlier run is refused here, before anything is made or requested.
+          if (sourcePoint !== "latest_stable") {
+            const latest = yield* projectionOf(parentThreadId).pipe(
+              Effect.map((projection) => ({
+                readable: true as const,
+                id: projection.runs
+                  .filter((run) => run.status === "completed" && run.checkpointId !== null)
+                  .toSorted((left, right) => right.ordinal - left.ordinal)[0]?.id,
+              })),
+              Effect.catchCause(() => Effect.succeed({ readable: false as const })),
+            );
+            if (!latest.readable)
+              return fail("unavailable" as const, "the parent's runs cannot be read");
+            if (latest.id === undefined || String(latest.id) !== sourcePoint.run) {
+              return fail(
+                "prefix-unsupported" as const,
+                "a fork works only from the latest finished turn of the conversation; that run is not it",
+              );
+            }
+          }
+          requestPiSessionId(forkSlotKey(targetThreadId), piSessionId);
           yield* threads.dispatch({
             type: "thread.fork",
             commandId: CommandId.make(`m05-fork:${targetThreadId}`),
@@ -301,15 +326,12 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             createdBy: "agent",
             creationSource: "server",
           });
-          const target = yield* projectionOf(targetThreadId);
-          const forkSessionId = piSessionIdOf(target.providerThreads[0]?.nativeThreadRef?.nativeId);
-          return forkSessionId === undefined
-            ? fail("fork-failed" as const, "the fork names no Pi session")
-            : { ok: true as const, threadId: targetThreadId, forkSessionId };
+          return { ok: true as const, threadId: targetThreadId };
         }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.succeed(fail("fork-failed" as const, detailOf(failureOf(cause)))),
-          ),
+          Effect.catchCause((cause) => {
+            withdrawPiSessionIdRequest(forkSlotKey(targetThreadId));
+            return Effect.succeed(fail("fork-failed" as const, detailOf(failureOf(cause))));
+          }),
         ),
       ),
 
@@ -568,8 +590,10 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
-    close: ({ threadId }) =>
-      runPromise(
+    close: ({ threadId }) => {
+      // A fork thread closed before its first turn must not leave its requested session id for a later launch.
+      withdrawPiSessionIdRequest(forkSlotKey(threadId));
+      return runPromise(
         threads
           .dispatch({
             type: "thread.stop",
@@ -590,7 +614,8 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
               );
             }),
           ),
-      ),
+      );
+    },
   };
   return port satisfies ChildThreadPort;
 });

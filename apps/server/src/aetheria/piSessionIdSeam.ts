@@ -24,6 +24,12 @@ const seam: SessionIdSeam = {
   },
 };
 
+/**
+ * The slot key of a FORK thread's copy. T3's `thread.fork` makes only the thread; the Pi session copy is made later by `PiAdapter.forkThread` (`pi --fork <file> --session-id <id>`),
+ * which asks for `fork:<threadId>`. The thread's own open launch asks for the plain thread id, so it can never consume (or be given) a fork's request.
+ */
+export const forkSlotKey = (threadId: string): string => `fork:${threadId}`;
+
 /** Asks for `sessionId` as the Pi session id of the thread's next launch. Installs the slot on first use (idempotent). */
 export function requestPiSessionId(threadId: string, sessionId: string): void {
   (globalThis as Record<symbol, SessionIdSeam | undefined>)[SLOT] = seam;

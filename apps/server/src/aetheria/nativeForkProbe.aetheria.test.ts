@@ -36,6 +36,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CommandPolicy from "../orchestration-v2/CommandPolicy.ts";
 import { makePiAdapterV2 } from "../../../../packages/provider-pi/src/server/adapter.ts";
+import { forkSlotKey, requestPiSessionId } from "./piSessionIdSeam.ts";
 
 const REPO = NodePath.join(import.meta.dirname, "../../../../../..");
 const PI_DIR = NodePath.join(REPO, "node_modules/@earendil-works/pi-coding-agent");
@@ -379,7 +380,41 @@ describe("T3's native Pi fork carries Pi custom entries at the fork prefix", () 
               sha: sha256(parentPath),
               size: NodeFS.statSync(parentPath).size,
             };
+            const launchesBefore = launches.length;
+
+            // Identity-first fork (native round 2): the Backend's chosen Pi session id, asked for under `fork:<threadId>`, is passed as `--session-id` beside `--fork`.
+            const seam = (
+              globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>
+            )[Symbol.for("aetheria.pi.session-id-seam")];
+            // (a) at the LATEST turn only `--fork` runs: the copy carries the chosen id, in its file name and its header.
+            const chosen = NodeCrypto.randomUUID();
+            const latestTarget = ThreadId.make("thread-native-fork-latest");
+            requestPiSessionId(forkSlotKey(latestTarget), chosen);
+            const latest = yield* runtime.forkThread({
+              sourceProviderThread: source,
+              sourceProviderTurns: [turn1, turn2],
+              providerTurnId: turn2.id,
+              targetThreadId: latestTarget,
+            });
+            const latestSeen = { slotLeft: seam?.take(forkSlotKey(latestTarget)) };
+            // (b) inside the history Pi's RPC `fork` opens a session of its own: the adapter refuses a copy under another id rather than run it.
+            const insideTarget = ThreadId.make("thread-native-fork-inside");
+            requestPiSessionId(forkSlotKey(insideTarget), NodeCrypto.randomUUID());
+            const inside = yield* Effect.exit(
+              runtime.forkThread({
+                sourceProviderThread: source,
+                sourceProviderTurns: [turn1, turn2],
+                providerTurnId: turn1.id,
+                targetThreadId: insideTarget,
+              }),
+            );
             return {
+              launchesBefore,
+              chosen,
+              latest,
+              latestSeen,
+              inside,
+              parentAfterExtras: sha256(parentPath),
               decision,
               source,
               forked,
@@ -417,9 +452,34 @@ describe("T3's native Pi fork carries Pi custom entries at the fork prefix", () 
         // Which route ran.
         assert.equal(evidence.decision, "native_fork");
         assert.equal(
-          launches.length,
+          evidence.launchesBefore,
           2,
           `launches: ${JSON.stringify(launches.map((l) => l.args))}`,
+        );
+
+        // Identity-first fork: the chosen id (asked for under `fork:<threadId>`) reaches `--session-id` beside `--fork`, the copy carries it, the slot is consumed once. Inside the history Pi's RPC fork opens another session, so the adapter refuses it.
+        const asked = launches.filter((launch) => launch.args.includes("--session-id"));
+        assert.deepEqual(
+          asked.map((launch) => launch.args[launch.args.indexOf("--session-id") + 1]).slice(0, 1),
+          [evidence.chosen],
+        );
+        assert.isTrue(asked[0]!.args.includes("--fork"));
+        const latestFile = evidence.latest.nativeThreadRef?.nativeId ?? "";
+        assert.include(NodePath.basename(latestFile), `_${evidence.chosen}.jsonl`);
+        assert.equal(
+          (JSON.parse(NodeFS.readFileSync(latestFile, "utf8").split("\n")[0]!) as { id: string })
+            .id,
+          evidence.chosen,
+        );
+        assert.deepEqual(evidence.latestSeen, { slotLeft: undefined });
+        assert.isTrue(
+          evidence.inside._tag === "Failure",
+          "a copy under another session id is refused",
+        );
+        assert.equal(
+          evidence.parentAfterExtras,
+          evidence.parentAfterFork.sha,
+          "the parent is still untouched",
         );
         const forkLaunch = launches.find((launch) => launch.args.includes("--fork"));
         assert.isDefined(forkLaunch);

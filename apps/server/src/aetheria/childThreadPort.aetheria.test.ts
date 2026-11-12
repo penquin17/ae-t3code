@@ -598,11 +598,60 @@ it.effect(
             parentThreadId: String(parent.parent),
             sourcePoint: "latest_stable",
             targetThreadId: "thread:fork-detail-target",
+            piSessionId: "11111111-2222-4333-8444-555555555555",
           }),
         );
         assert.isFalse(forked.ok);
         assert.equal(!forked.ok && forked.reason, "fork-failed");
         assert.match(!forked.ok ? (forked.detail ?? "") : "", /No stable source run/);
+        // A failed fork withdraws the session id it asked for, so nothing is left for a later launch.
+        const seam = (
+          globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>
+        )[Symbol.for("aetheria.pi.session-id-seam")];
+        assert.isUndefined(seam?.take("fork:thread:fork-detail-target"));
+      }),
+    ),
+);
+
+it.effect(
+  "a fork at a run is accepted only at the parent's latest completed run: with none it is prefix-unsupported naming the latest finished turn, an unreadable parent is unavailable, and nothing is created or requested",
+  () =>
+    scenario("fork-latest-only", (script) =>
+      Effect.gen(function* () {
+        const port = yield* portOver;
+        const parent = yield* startParent(script.cwd);
+        const seam = (
+          globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>
+        )[Symbol.for("aetheria.pi.session-id-seam")];
+        const earlier = yield* Effect.promise(() =>
+          port.forkThread({
+            parentThreadId: String(parent.parent),
+            sourcePoint: { run: "run:thread:parent:ordinal:1" },
+            targetThreadId: "thread:fork-earlier-target",
+            piSessionId: "11111111-2222-4333-8444-555555555555",
+          }),
+        );
+        assert.isFalse(earlier.ok);
+        assert.equal(!earlier.ok && earlier.reason, "prefix-unsupported");
+        assert.match(!earlier.ok ? (earlier.detail ?? "") : "", /latest finished turn/);
+        assert.isUndefined(
+          seam?.take("fork:thread:fork-earlier-target"),
+          "no session id was requested",
+        );
+        const target = yield* Effect.promise(() =>
+          port.readLastRun({ threadId: "thread:fork-earlier-target" }),
+        );
+        assert.isFalse(target.ok, "no fork thread exists");
+        const unreadable = yield* Effect.promise(() =>
+          port.forkThread({
+            parentThreadId: "thread:nobody",
+            sourcePoint: { run: "run:thread:nobody:ordinal:1" },
+            targetThreadId: "thread:fork-unreadable-target",
+            piSessionId: "11111111-2222-4333-8444-555555555555",
+          }),
+        );
+        assert.isFalse(unreadable.ok);
+        assert.equal(!unreadable.ok && unreadable.reason, "unavailable");
       }),
     ),
 );

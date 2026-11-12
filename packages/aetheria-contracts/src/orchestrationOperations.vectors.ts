@@ -203,8 +203,10 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
           label: "alt path",
         },
       },
+    ],
+    refuse: [
       {
-        name: "retry reusing an unregistered copy",
+        name: "the retired reuse field (a fork's session copy is made at its first turn, so none exists to reuse)",
         value: {
           prefix: "all",
           prompt: "Again.",
@@ -212,8 +214,6 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
           reuseForkSessionId: "sess_fork1",
         },
       },
-    ],
-    refuse: [
       { name: "no allow-list", value: { prefix: "all", prompt: "x" } },
       { name: "an empty allow-list", value: { prefix: "all", prompt: "x", allow: [] } },
       {

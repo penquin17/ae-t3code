@@ -58,7 +58,14 @@ interface Fake {
   emit(event: ChildTurnCompletedEvent): void;
   readonly requestedSessionIds: string[];
   readonly suppressed: string[];
-  readonly forked: Array<{ parentThreadId: string; sourcePoint: unknown; targetThreadId: string }>;
+  readonly forked: Array<{
+    parentThreadId: string;
+    sourcePoint: unknown;
+    targetThreadId: string;
+    piSessionId: string;
+  }>;
+  /** The Pi session a fork thread holds once its first turn has started (T3 makes the copy then, under the requested id). */
+  readonly forkSessions: Map<string, string>;
   readonly lastRuns: Map<
     string,
     {
@@ -86,8 +93,8 @@ function fakeThreads(): Fake {
   const failNext: Fake["failNext"] = {};
   const requestedSessionIds: string[] = [];
   const suppressed: string[] = [];
-  const forked: Array<{ parentThreadId: string; sourcePoint: unknown; targetThreadId: string }> =
-    [];
+  const forked: Fake["forked"] = [];
+  const forkSessions = new Map<string, string>();
   const lastRuns: Fake["lastRuns"] = new Map();
   const results = new Map<
     string,
@@ -126,14 +133,17 @@ function fakeThreads(): Fake {
       releases.push(threadId);
       return { ok: true, accepted: true };
     },
-    forkThread: async ({ parentThreadId, sourcePoint, targetThreadId }) => {
+    forkThread: async ({ parentThreadId, sourcePoint, targetThreadId, piSessionId }) => {
       calls.push("fork");
-      forked.push({ parentThreadId, sourcePoint, targetThreadId });
+      forked.push({ parentThreadId, sourcePoint, targetThreadId, piSessionId });
       activity.set(targetThreadId, "idle");
-      return { ok: true, threadId: targetThreadId, forkSessionId: `pi-${targetThreadId}` };
+      return { ok: true, threadId: targetThreadId };
     },
     startTurn: async ({ threadId, content, delivery, messageId }) => {
       calls.push("startTurn");
+      // The fork thread's first turn makes the Pi session copy under the id the Backend asked for.
+      const asked = forked.find((f) => f.targetThreadId === threadId);
+      if (asked !== undefined) forkSessions.set(threadId, asked.piSessionId);
       turns.push({ threadId, content, delivery, messageId });
       return { ok: true, accepted: true, messageId };
     },
@@ -183,6 +193,7 @@ function fakeThreads(): Fake {
     requestedSessionIds,
     suppressed,
     forked,
+    forkSessions,
     lastRuns,
     results,
     turns,
@@ -245,15 +256,16 @@ function world(stateRoot = scratch()): World {
     sessionOfThread: (threadId) =>
       threadId === CALLER_THREAD
         ? MAIN
-        : threadId.startsWith("thread-child") || threadId.startsWith("thread-fork")
-          ? `pi-${threadId}`
-          : undefined,
+        : threadId.startsWith("thread-fork")
+          ? fake.forkSessions.get(threadId)
+          : threadId.startsWith("thread-child")
+            ? `pi-${threadId}`
+            : undefined,
     threadOfSession: (sessionId) =>
       sessionId === MAIN
         ? CALLER_THREAD
-        : sessionId.startsWith("pi-")
-          ? sessionId.slice(3)
-          : undefined,
+        : ([...fake.forkSessions].find(([, session]) => session === sessionId)?.[0] ??
+          (sessionId.startsWith("pi-") ? sessionId.slice(3) : undefined)),
     lineageSessionOf: () => "unknown",
     spawnAuthorizer: {
       authorize: async (input) => {
@@ -853,12 +865,16 @@ describe("children.fork through the factory (step 11)", () => {
         parentThreadId: CALLER_THREAD,
         sourcePoint: "latest_stable",
         targetThreadId: "thread-fork-1",
+        piSessionId: expect.any(String),
       },
     ]);
+    // The session id was chosen BEFORE the fork thread existed and handed to the port; the copy T3 makes at the first turn carries it.
+    const chosen = w.fake.forked[0]!.piSessionId;
+    expect(w.fake.forkSessions.get("thread-fork-1")).toBe(chosen);
     expect(w.fake.calls).toEqual(["fork", "startTurn"]);
-    expect(w.planModeCalls).toEqual([`${MAIN}>pi-thread-fork-1:fork`]);
+    expect(w.planModeCalls).toEqual([`${MAIN}>${chosen}:fork`]);
     const identity = JSON.parse(
-      NodeFS.readFileSync(NodePath.join(w.stateRoot, "identity", "pi-thread-fork-1.json"), "utf8"),
+      NodeFS.readFileSync(NodePath.join(w.stateRoot, "identity", `${chosen}.json`), "utf8"),
     );
     expect(identity.record).toMatchObject({
       kind: "child",
@@ -871,7 +887,7 @@ describe("children.fork through the factory (step 11)", () => {
       ["thread-fork-1", "carry on from here"],
     ]);
     expect(
-      ok(await service.handle("children.status", who, { childSessionId: "pi-thread-fork-1" })),
+      ok(await service.handle("children.status", who, { childSessionId: chosen })),
     ).toMatchObject({ owned: true });
   });
 
@@ -893,7 +909,7 @@ describe("children.fork through the factory (step 11)", () => {
     expect(await second.service.handle("children.fork", who, forkArgs)).toMatchObject({
       ok: false,
       code: "FORK_PARTIAL",
-      forkSessionId: "pi-thread-fork-1",
+      forkSessionId: failing.fake.forked[0]?.piSessionId,
       registered: false,
       step: 3,
     });

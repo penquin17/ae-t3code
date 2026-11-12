@@ -198,7 +198,6 @@ export const ChildrenForkArgs = Schema.Struct({
   prompt: Text,
   allow: AllowList,
   label: Schema.optionalKey(Text),
-  reuseForkSessionId: Schema.optionalKey(Id),
 });
 export type ChildrenForkArgs = typeof ChildrenForkArgs.Type;
 export const ChildrenForkResult = reply(Schema.Struct({ childId: Id }), [

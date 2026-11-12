@@ -3195,15 +3195,24 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                   });
             // CLI --fork uses Pi's own session format and sets the destination cwd. RPC
             // switch_session/clone alone would retain the source cwd.
-            const forkLaunch = buildPiRpcLaunch({
-              launchArgs: resolvedLaunchArgs.args,
-              environment: options.environment,
-              mcpSession: undefined,
-              extensionPath: undefined,
-              shortLived: true,
-              disableExtensions: true,
-              disableTools: true,
-            });
+
+            // AETHERIA-IP:IP-25 the Backend's requested id for THIS fork's copy (slot key `fork:<threadId>`) as `--session-id` beside `--fork`.
+            // Pi's RPC `fork` inside the history opens a session with its own id, so the id is checked below.
+            const forkLaunch = withAetheriaSessionId(
+              buildPiRpcLaunch({
+                launchArgs: resolvedLaunchArgs.args,
+                environment: options.environment,
+                mcpSession: undefined,
+                extensionPath: undefined,
+                shortLived: true,
+                disableExtensions: true,
+                disableTools: true,
+              }),
+              `fork:${forkInput.targetThreadId}`,
+            );
+            const requestedSessionAt = forkLaunch.args.lastIndexOf("--session-id");
+            const requestedSessionId =
+              requestedSessionAt >= 0 ? forkLaunch.args[requestedSessionAt + 1] : undefined;
             const nativeId = yield* Effect.scoped(
               Effect.gen(function* () {
                 const forkConnection = yield* makePiRpcConnection({
@@ -3238,6 +3247,14 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                 const file = recordString(state, "sessionFile");
                 if (file === undefined || file === sourceFile) {
                   return yield* protocolError("Pi fork did not create a distinct session file");
+                }
+                if (
+                  requestedSessionId !== undefined &&
+                  recordString(state, "sessionId") !== requestedSessionId
+                ) {
+                  return yield* protocolError(
+                    "Pi did not keep the requested session id for a fork inside the session history",
+                  );
                 }
                 return file;
               }),

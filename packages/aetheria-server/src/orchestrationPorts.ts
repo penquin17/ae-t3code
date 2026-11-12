@@ -121,15 +121,17 @@ export interface ChildThreadPort {
     readonly threadId: string;
     readonly heldMessageId: string;
   }): Promise<PortResult<{ readonly accepted: true }, "delivery-unavailable">>;
+  /**
+   * T3's `thread.fork` creates only the fork THREAD; the Pi session copy is made when its first turn starts, under `piSessionId` (the Backend's choice, asked for in the IP-25 slot
+   * under `fork:<targetThreadId>`). A run prefix is accepted only at the parent's latest completed run (`prefix-unsupported` otherwise; `unavailable` when the runs cannot be read).
+   */
   forkThread(input: {
     readonly parentThreadId: string;
     readonly sourcePoint: "latest_stable" | { readonly run: string };
     readonly targetThreadId: string;
+    readonly piSessionId: string;
   }): Promise<
-    PortResult<
-      { readonly threadId: string; readonly forkSessionId: string },
-      "fork-failed" | "prefix-unsupported"
-    >
+    PortResult<{ readonly threadId: string }, "fork-failed" | "prefix-unsupported" | "unavailable">
   >;
   /** The adapter derives T3's command id from the message id, so a repeated message id counts as accepted. */
   startTurn(input: {
