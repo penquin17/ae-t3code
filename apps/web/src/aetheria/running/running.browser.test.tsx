@@ -45,6 +45,13 @@ const START = Date.parse("2026-11-12T10:00:00.000Z");
 function frozenDate(): Disposable {
   return { [Symbol.dispose]: () => void vi.useRealTimers() };
 }
+/** A short settle hold for one test, through the token the indicator reads once at mount. */
+function shortSettleHold(ms: number): Disposable {
+  document.documentElement.style.setProperty("--ae-motion-settle", `${ms}ms`);
+  return {
+    [Symbol.dispose]: () => document.documentElement.style.removeProperty("--ae-motion-settle"),
+  };
+}
 const freshRun = () => {
   const startedAt = DateTime.makeUnsafe(START);
   return {
@@ -128,6 +135,7 @@ describe("the running thread in the real app", () => {
   it("the words follow the thread's own items: a writing tool weaves, a search gathers, asking connects", async () => {
     using _clock = frozenDate();
     await prepare(1280, 800, "light");
+    using _hold = shortSettleHold(150);
     const app = await mountRoute(THREAD_PATH);
     await using _screen = app.screen;
     const run = await startRun();

@@ -88,30 +88,59 @@ function ringColor(boxShadow: string) {
   return null;
 }
 
-/** Presses Tab until the sidebar's home link has focus (at most 120 times; it throws with the focus trail if it never gets there) and returns how many presses it took. */
+const BRAND_SELECTOR = 'a[aria-label="Aetheria home"]';
+
+/** The elements the keyboard can land on, in document order: visible, enabled, tabindex 0 or more. */
+function tabStops(): HTMLElement[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>(
+      "a[href], button, input, select, textarea, [tabindex]",
+    ),
+  ].filter(
+    (element) =>
+      element.tabIndex >= 0 &&
+      !(element as HTMLButtonElement).disabled &&
+      element.getClientRects().length > 0 &&
+      getComputedStyle(element).visibility === "visible" &&
+      element.closest("[inert]") === null,
+  );
+}
+
+/**
+ * Proves the sidebar's home link is reachable by keyboard alone without walking every stop before it: the link
+ * must be one of the page's tab stops, and the browser's own Tab from the stop before it must land on it. A
+ * page with many stops (a long session list) costs one press, not one per stop. Returns the link's place
+ * in the tab order (0 is the first stop).
+ */
 async function tabToBrand(): Promise<number> {
-  // The sidebar mounts after the thread under load; tabbing before its link exists walks past it.
+  // The sidebar mounts after the thread under load; looking before its link exists would miss it.
   await expect
-    .poll(() => document.querySelector('a[aria-label="Aetheria home"]') !== null, {
-      timeout: 15_000,
-    })
+    .poll(() => document.querySelector(BRAND_SELECTOR) !== null, { timeout: 15_000 })
     .toBe(true);
-  let presses = 0;
-  const trail: string[] = [];
-  while (document.activeElement?.getAttribute("aria-label") !== "Aetheria home" && presses < 120) {
-    await userEvent.keyboard("{Tab}");
-    presses += 1;
-    const active = document.activeElement;
-    trail.push(
-      active ? accessibleName(active).slice(0, 24) || active.tagName.toLowerCase() : "none",
-    );
-  }
-  if (document.activeElement?.getAttribute("aria-label") !== "Aetheria home") {
+  const stops = tabStops();
+  const link = document.querySelector<HTMLElement>(BRAND_SELECTOR)!;
+  const place = stops.indexOf(link);
+  expect(
+    place,
+    `the home link is a tab stop; the page has ${stops.length} stops: ${stops
+      .slice(0, 12)
+      .map((stop) => accessibleName(stop).slice(0, 18) || stop.tagName.toLowerCase())
+      .join(" > ")}`,
+  ).toBeGreaterThanOrEqual(0);
+  // From the stop before it, one Tab; when it is the first stop, one Shift+Tab from the stop after it
+  // (the browser keeps its own starting point for sequential navigation, so a blur would not reset it).
+  const before = stops[place - 1];
+  const after = stops[place + 1];
+  const from = before ?? after;
+  expect(from, "the page has a stop next to the home link").toBeDefined();
+  from!.focus();
+  await userEvent.keyboard(before ? "{Tab}" : "{Shift>}{Tab}{/Shift}");
+  if (document.activeElement !== link) {
     throw new Error(
-      `the home link was not reached in ${presses} Tab presses; focus visited: ${trail.slice(0, 40).join(" > ")}`,
+      `${before ? "Tab" : "Shift+Tab"} from "${accessibleName(from!)}" did not reach the home link (tab stop ${place} of ${stops.length}); focus is on ${document.activeElement ? accessibleName(document.activeElement) || document.activeElement.tagName : "nothing"}`,
     );
   }
-  return presses;
+  return place;
 }
 
 describe("names and keyboard reach on the identity surfaces", () => {
@@ -146,15 +175,15 @@ describe("names and keyboard reach on the identity surfaces", () => {
     await expect.element(page.getByText(LAST_ANSWER)).toBeVisible();
     // While the app is still starting, its composer may take focus back between the Tab and the Enter; the
     // test counts only an Enter pressed with the link focused, and tries again if the app took focus away.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const presses = await tabToBrand();
-      expect(
-        document.activeElement?.getAttribute("aria-label"),
-        `after ${presses} Tab presses`,
-      ).toBe("Aetheria home");
+    // Two attempts of at most 3 s each keep the whole test inside the project's 15 s ceiling.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const place = await tabToBrand();
+      expect(document.activeElement?.getAttribute("aria-label"), `tab stop ${place}`).toBe(
+        "Aetheria home",
+      );
       await userEvent.keyboard("{Enter}");
       const went = await expect
-        .poll(() => app.router.state.location.pathname, { timeout: 4000 })
+        .poll(() => app.router.state.location.pathname, { timeout: 3000 })
         .toBe("/")
         .then(() => true)
         .catch(() => false);
@@ -258,5 +287,28 @@ describe("the name check catches a seeded missing name", () => {
     const seeded = interactive().filter((element) => element.hasAttribute("data-seeded"));
     const unnamed = seeded.filter((element) => accessibleName(element) === "");
     expect(unnamed.map((element) => element.dataset.seeded)).toEqual(["unnamed"]);
+  });
+});
+
+describe("the tab-stop check counts only what the keyboard can reach", () => {
+  it("leaves out a tabindex -1 control, a disabled one and a hidden one, and keeps the plain one", async () => {
+    await using _screen = await render(
+      <div>
+        <button type="button" data-stop="plain">
+          Plain
+        </button>
+        <button type="button" data-stop="skipped" tabIndex={-1}>
+          Skipped
+        </button>
+        <button type="button" data-stop="disabled" disabled>
+          Disabled
+        </button>
+        <button type="button" data-stop="hidden" style={{ display: "none" }}>
+          Hidden
+        </button>
+      </div>,
+    );
+    const seeded = tabStops().filter((element) => element.hasAttribute("data-stop"));
+    expect(seeded.map((element) => element.dataset.stop)).toEqual(["plain"]);
   });
 });
