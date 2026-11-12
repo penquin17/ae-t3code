@@ -17,6 +17,8 @@ export const THREAD_PORT_CALLS = [
   "subscribeTurnCompleted",
   "readDelegatedCompletion",
   "readRestartNotes",
+  "suppressCompletionDelivery",
+  "readChildResult",
   "close",
 ] as const;
 
@@ -160,6 +162,23 @@ export interface ChildThreadPort {
   readRestartNotes(input: {
     readonly threadId: string;
   }): Promise<PortResult<{ readonly notes: readonly ChildRestartNote[] }, "unavailable">>;
+  /**
+   * Record-only delivery (Plan step 12): T3's own `delegated_task.completion-delivery.dispose` on the child's task, dispatched while the child is still held. T3 skips a disposed
+   * task at both points it delivers a completion. Idempotent. A failure is the service's to roll back.
+   */
+  suppressCompletionDelivery(input: {
+    readonly threadId: string;
+    readonly parentThreadId: string;
+  }): Promise<PortResult<{ readonly suppressed: true }, "unavailable">>;
+  /** The child's final text and T3's terminal status, as T3 recorded them on the parent's task. `not-terminal` is a completion T3 has not recorded; never a guess. */
+  readChildResult(input: {
+    readonly threadId: string;
+  }): Promise<
+    PortResult<
+      { readonly status: ChildTurnOutcome; readonly text: string },
+      "not-terminal" | "unavailable"
+    >
+  >;
   /** T3 `thread.stop` with `stopDelegatedTasks: false`, never `thread.delete`. A not-found error is treated as closed. */
   close(input: {
     readonly threadId: string;

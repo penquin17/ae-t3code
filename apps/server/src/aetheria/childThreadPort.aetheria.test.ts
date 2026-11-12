@@ -394,6 +394,57 @@ it.effect(
     ),
 );
 
+it.effect(
+  "suppressCompletionDelivery disposes the child's task delivery through T3's own command (idempotent, held child), and readChildResult answers not-terminal until T3 records a result",
+  () =>
+    scenario("suppress-and-result", (script) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const port = yield* portOver;
+        const parent = yield* startParent(script.cwd);
+        const created = yield* Effect.promise(() =>
+          port.createChildThread(spawnInput(parent, `${script.cwd}/child-work`)),
+        );
+        assert.isTrue(created.ok, JSON.stringify(created));
+        if (!created.ok) return;
+        const taskOf = () =>
+          orchestrator
+            .getThreadProjection(parent.parent)
+            .pipe(
+              Effect.map((projection) =>
+                projection.subagents.find((s) => String(s.childThreadId) === created.threadId),
+              ),
+            );
+        assert.isDefined(yield* taskOf(), "the parent holds the child's task");
+        assert.notEqual((yield* taskOf())?.completionDelivery?.state, "disposed");
+        const input = { threadId: created.threadId, parentThreadId: String(parent.parent) };
+        const first = yield* Effect.promise(() => port.suppressCompletionDelivery(input));
+        assert.deepEqual(first, { ok: true, suppressed: true });
+        assert.equal((yield* taskOf())?.completionDelivery?.state, "disposed");
+        const repeat = yield* Effect.promise(() => port.suppressCompletionDelivery(input));
+        assert.deepEqual(repeat, { ok: true, suppressed: true }, "a repeat is accepted");
+        assert.equal((yield* taskOf())?.completionDelivery?.state, "disposed");
+        const unknownTask = yield* Effect.promise(() =>
+          port.suppressCompletionDelivery({
+            threadId: "thread:nobody",
+            parentThreadId: String(parent.parent),
+          }),
+        );
+        assert.isFalse(unknownTask.ok);
+        const result = yield* Effect.promise(() =>
+          port.readChildResult({ threadId: created.threadId }),
+        );
+        assert.isFalse(result.ok);
+        assert.equal(!result.ok && result.reason, "not-terminal");
+        const missing = yield* Effect.promise(() =>
+          port.readChildResult({ threadId: "thread:nobody" }),
+        );
+        assert.isFalse(missing.ok);
+        assert.equal(!missing.ok && missing.reason, "unavailable");
+      }),
+    ),
+);
+
 it.effect("refuses an unknown parent and reports a bind it cannot do, never success", () =>
   scenario("failures", (script) =>
     Effect.gen(function* () {

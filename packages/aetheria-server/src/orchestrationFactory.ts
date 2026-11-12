@@ -83,9 +83,6 @@ const message = (error: unknown): string =>
 /** Operations whose service logic is not built in this slice. They answer unavailable; the module maps that onto the XC-6 `unavailable` reply. */
 const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOperation>([
   "children.fork",
-  "children.close",
-  "children.await-report",
-  "children.cancel",
   "jobs.output",
   "jobs.list",
   "jobs.kill",
@@ -252,12 +249,32 @@ export function createOrchestrationFactory(
      */
     const control = async (
       state: Running,
-      operation: "children.message" | "children.list" | "children.interrupt" | "children.status",
+      operation:
+        | "children.message"
+        | "children.list"
+        | "children.interrupt"
+        | "children.close"
+        | "children.await-report"
+        | "children.cancel"
+        | "children.status",
       who: OrchestrationCaller,
       args: unknown,
+      signal: AbortSignal | undefined,
     ): Promise<OrchestrationOutcome> => {
       const caller = { sessionId: who.sessionId, rootSessionId: who.rootSessionId };
       switch (operation) {
+        case "children.await-report":
+          // Event-driven and bounded in the service; the module's signal (drain) and `children.cancel` by request id end it. The caller is the carrier's.
+          return (await state.children.awaitReport({
+            caller,
+            args: args as { target: string; requestId?: string },
+            signal,
+          })) as OrchestrationOutcome;
+        case "children.cancel":
+          return (await state.children.cancelWait({
+            caller,
+            args: args as { requestId: string },
+          })) as OrchestrationOutcome;
         case "children.message":
           return (await state.children.messageChild({
             caller,
@@ -267,6 +284,12 @@ export function createOrchestrationFactory(
           return (await state.children.listChildren({
             caller,
             args: args as { scope: "children" | "descendants" },
+          })) as OrchestrationOutcome;
+        case "children.close":
+          // An exact ancestor only: the user's own close is a direct Backend call (M10), never this XC-6 operation.
+          return (await state.children.closeChild({
+            caller,
+            args: args as { target: string },
           })) as OrchestrationOutcome;
         case "children.interrupt":
           return (await state.children.interruptChild({
@@ -297,7 +320,13 @@ export function createOrchestrationFactory(
         try {
           return operation === "children.spawn"
             ? await spawn(state, who, args, handleOptions?.signal)
-            : await control(state, operation as Parameters<typeof control>[1], who, args);
+            : await control(
+                state,
+                operation as Parameters<typeof control>[1],
+                who,
+                args,
+                handleOptions?.signal,
+              );
         } catch (error) {
           return unavailable(`${operation} failed: ${message(error)}`);
         }

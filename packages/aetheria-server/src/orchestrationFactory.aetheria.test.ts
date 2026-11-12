@@ -57,6 +57,8 @@ interface Fake {
   readonly subscriptions: Set<unknown>;
   emit(event: ChildTurnCompletedEvent): void;
   readonly requestedSessionIds: string[];
+  readonly suppressed: string[];
+  readonly results: Map<string, { status: "completed" | "failed" | "interrupted"; text: string }>;
   readonly turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }>;
   failNext: { create?: boolean; release?: boolean; bindAs?: (chosen: string) => string };
 }
@@ -73,6 +75,11 @@ function fakeThreads(): Fake {
   }>();
   const failNext: Fake["failNext"] = {};
   const requestedSessionIds: string[] = [];
+  const suppressed: string[] = [];
+  const results = new Map<
+    string,
+    { status: "completed" | "failed" | "interrupted"; text: string }
+  >();
   const turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }> =
     [];
   const port: ChildThreadPort = {
@@ -128,6 +135,17 @@ function fakeThreads(): Fake {
     },
     readDelegatedCompletion: async () => ({ ok: false, reason: "unavailable" }),
     readRestartNotes: async () => ({ ok: false, reason: "unavailable" }),
+    suppressCompletionDelivery: async ({ threadId }) => {
+      calls.push("suppress");
+      suppressed.push(threadId);
+      return { ok: true, suppressed: true };
+    },
+    readChildResult: async ({ threadId }) => {
+      const recorded = results.get(threadId);
+      return recorded === undefined
+        ? { ok: false, reason: "not-terminal" }
+        : { ok: true, ...recorded };
+    },
     close: async ({ threadId }) => {
       calls.push("close");
       closed.push(threadId);
@@ -144,6 +162,8 @@ function fakeThreads(): Fake {
     subscriptions,
     failNext,
     requestedSessionIds,
+    suppressed,
+    results,
     turns,
     emit: (event) => {
       for (const entry of subscriptions) entry.handler(event);
@@ -481,10 +501,13 @@ describe("the operations that are not built", () => {
     "children.message",
     "children.list",
     "children.interrupt",
+    "children.close",
+    "children.await-report",
+    "children.cancel",
   ];
   const unbuilt = ORCHESTRATION_OPERATIONS.filter((name) => !built.includes(name));
-  it("are twelve and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
-    expect(unbuilt).toHaveLength(12);
+  it("are nine and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
+    expect(unbuilt).toHaveLength(9);
     const w = world();
     const { service } = await started(w);
     for (const name of unbuilt) {
@@ -509,7 +532,7 @@ describe("the operations that are not built", () => {
     });
     const operations = registration.operations ?? {};
     expect(
-      await operations["children.close"]!(context({ target: "thread-child-1" })),
+      await operations["children.fork"]!(context({ prefix: "all", prompt: "p", allow: ["read"] })),
     ).toMatchObject({
       status: "unavailable",
       code: "ORCHESTRATION_UNAVAILABLE",
@@ -610,6 +633,84 @@ describe("the control operations (step 10) through the factory", () => {
     expect(
       ok(await service.handle("children.status", who, { childSessionId: "pi-thread-child-1" })),
     ).toEqual({ owned: true, state: "idle" });
+  });
+
+  it("a record-only child is suppressed before release, its report is stored when it settles and awaited through the factory; children.cancel ends only that wait", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w);
+    ok(
+      await service.handle("children.spawn", who, {
+        ...SPAWN,
+        mode: "one-shot",
+        delivery: "record-only",
+      }),
+    );
+    expect(w.fake.suppressed).toEqual(["thread-child-1"]);
+    expect(w.fake.calls).toEqual(["create", "suppress", "bind", "release"]);
+    const controller = new AbortController();
+    const waiting = service.handle(
+      "children.await-report",
+      who,
+      { target: "thread-child-1", requestId: "r1" },
+      { signal: controller.signal },
+    );
+    const cancelled = service.handle("children.await-report", who, {
+      target: "thread-child-1",
+      requestId: "r2",
+    });
+    expect(await service.handle("children.cancel", who, { requestId: "r2" })).toEqual({
+      ok: true,
+      value: { accepted: true },
+    });
+    expect(await cancelled).toMatchObject({ ok: false, code: "ABORTED" });
+    w.fake.results.set("thread-child-1", { status: "completed", text: "the report" });
+    w.fake.emit({
+      threadId: "thread-child-1",
+      turnId: "run-1",
+      outcome: "completed",
+      settledAt: "2026-11-12T10:00:00.000Z",
+    });
+    // Settles reach the service through the watch the factory makes on the child's root.
+    expect(await waiting).toEqual({
+      ok: true,
+      value: { status: "completed", text: "the report", route: 1 },
+    });
+    expect(
+      await service.handle("children.await-report", who, { target: "thread-child-1" }),
+    ).toEqual({ ok: true, value: { status: "completed", text: "the report", route: 1 } });
+    const stranger = { sessionId: "other-main", rootSessionId: "other-main", kind: "main" };
+    expect(
+      await service.handle("children.await-report", stranger, { target: "thread-child-1" }),
+    ).toMatchObject({ ok: false, code: "ORCHESTRATION_UNAVAILABLE" });
+    controller.abort();
+  });
+
+  it("children.close stops that one thread through T3, closes the record, is idempotent and refuses a stranger", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    writeMainRecord(w.stateRoot, "other-main");
+    const { service } = await started(w);
+    ok(await service.handle("children.spawn", who, { ...SPAWN, mode: "continuable" }));
+    w.lineage.threads = [childRow()];
+    const other = { sessionId: "other-main", rootSessionId: "other-main", kind: "main" };
+    expect(
+      await service.handle("children.close", other, { target: "thread-child-1" }),
+    ).toMatchObject({ ok: false, code: "NOT_AUTHORIZED" });
+    expect(w.fake.closed).toEqual([]);
+    const closed = ok(await service.handle("children.close", who, { target: "thread-child-1" }));
+    expect(closed).toEqual({ closed: true, killedJobs: [] });
+    expect(w.fake.closed).toEqual(["thread-child-1"]);
+    expect(ok(await service.handle("children.close", who, { target: "thread-child-1" }))).toEqual(
+      closed,
+    );
+    expect(w.fake.closed).toEqual(["thread-child-1"]);
+    expect(
+      await service.handle("children.message", who, { target: "thread-child-1", content: "x" }),
+    ).toMatchObject({ ok: false, code: "CHILD_NOT_RESUMABLE" });
+    expect(
+      ok(await service.handle("children.status", who, { childSessionId: "pi-thread-child-1" })),
+    ).toEqual({ owned: true, state: "closed" });
   });
 
   it("a stranger session and a forged target get the refusals, and the arguments can name no caller", async () => {

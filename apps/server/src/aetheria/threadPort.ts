@@ -480,6 +480,66 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
+    // Record-only delivery (step 12): T3 skips a task whose completion delivery is `disposed` at the offer when the child completes AND at the parent-settle delivery
+    // (Orchestrator.ts planDelegatedCompletionDelivery and its `pending` selection). The command is T3's own and public; the same command id replays harmlessly.
+    suppressCompletionDelivery: ({ threadId, parentThreadId }) =>
+      runPromise(
+        Effect.gen(function* () {
+          const parent = yield* projectionOf(parentThreadId);
+          const task = parent.subagents.find(
+            (subagent) =>
+              subagent.origin === "app_owned" && String(subagent.childThreadId) === threadId,
+          );
+          if (task === undefined)
+            return fail("unavailable" as const, "the parent holds no delegated task for the child");
+          yield* threads.dispatch({
+            type: "delegated_task.completion-delivery.dispose",
+            commandId: CommandId.make(`m05-suppress:${task.id}`),
+            parentThreadId: ThreadId.make(parentThreadId),
+            taskId: task.id,
+          });
+          return { ok: true as const, suppressed: true as const };
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.succeed(
+              fail(
+                "unavailable" as const,
+                detailOf((cause as unknown as { error?: unknown }).error),
+              ),
+            ),
+          ),
+        ),
+      ),
+
+    // The child's final result as T3 recorded it on the parent's task when the child completed (`subagent.result`, the run's final text) and T3's own terminal status.
+    readChildResult: ({ threadId }) =>
+      runPromise(
+        Effect.gen(function* () {
+          const child = yield* projectionOf(threadId);
+          const parentId = child.thread.lineage.parentThreadId;
+          if (parentId === undefined || parentId === null)
+            return fail("unavailable" as const, "the thread has no parent");
+          const parent = yield* projectionOf(parentId);
+          const task = parent.subagents.find(
+            (subagent) => String(subagent.childThreadId) === threadId,
+          );
+          if (task === undefined)
+            return fail("unavailable" as const, "the parent holds no delegated task for the child");
+          const status = terminalOutcomeOf(task.status);
+          if (status === null) return fail("not-terminal" as const);
+          return { ok: true as const, status, text: task.result ?? "" };
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.succeed(
+              fail(
+                "unavailable" as const,
+                detailOf((cause as unknown as { error?: unknown }).error),
+              ),
+            ),
+          ),
+        ),
+      ),
+
     readRestartNotes: ({ threadId }) =>
       runPromise(
         projectionOf(threadId).pipe(
