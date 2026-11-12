@@ -22,6 +22,7 @@ export const THREAD_PORT_CALLS = [
   "readChildResult",
   "readLastRun",
   "readMessageReceipt",
+  "readLastHumanMessage",
   "close",
 ] as const;
 
@@ -218,6 +219,13 @@ export interface ChildThreadPort {
     readonly threadId: string;
     readonly messageId: string;
   }): Promise<PortResult<{ readonly found: boolean }, "unavailable">>;
+  /**
+   * Step 17 (the wake bound): the id of the newest message a human created on the thread (T3's `createdBy: "user"`), or null when none. A change of it resets the consecutive-wake count.
+   * An unreadable projection is `unavailable`.
+   */
+  readLastHumanMessage(input: {
+    readonly threadId: string;
+  }): Promise<PortResult<{ readonly messageId: string | null }, "unavailable">>;
   /** T3 `thread.stop` with `stopDelegatedTasks: false`, never `thread.delete`. A not-found error is treated as closed. */
   close(input: {
     readonly threadId: string;

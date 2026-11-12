@@ -3,6 +3,6 @@
   "package": "@aetheria/orchestration",
   "version": "0.1.0",
   "archive": "aetheria-orchestration-0.1.0.tgz",
-  "sha256": "e4f52060c1e7e5a2750d4b649f1adb45666cb78b8894785254660692ca454b45",
-  "stamp": "sha256:e4f52060c1e7e5a2750d4b649f1adb45666cb78b8894785254660692ca454b45"
+  "sha256": "145af70d024b750d19f5c2e3ddde97062aae0c3676553be4e38ba796fe9e09aa",
+  "stamp": "sha256:145af70d024b750d19f5c2e3ddde97062aae0c3676553be4e38ba796fe9e09aa"
 }

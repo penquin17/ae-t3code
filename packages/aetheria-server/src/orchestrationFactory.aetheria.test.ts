@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off
 // AETHERIA M05 Plan step 9 (C2, C10) — the `orchestrationFactory` join over the INSTALLED orchestration archive.
 //
 // Boundary: the factory, the real children service of `@aetheria/orchestration/backend`, the real orchestration store and M03's real identity store (writer
@@ -77,6 +77,8 @@ interface Fake {
   >;
   readonly results: Map<string, { status: "completed" | "failed" | "interrupted"; text: string }>;
   readonly turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }>;
+  /** Resolves when the next turn is accepted (an event, not a sleep). */
+  nextTurn(): Promise<void>;
   failNext: { create?: boolean; release?: boolean; bindAs?: (chosen: string) => string };
 }
 function fakeThreads(): Fake {
@@ -102,6 +104,7 @@ function fakeThreads(): Fake {
   >();
   const turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }> =
     [];
+  const turnListeners: Array<() => void> = [];
   const port: ChildThreadPort = {
     createChildThread: async (input) => {
       calls.push("create");
@@ -146,6 +149,7 @@ function fakeThreads(): Fake {
       const asked = forked.find((f) => f.targetThreadId === threadId);
       if (asked !== undefined) forkSessions.set(threadId, asked.piSessionId);
       turns.push({ threadId, content, delivery, messageId });
+      for (const listener of turnListeners.splice(0)) listener();
       return { ok: true, accepted: true, messageId };
     },
     interrupt: async ({ threadId }) => {
@@ -165,6 +169,7 @@ function fakeThreads(): Fake {
     readDelegatedCompletion: async () => ({ ok: false, reason: "unavailable" }),
     readRestartNotes: async () => ({ ok: true, notes: [] }),
     readLastRun: async ({ threadId }) => ({ ok: true, run: lastRuns.get(threadId) ?? null }),
+    readLastHumanMessage: async () => ({ ok: true, messageId: null }),
     // T3's receipt: found when a turn was accepted for this thread under this message id.
     readMessageReceipt: async ({ threadId, messageId }) => ({
       ok: true,
@@ -203,6 +208,8 @@ function fakeThreads(): Fake {
     lastRuns,
     results,
     turns,
+    /** Resolves when the next turn is accepted (an event, not a sleep). */
+    nextTurn: () => new Promise<void>((resolve) => void turnListeners.push(resolve)),
     emit: (event) => {
       for (const entry of subscriptions) entry.handler(event);
     },
@@ -570,10 +577,13 @@ describe("the operations that are not built", () => {
     "jobs.attach",
     "jobs.adopted",
     "jobs.exited",
+    "jobs.output",
+    "jobs.list",
+    "jobs.cancel",
   ];
   const unbuilt = ORCHESTRATION_OPERATIONS.filter((name) => !built.includes(name));
-  it("are four (the jobs operations of steps 17 and 18) and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
-    expect(unbuilt).toHaveLength(4);
+  it("are one (jobs.kill, step 18) and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
+    expect(unbuilt).toHaveLength(1);
     const w = world();
     const { service } = await started(w);
     for (const name of unbuilt) {
@@ -597,7 +607,7 @@ describe("the operations that are not built", () => {
       args,
     });
     const operations = registration.operations ?? {};
-    expect(await operations["jobs.list"]!(context({ scope: "own" }))).toMatchObject({
+    expect(await operations["jobs.kill"]!(context({ jobId: "job-1" }))).toMatchObject({
       status: "unavailable",
       code: "ORCHESTRATION_UNAVAILABLE",
     });
@@ -716,6 +726,123 @@ describe("the job lifecycle operations (step 16)", () => {
     expect(
       NodeFS.readdirSync(NodePath.join(w.stateRoot, "jobs")).filter((name) => name !== "FORMAT"),
     ).toEqual([]);
+    await service.drain();
+  });
+});
+
+describe("job output, list and bounded wakes (step 17)", () => {
+  const RUN = "0197d3c0-aaaa-4000-8000-00000000cafe";
+  const host = () => ({
+    startTime: async () => "T",
+    probeGroup: () => ({ state: "live" as const }),
+    inspectRun: async () => ({ ok: true as const }),
+  });
+  // A few microtask turns, enough for a started call to reach its wait; the delivery under test is awaited through the fake's own event.
+  const settle = async () => {
+    for (let i = 0; i < 50; i += 1) await Promise.resolve();
+  };
+  async function adopted(w: World, service: Awaited<ReturnType<typeof started>>["service"]) {
+    const reserved = ok(
+      await service.handle("jobs.reserve", who, {
+        runKey: RUN,
+        label: "npm test",
+        mode: "background",
+      }),
+    );
+    const jobId = reserved.jobId as string;
+    const folder = NodePath.join(w.stateRoot, "shell", "runs", RUN);
+    NodeFS.mkdirSync(folder, { recursive: true, mode: 0o700 });
+    NodeFS.writeFileSync(NodePath.join(folder, "stdout"), "");
+    NodeFS.writeFileSync(NodePath.join(folder, "stderr"), "");
+    ok(
+      await service.handle("jobs.attach", who, {
+        jobId,
+        pid: 4242,
+        pgid: 4242,
+        startIdentity: { pid: 4242, startTime: "T" },
+      }),
+    );
+    ok(await service.handle("jobs.adopted", who, { jobId, via: "background" }));
+    return { jobId, stdout: NodePath.join(folder, "stdout") };
+  }
+
+  it("reads only new output, lists the job with its notice pending, and delivers the exit once to the owner, coalesced", async () => {
+    const w = world();
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(),
+      newJobId: () => "job-1",
+      wakeCoalesceMs: 5,
+    });
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    const { jobId, stdout } = await adopted(w, service);
+    NodeFS.appendFileSync(stdout, "hello");
+    expect(ok(await service.handle("jobs.output", who, { jobId }))).toMatchObject({
+      jobId,
+      state: "running",
+      streams: [{ stream: "stdout", from: 0, to: 5, text: "hello", truncated: false }],
+      waitElapsed: false,
+    });
+    expect(ok(await service.handle("jobs.output", who, { jobId })).streams).toEqual([]);
+    expect(ok(await service.handle("jobs.list", who, {})).jobs).toMatchObject([
+      { jobId, ownerSessionId: MAIN, label: "npm test", state: "running", completion: "pending" },
+    ]);
+
+    const arrived = w.fake.nextTurn();
+    ok(await service.handle("jobs.exited", who, { jobId, exit: { code: 0, signal: null } }));
+    await arrived;
+    const toOwner = w.fake.turns.filter((t) => t.threadId === CALLER_THREAD);
+    expect(toOwner).toHaveLength(1);
+    expect(toOwner[0]?.content).toMatch(/npm test/);
+    expect(toOwner[0]?.messageId).toMatch(/^outbox-/);
+    // The turn is accepted before the mark is written; drain waits for the delivery in flight, then the record shows the insertion.
+    await service.drain();
+    const record = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(w.stateRoot, "jobs", jobId, "record.json"), "utf8"),
+    );
+    expect(record).toMatchObject({ state: "exited", completion: "inserted" });
+    expect(record.outbox.map((e: { state: string }) => e.state)).toEqual(["inserted"]);
+  });
+
+  it("a terminal read collects the job and withdraws the notice: nothing is sent to the owner", async () => {
+    const w = world();
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(),
+      newJobId: () => "job-1",
+      wakeCoalesceMs: 60_000,
+    });
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    const { jobId } = await adopted(w, service);
+    ok(await service.handle("jobs.exited", who, { jobId, exit: { code: 7, signal: null } }));
+    expect(ok(await service.handle("jobs.output", who, { jobId }))).toMatchObject({
+      state: "exited",
+      exit: { code: 7, signal: null },
+    });
+    expect(ok(await service.handle("jobs.list", who, {})).jobs).toMatchObject([
+      { completion: "none", collectedAt: expect.any(String) },
+    ]);
+    await service.drain();
+    expect(w.fake.turns.filter((t) => t.threadId === CALLER_THREAD)).toEqual([]);
+  });
+
+  it("jobs.cancel ends a long wait with ABORTED, scoped to the caller; a wait that times out says so and leaves the job", async () => {
+    const w = world();
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(),
+      newJobId: () => "job-1",
+    });
+    const { jobId } = await adopted(w, service);
+    const waiting = service.handle("jobs.output", who, {
+      jobId,
+      wait: true,
+      timeoutMs: 20_000,
+      requestId: "req-1",
+    });
+    await settle();
+    ok(await service.handle("jobs.cancel", who, { requestId: "req-1" }));
+    expect(await waiting).toMatchObject({ ok: false, code: "ABORTED" });
+    expect(
+      ok(await service.handle("jobs.output", who, { jobId, wait: true, timeoutMs: 30 })),
+    ).toMatchObject({ state: "running", waitElapsed: true });
     await service.drain();
   });
 });

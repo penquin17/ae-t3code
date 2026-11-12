@@ -598,6 +598,34 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
+    // Step 17 (the wake bound): the newest message a HUMAN created on the thread (T3's `createdBy: "user"` on a user message), by creation time. The outbox's own messages are
+    // agent-created, so they never move it. A projection that cannot be read is unavailable, never "no human message".
+    readLastHumanMessage: ({ threadId }) =>
+      runPromise(
+        projectionOf(threadId).pipe(
+          Effect.map((projection) => {
+            const human = projection.messages.filter(
+              (message) => message.role === "user" && message.createdBy === "user",
+            );
+            const newest = human.reduce<(typeof human)[number] | undefined>(
+              (best, message) =>
+                best === undefined ||
+                DateTime.toEpochMillis(message.createdAt) >= DateTime.toEpochMillis(best.createdAt)
+                  ? message
+                  : best,
+              undefined,
+            );
+            return {
+              ok: true as const,
+              messageId: newest === undefined ? null : String(newest.id),
+            };
+          }),
+          Effect.catchCause((cause) =>
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
+          ),
+        ),
+      ),
+
     readRestartNotes: ({ threadId }) =>
       runPromise(
         projectionOf(threadId).pipe(

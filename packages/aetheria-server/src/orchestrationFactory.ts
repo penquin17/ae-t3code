@@ -30,16 +30,22 @@ import {
   createChildService,
   createIdentityStore,
   createJobLifecycle,
+  createJobOutput,
   createJobRegistry,
+  createJobWakes,
   nodeHostProcessPort,
+  nodeJobOutputPort,
   nodeStoreDeps,
   openJobsStore,
+  orchestrationParameter,
   openOrchestrationStore,
   reconcileChildren,
   type BootReport,
   type HostProcessPort,
   type JobLifecycle,
+  type JobOutput,
   type JobsStore,
+  type JobWakes,
   type CallerContext,
   type ChildService,
   type ManagedIdentityWriter,
@@ -94,6 +100,8 @@ export interface OrchestrationFactoryOptions {
   readonly newMessageId?: (() => string) | undefined;
   /** Test seam: the host the job lifecycle checks an attach against. Default: the Node-backed port over M09's process-group primitives and the state root's run folders. */
   readonly hostProcess?: HostProcessPort | undefined;
+  /** Test seam: the delay in which completion notices for one owner coalesce into one message. Default 50 ms. */
+  readonly wakeCoalesceMs?: number | undefined;
   /** Test seam: the id of each new job. Default: `job-<uuid>`. */
   readonly newJobId?: (() => string) | undefined;
   /** Test seam: the T3 thread id of each fork's copy. Default: random. */
@@ -111,16 +119,15 @@ const message = (error: unknown): string =>
 
 /** Operations whose service logic is not built in this slice. They answer unavailable; the module maps that onto the XC-6 `unavailable` reply. */
 const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOperation>([
-  "jobs.output",
-  "jobs.list",
   "jobs.kill",
-  "jobs.cancel",
 ]);
 
 interface Running {
   readonly store: OrchestrationStore;
   readonly jobs: JobsStore;
   readonly lifecycle: JobLifecycle;
+  readonly output: JobOutput;
+  readonly wakes: JobWakes;
   readonly identity: ManagedIdentityWriter;
   readonly children: ChildService;
   readonly watchers: Map<string, { unsubscribe(): void }>;
@@ -230,15 +237,71 @@ export function createOrchestrationFactory(
         newThreadId,
       });
       // Step 16: the lifecycle facts the Agent's runner reports. The registry is the only writer of the job records; the host port only reads and probes.
+      const registry = createJobRegistry({
+        store: jobs,
+        now: deps.now,
+        newJobId: options.newJobId ?? (() => `job-${NodeCrypto.randomUUID()}`),
+      });
       const lifecycle = createJobLifecycle({
-        registry: createJobRegistry({
-          store: jobs,
-          now: deps.now,
-          newJobId: options.newJobId ?? (() => `job-${NodeCrypto.randomUUID()}`),
-        }),
+        registry,
         host: options.hostProcess ?? nodeHostProcessPort({ stateRoot: deps.stateRoot }),
       });
-      state = { store, jobs, lifecycle, identity, children, watchers };
+      // Step 17: completion wakes are bounded and coalesced. The outbox is the service's (it holds the notices in the job, child and main records); the cap is the carried parameter, the
+      // resume barrier is M06's, and a human message is read as a change of the newest user-created message on the owner's thread.
+      const outbox = children.outbox;
+      if (outbox === undefined) {
+        jobs.close();
+        store.close();
+        return {
+          ok: false,
+          code: "OUTBOX_UNAVAILABLE",
+          detail: "the child service built no outbox",
+        };
+      }
+      const wakes = createJobWakes({
+        outbox,
+        wakeCap: () => orchestrationParameter("maxConsecutiveWakes"),
+        now: deps.now,
+        coalesceMs: options.wakeCoalesceMs ?? 50,
+        beforeDeliver: (sessionId) => deps.resume.resumed(sessionId),
+        humanMessageId: async (sessionId) => {
+          const threadId = deps.threadOfSession(sessionId);
+          if (threadId === undefined || deps.threads.readLastHumanMessage === undefined)
+            return null;
+          const read = await deps.threads.readLastHumanMessage({ threadId });
+          return read.ok ? read.messageId : null;
+        },
+      });
+      // A notice queued for an owner (an adopted job's exit) schedules its one coalesced delivery.
+      registry.onChange((job) => {
+        for (const entry of job.outbox)
+          if (
+            entry.kind === "job-completion" &&
+            entry.state === "pending" &&
+            entry.batchId === null
+          )
+            wakes.noticed(entry.targetSessionId);
+      });
+      const output = createJobOutput({
+        registry,
+        port: nodeJobOutputPort({ stateRoot: deps.stateRoot }),
+        outbox,
+        isDescendant: (ancestor, owner) => {
+          const read = identity.read(owner);
+          const record =
+            read.state === "active"
+              ? (read.record as { kind?: unknown; parentChain?: unknown } | undefined)
+              : undefined;
+          return (
+            record?.kind === "child" &&
+            Array.isArray(record.parentChain) &&
+            record.parentChain.includes(ancestor)
+          );
+        },
+        waitDefaultMs: () => orchestrationParameter("waitDefaultMs"),
+        waitCapMs: () => orchestrationParameter("waitCapMs"),
+      });
+      state = { store, jobs, lifecycle, output, wakes, identity, children, watchers };
       try {
         const report = await reconcileChildren({
           threads,
@@ -257,6 +320,17 @@ export function createOrchestrationFactory(
           notify: options.notifyRestart ?? children.restartNotify,
         });
         options.onRestart?.(restarted);
+        // Step 17: completions a restart left pending (past the cap, or an owner that was absent) are offered again; a bounded, coalesced delivery per owner.
+        const waiting = jobs.listJobs();
+        if (waiting.ok)
+          for (const job of waiting.records)
+            for (const entry of job.outbox)
+              if (
+                entry.kind === "job-completion" &&
+                entry.state !== "inserted" &&
+                entry.state !== "abandoned"
+              )
+                wakes.noticed(entry.targetSessionId);
         for (const thread of bootThreads)
           if (thread.relationshipToParent === "subagent" || thread.relationshipToParent === "fork")
             watchRoot(state, thread.rootThreadId);
@@ -400,6 +474,25 @@ export function createOrchestrationFactory(
     };
 
     /** Step 16: the four lifecycle facts. The caller is the carrier's (session and root), never an argument; the arguments were decoded strictly by the module. */
+    /** Step 17: output, list and the scoped cancel of a wait. The caller is the carrier's; a wait ends on the module's signal (drain) as well as the caller's own cancel. */
+    const outputOperation = async (
+      state: Running,
+      operation: "jobs.output" | "jobs.list" | "jobs.cancel",
+      who: OrchestrationCaller,
+      args: unknown,
+      signal: AbortSignal | undefined,
+    ): Promise<OrchestrationOutcome> => {
+      const caller = { sessionId: who.sessionId, rootSessionId: who.rootSessionId };
+      switch (operation) {
+        case "jobs.output":
+          return (await state.output.output(caller, args as never, signal)) as OrchestrationOutcome;
+        case "jobs.list":
+          return (await state.output.list(caller, args as never)) as OrchestrationOutcome;
+        case "jobs.cancel":
+          return (await state.output.cancel(caller, args as never)) as OrchestrationOutcome;
+      }
+    };
+
     const lifecycle = async (
       state: Running,
       operation: "jobs.reserve" | "jobs.attach" | "jobs.adopted" | "jobs.exited",
@@ -429,6 +522,12 @@ export function createOrchestrationFactory(
       const ticket = attempts;
       const work = (async (): Promise<OrchestrationOutcome> => {
         try {
+          if (
+            operation === "jobs.output" ||
+            operation === "jobs.list" ||
+            operation === "jobs.cancel"
+          )
+            return await outputOperation(state, operation, who, args, handleOptions?.signal);
           if (
             operation === "jobs.reserve" ||
             operation === "jobs.attach" ||
@@ -483,6 +582,7 @@ export function createOrchestrationFactory(
           }
         }
         state.watchers.clear();
+        await state.wakes.drain();
         state.jobs.close();
         state.store.close();
       }

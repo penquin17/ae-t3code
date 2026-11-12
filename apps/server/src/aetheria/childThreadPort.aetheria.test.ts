@@ -900,3 +900,104 @@ it.effect(
       }),
     ),
 );
+
+// Step 17 (the wake bound): `readLastHumanMessage` reads the thread projection for the newest message a HUMAN created. The outbox's own messages are agent-created and must never
+// move it; a message created with `createdBy: "user"` (the shape M06's human delivery uses) must; an unknown thread is unavailable, never "no human message".
+it.effect(
+  "readLastHumanMessage names the newest user-created message, ignores the outbox's own agent-created ones, and is unavailable for an unknown thread",
+  () =>
+    scenario("last-human-message", (script) =>
+      Effect.gen(function* () {
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const threads = yield* ThreadManagementService.ThreadManagementService;
+        const port = yield* portOver;
+        const parent = yield* startParent(script.cwd);
+        const created = yield* Effect.promise(() =>
+          port.createChildThread(spawnInput(parent, script.cwd)),
+        );
+        if (!created.ok) return assert.fail(JSON.stringify(created));
+        yield* Effect.promise(() =>
+          port.bindChildSession({
+            threadId: created.threadId,
+            heldMessageId: created.heldMessageId,
+            piSessionId: CHOSEN,
+          }),
+        );
+        yield* Effect.promise(() =>
+          port.releaseFirstTurn({
+            threadId: created.threadId,
+            heldMessageId: created.heldMessageId,
+          }),
+        );
+        yield* worker.drain();
+        const lastHuman = () =>
+          Effect.promise(() => port.readLastHumanMessage({ threadId: created.threadId }));
+
+        // The outbox's own message (createdBy "agent") is not a human message.
+        assert.isTrue(
+          (yield* Effect.promise(() =>
+            port.startTurn({
+              threadId: created.threadId,
+              content: "notice",
+              delivery: "queue",
+              messageId: "outbox-agent-1",
+            }),
+          )).ok,
+        );
+        yield* worker.drain();
+        const afterAgent = yield* lastHuman();
+        assert.isTrue(afterAgent.ok);
+        if (afterAgent.ok)
+          assert.isTrue(
+            afterAgent.messageId === null || !afterAgent.messageId.startsWith("outbox-"),
+            JSON.stringify(afterAgent),
+          );
+
+        // A human message (createdBy "user", the M06 delivery shape) is.
+        const human = (id: string) =>
+          threads.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make(`test-human:${id}`),
+            threadId: ThreadId.make(created.threadId),
+            messageId: MessageId.make(id),
+            text: "hello from the user",
+            attachments: [],
+            dispatchMode: { type: "queue_after_active" },
+            deliveryIntent: "auto",
+            createdBy: "user",
+            creationSource: "server",
+          });
+        yield* human("human-message-1");
+        yield* worker.drain();
+        assert.deepEqual(yield* lastHuman(), { ok: true, messageId: "human-message-1" });
+        yield* human("human-message-2");
+        yield* worker.drain();
+        // The test clock holds every message at one instant, so which of two same-instant human messages is "newest" is not decided here (real messages differ by creation time);
+        // what is: it is a human message, and never an agent-created one.
+        const second = yield* lastHuman();
+        assert.isTrue(
+          second.ok &&
+            (second.messageId === "human-message-1" || second.messageId === "human-message-2"),
+          JSON.stringify(second),
+        );
+        // An agent message after it changes nothing.
+        assert.isTrue(
+          (yield* Effect.promise(() =>
+            port.startTurn({
+              threadId: created.threadId,
+              content: "notice 2",
+              delivery: "queue",
+              messageId: "outbox-agent-2",
+            }),
+          )).ok,
+        );
+        yield* worker.drain();
+        assert.deepEqual(yield* lastHuman(), second);
+
+        const unknown = yield* Effect.promise(() =>
+          port.readLastHumanMessage({ threadId: "mcp:no-such-thread" }),
+        );
+        assert.isFalse(unknown.ok);
+      }),
+    ),
+);
