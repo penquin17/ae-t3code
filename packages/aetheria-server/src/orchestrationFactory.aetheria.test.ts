@@ -58,6 +58,16 @@ interface Fake {
   emit(event: ChildTurnCompletedEvent): void;
   readonly requestedSessionIds: string[];
   readonly suppressed: string[];
+  readonly forked: Array<{ parentThreadId: string; sourcePoint: unknown; targetThreadId: string }>;
+  readonly lastRuns: Map<
+    string,
+    {
+      runId: string;
+      outcome: "completed" | "failed" | "interrupted" | "active";
+      settledAt: string | null;
+      errorText: string | null;
+    }
+  >;
   readonly results: Map<string, { status: "completed" | "failed" | "interrupted"; text: string }>;
   readonly turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }>;
   failNext: { create?: boolean; release?: boolean; bindAs?: (chosen: string) => string };
@@ -76,6 +86,9 @@ function fakeThreads(): Fake {
   const failNext: Fake["failNext"] = {};
   const requestedSessionIds: string[] = [];
   const suppressed: string[] = [];
+  const forked: Array<{ parentThreadId: string; sourcePoint: unknown; targetThreadId: string }> =
+    [];
+  const lastRuns: Fake["lastRuns"] = new Map();
   const results = new Map<
     string,
     { status: "completed" | "failed" | "interrupted"; text: string }
@@ -113,7 +126,12 @@ function fakeThreads(): Fake {
       releases.push(threadId);
       return { ok: true, accepted: true };
     },
-    forkThread: async () => ({ ok: false, reason: "fork-failed" }),
+    forkThread: async ({ parentThreadId, sourcePoint, targetThreadId }) => {
+      calls.push("fork");
+      forked.push({ parentThreadId, sourcePoint, targetThreadId });
+      activity.set(targetThreadId, "idle");
+      return { ok: true, threadId: targetThreadId, forkSessionId: `pi-${targetThreadId}` };
+    },
     startTurn: async ({ threadId, content, delivery, messageId }) => {
       calls.push("startTurn");
       turns.push({ threadId, content, delivery, messageId });
@@ -134,7 +152,8 @@ function fakeThreads(): Fake {
       return { unsubscribe: () => void subscriptions.delete(entry) };
     },
     readDelegatedCompletion: async () => ({ ok: false, reason: "unavailable" }),
-    readRestartNotes: async () => ({ ok: false, reason: "unavailable" }),
+    readRestartNotes: async () => ({ ok: true, notes: [] }),
+    readLastRun: async ({ threadId }) => ({ ok: true, run: lastRuns.get(threadId) ?? null }),
     suppressCompletionDelivery: async ({ threadId }) => {
       calls.push("suppress");
       suppressed.push(threadId);
@@ -163,6 +182,8 @@ function fakeThreads(): Fake {
     failNext,
     requestedSessionIds,
     suppressed,
+    forked,
+    lastRuns,
     results,
     turns,
     emit: (event) => {
@@ -224,7 +245,7 @@ function world(stateRoot = scratch()): World {
     sessionOfThread: (threadId) =>
       threadId === CALLER_THREAD
         ? MAIN
-        : threadId.startsWith("thread-child")
+        : threadId.startsWith("thread-child") || threadId.startsWith("thread-fork")
           ? `pi-${threadId}`
           : undefined,
     threadOfSession: (sessionId) =>
@@ -241,6 +262,23 @@ function world(stateRoot = scratch()): World {
           workingFolder: input.workingFolder,
         });
         return options.verdict;
+      },
+      authorizeFork: async (input) => {
+        authorizerSeen.push({
+          callerSessionId: input.callerSessionId,
+          workingFolder: input.workingFolder,
+        });
+        if (!options.verdict.ok) return options.verdict;
+        return {
+          ...options.verdict,
+          child: {
+            authoritySource: "spawn-explicit" as const,
+            role: null,
+            roleOrigin: null,
+            roleDigest: null,
+            explicitAllow: [...input.allow],
+          },
+        };
       },
     },
     lineage: {
@@ -276,12 +314,17 @@ const callerOk: CallerContextPort = async (sessionId) =>
 const who = { sessionId: MAIN, rootSessionId: MAIN, kind: "main" };
 const SPAWN = { role: "reader", prompt: "do the task", mode: "one-shot" } as const;
 
-async function started(w: World, callerContext: CallerContextPort = callerOk) {
+async function started(
+  w: World,
+  callerContext: CallerContextPort = callerOk,
+  extra: Partial<Parameters<typeof createOrchestrationFactory>[0]> = {},
+) {
   const boots: unknown[] = [];
   let n = 0;
   let m = 0;
   const service = createOrchestrationFactory({
     callerContext,
+    ...extra,
     onBoot: (report) => boots.push(report),
     newAttemptId: () => `attempt-${++n}`,
     newSessionId: () => `pi-thread-child-${++m}`,
@@ -504,10 +547,11 @@ describe("the operations that are not built", () => {
     "children.close",
     "children.await-report",
     "children.cancel",
+    "children.fork",
   ];
   const unbuilt = ORCHESTRATION_OPERATIONS.filter((name) => !built.includes(name));
-  it("are nine and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
-    expect(unbuilt).toHaveLength(9);
+  it("are eight (the jobs operations) and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
+    expect(unbuilt).toHaveLength(8);
     const w = world();
     const { service } = await started(w);
     for (const name of unbuilt) {
@@ -531,9 +575,7 @@ describe("the operations that are not built", () => {
       args,
     });
     const operations = registration.operations ?? {};
-    expect(
-      await operations["children.fork"]!(context({ prefix: "all", prompt: "p", allow: ["read"] })),
-    ).toMatchObject({
+    expect(await operations["jobs.list"]!(context({ scope: "own" }))).toMatchObject({
       status: "unavailable",
       code: "ORCHESTRATION_UNAVAILABLE",
     });
@@ -744,6 +786,140 @@ describe("the control operations (step 10) through the factory", () => {
       }),
     ).toThrow();
     await registration.activation.drain("test");
+  });
+});
+
+describe("children.fork through the factory (step 11)", () => {
+  const forkArgs = { prefix: "all", prompt: "carry on from here", allow: ["read", "grep"] };
+  const withThreads = (n: { value: number } = { value: 0 }) => ({
+    newThreadId: () => `thread-fork-${++n.value}`,
+  });
+
+  it("registers the copy as an owned continuable child for the carrier's caller: copy, then identity, then plan mode, then the prompt", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w, callerOk, withThreads());
+    const value = ok(await service.handle("children.fork", who, forkArgs));
+    expect(value).toEqual({ childId: "thread-fork-1" });
+    expect(w.fake.forked).toEqual([
+      {
+        parentThreadId: CALLER_THREAD,
+        sourcePoint: "latest_stable",
+        targetThreadId: "thread-fork-1",
+      },
+    ]);
+    expect(w.fake.calls).toEqual(["fork", "startTurn"]);
+    expect(w.planModeCalls).toEqual([`${MAIN}>pi-thread-fork-1:fork`]);
+    const identity = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(w.stateRoot, "identity", "pi-thread-fork-1.json"), "utf8"),
+    );
+    expect(identity.record).toMatchObject({
+      kind: "child",
+      authoritySource: "spawn-explicit",
+      role: null,
+      explicitAllow: ["read", "grep"],
+      parentChain: [MAIN],
+    });
+    expect(w.fake.turns.map((t) => [t.threadId, t.content])).toEqual([
+      ["thread-fork-1", "carry on from here"],
+    ]);
+    expect(
+      ok(await service.handle("children.status", who, { childSessionId: "pi-thread-fork-1" })),
+    ).toMatchObject({ owned: true });
+  });
+
+  it("a parent run id is the run source point; a widened list is refused before any copy; a failed first prompt is FORK_PARTIAL step 3 with the session named", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w, callerOk, withThreads());
+    ok(await service.handle("children.fork", who, { ...forkArgs, prefix: { runId: "run-3" } }));
+    expect(w.fake.forked[0]?.sourcePoint).toEqual({ run: "run-3" });
+    const before = w.fake.forked.length;
+    expect(
+      await service.handle("children.fork", who, { ...forkArgs, allow: ["read", "workflow"] }),
+    ).toMatchObject({ ok: false, code: "AUTH_TOOL_NOT_ALLOWED" });
+    expect(w.fake.forked).toHaveLength(before);
+    const failing = world();
+    writeMainRecord(failing.stateRoot, MAIN);
+    failing.fake.port.startTurn = async () => ({ ok: false, reason: "delivery-unavailable" });
+    const second = await started(failing, callerOk, withThreads());
+    expect(await second.service.handle("children.fork", who, forkArgs)).toMatchObject({
+      ok: false,
+      code: "FORK_PARTIAL",
+      forkSessionId: "pi-thread-fork-1",
+      registered: false,
+      step: 3,
+    });
+    expect(failing.fake.closed).toEqual(["thread-fork-1"]);
+  });
+});
+
+describe("restart reconciliation of a cut child (step 13)", () => {
+  const childRow = (): ChildLineageThread => ({
+    threadId: "thread-child-1",
+    parentThreadId: CALLER_THREAD,
+    rootThreadId: ROOT_THREAD,
+    relationshipToParent: "subagent",
+    sessionId: "pi-thread-child-1",
+    closed: false,
+  });
+
+  it("a child whose run T3 cut is settled interrupted / backend-restarted at start, takes a message, and its notice waits for the outbox seam, then goes out once under its key", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const first = await started(w);
+    ok(await first.service.handle("children.spawn", who, { ...SPAWN, mode: "continuable" }));
+    await first.service.drain();
+    // The restart: T3 cut the run and went idle; the Backend starts again over the same state root.
+    w.lineage.threads = [childRow()];
+    w.fake.activity.set("thread-child-1", "idle");
+    w.fake.lastRuns.set("thread-child-1", {
+      runId: "run-7",
+      outcome: "interrupted",
+      settledAt: "2026-11-12T09:00:00.000Z",
+      errorText: null,
+    });
+    const reports: Array<{
+      interruptedByRestart: string[];
+      notices: { sent: string[]; pending: string[] };
+    }> = [];
+    const second = await started(w, callerOk, { onRestart: (r) => void reports.push(r) });
+    expect(reports[0]?.interruptedByRestart).toEqual(["thread-child-1"]);
+    expect(reports[0]?.notices.pending).toHaveLength(1);
+    expect(reports[0]?.notices.pending[0]).toMatch(/^child:thread-child-1:restart:\d+$/);
+    expect(
+      ok(await second.service.handle("children.list", who, { scope: "children" })),
+    ).toMatchObject({
+      rows: [{ state: "idle", lastOutcome: { status: "interrupted", cause: "backend-restarted" } }],
+    });
+    expect(
+      ok(
+        await second.service.handle("children.message", who, {
+          target: "thread-child-1",
+          content: "go on",
+        }),
+      ),
+    ).toBeDefined();
+    expect(w.fake.turns.map((t) => t.delivery)).toEqual(["queue"]);
+    await second.service.drain();
+    // Step 15 fills the seam: the next start delivers the pending notice once, under the original key.
+    const delivered: string[] = [];
+    const third = await started(w, callerOk, {
+      notifyRestart: async (notice) => {
+        delivered.push(notice.key);
+        return { ok: true };
+      },
+    });
+    expect(delivered).toEqual([reports[0]?.notices.pending[0]]);
+    await third.service.drain();
+    const fourth = await started(w, callerOk, {
+      notifyRestart: async (notice) => {
+        delivered.push(notice.key);
+        return { ok: true };
+      },
+    });
+    expect(delivered).toHaveLength(1);
+    await fourth.service.drain();
   });
 });
 

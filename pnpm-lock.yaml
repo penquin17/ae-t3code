@@ -2583,7 +2583,7 @@ packages:
         optional: true
 
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz':
-    resolution: {integrity: sha512-cYuE5sNbndzLy+pnTWFiKOjbvwW3QUYa+vwDHzPOL1qDyP40wWEy+zHO52KZKj97QjcOuhuZz2OqLTtprbJ0Qw==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
+    resolution: {integrity: sha512-EPYFlaBFtYPIRDgTTw96TmuIsQz5DPOaPoso+6FJvL9TF2Tv224s6Xty/uKGRhtklA1IgjnXv34nPThH845N3g==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
@@ -2598,7 +2598,7 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/orchestration@file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz':
-    resolution: {integrity: sha512-m3AU7dMeQc0usV0hh9X7oBHTFT+0a6LAcvNofcuZuGn4Mlq2qFs+9kxGSwbJyR0r8MUoV3V3/LTQe7uUpCpUDw==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
+    resolution: {integrity: sha512-xZ1Cc8y0qi5t5hWTtITCYaTkFiPXvZM5ImMZ235wJrc8qIJN/A4FDt0D5LrNivfbotXeTNGHuyIq7wtFcwxXMQ==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 

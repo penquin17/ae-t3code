@@ -19,6 +19,7 @@ export const THREAD_PORT_CALLS = [
   "readRestartNotes",
   "suppressCompletionDelivery",
   "readChildResult",
+  "readLastRun",
   "close",
 ] as const;
 
@@ -177,6 +178,23 @@ export interface ChildThreadPort {
     PortResult<
       { readonly status: ChildTurnOutcome; readonly text: string },
       "not-terminal" | "unavailable"
+    >
+  >;
+  /**
+   * Step 13: T3's newest run for the thread as it stands now (after a restart T3 has cut a running child's run, and with the R2 seam has not re-run it). `active` is a run that
+   * has not ended; `run: null` is a thread with no run; `unavailable` is never read as either.
+   */
+  readLastRun(input: { readonly threadId: string }): Promise<
+    PortResult<
+      {
+        readonly run: {
+          readonly runId: string;
+          readonly outcome: ChildTurnOutcome | "active";
+          readonly settledAt: string | null;
+          readonly errorText: string | null;
+        } | null;
+      },
+      "unavailable"
     >
   >;
   /** T3 `thread.stop` with `stopDelegatedTasks: false`, never `thread.delete`. A not-found error is treated as closed. */

@@ -75,7 +75,9 @@ import {
   CHILD_WRITER,
   createChildIdentityWriter,
   createChildService,
+  createExplicitAuthorityPort,
   createIdentityStore,
+  explicitAllowProblems,
   nodeStoreDeps,
   openOrchestrationStore,
   reconcileChildren,
@@ -84,6 +86,7 @@ import {
   type ChildService,
   type ManagedIdentityWriter,
   type OrchestrationStore,
+  type RestartReport,
 } from "@aetheria/orchestration/backend";
 import * as NodeCrypto from "node:crypto";
 
@@ -201,12 +204,21 @@ export {
   CHILD_WRITER,
   createChildIdentityWriter,
   createChildService,
+  createExplicitAuthorityPort,
   createIdentityStore,
+  explicitAllowProblems,
   nodeStoreDeps,
   openOrchestrationStore,
   reconcileChildren,
 };
-export type { BootReport, CallerContext, ChildService, ManagedIdentityWriter, OrchestrationStore };
+export type {
+  BootReport,
+  CallerContext,
+  ChildService,
+  ManagedIdentityWriter,
+  OrchestrationStore,
+  RestartReport,
+};
 
 /**
  * The runtime functions the orchestration factory (orchestrationFactory.ts) calls; a test checks each exists on the installed orchestration archive's
@@ -215,7 +227,9 @@ export type { BootReport, CallerContext, ChildService, ManagedIdentityWriter, Or
 export const ORCHESTRATION_LIBRARY_EXPORTS = [
   "createChildIdentityWriter",
   "createChildService",
+  "createExplicitAuthorityPort",
   "createIdentityStore",
+  "explicitAllowProblems",
   "nodeStoreDeps",
   "openOrchestrationStore",
   "reconcileChildren",

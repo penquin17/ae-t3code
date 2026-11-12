@@ -540,6 +540,39 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
+    // Step 13: T3's newest run (by ordinal) with its terminal status mapped as for a settle; a run that has not ended is `active`. After a restart T3 has cut a running child's run
+    // and, with the R2 seam (IP-24), has not re-run it, so a cut run reads terminal here.
+    readLastRun: ({ threadId }) =>
+      runPromise(
+        projectionOf(threadId).pipe(
+          Effect.map((projection) => {
+            const last = [...projection.runs].sort((a, b) => b.ordinal - a.ordinal)[0];
+            if (last === undefined) return { ok: true as const, run: null };
+            const outcome = terminalOutcomeOf(last.status);
+            return {
+              ok: true as const,
+              run: {
+                runId: String(last.id),
+                outcome: outcome ?? ("active" as const),
+                settledAt:
+                  outcome === null || last.completedAt === null
+                    ? null
+                    : DateTime.formatIso(last.completedAt),
+                errorText: null,
+              },
+            };
+          }),
+          Effect.catchCause((cause) =>
+            Effect.succeed(
+              fail(
+                "unavailable" as const,
+                detailOf((cause as unknown as { error?: unknown }).error),
+              ),
+            ),
+          ),
+        ),
+      ),
+
     readRestartNotes: ({ threadId }) =>
       runPromise(
         projectionOf(threadId).pipe(

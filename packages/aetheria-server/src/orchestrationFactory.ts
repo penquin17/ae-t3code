@@ -37,6 +37,7 @@ import {
   type ChildService,
   type ManagedIdentityWriter,
   type OrchestrationStore,
+  type RestartReport,
 } from "./library.ts";
 
 const ORCHESTRATION_UNAVAILABLE = "ORCHESTRATION_UNAVAILABLE";
@@ -63,12 +64,29 @@ export interface OrchestrationFactoryOptions {
   readonly callerContext: CallerContextPort;
   /** Told what boot reconciliation did (and that it could not read lineage, if so). Never required for the service to run. */
   readonly onBoot?: ((report: BootReport) => void) | undefined;
+  /**
+   * Told what restart reconciliation did (step 13): which children's runs the restart cut and how each notice stands. Never required for the service to run.
+   */
+  readonly onRestart?: ((report: RestartReport) => void) | undefined;
+  /**
+   * The restart-notice delivery seam: the outbox of step 15. Absent until step 15 is integrated, so every notice stays pending under its key and the next boot retries it.
+   */
+  readonly notifyRestart?:
+    | ((notice: {
+        readonly key: string;
+        readonly childThreadId: string;
+        readonly parentThreadId: string;
+        readonly text: string;
+      }) => Promise<{ readonly ok: boolean }>)
+    | undefined;
   /** Test seam: attempt ids. Default: random ids that M03's store accepts as attempt names. */
   readonly newAttemptId?: (() => string) | undefined;
   /** Test seam: the Pi session id of a new child. Default: a random UUID, a shape Pi's `--session-id` and M03's store both accept. */
   readonly newSessionId?: (() => string) | undefined;
   /** Test seam: the id of each message a control operation sends. Default: random. */
   readonly newMessageId?: (() => string) | undefined;
+  /** Test seam: the T3 thread id of each fork's copy. Default: random. */
+  readonly newThreadId?: (() => string) | undefined;
 }
 
 const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
@@ -82,7 +100,6 @@ const message = (error: unknown): string =>
 
 /** Operations whose service logic is not built in this slice. They answer unavailable; the module maps that onto the XC-6 `unavailable` reply. */
 const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOperation>([
-  "children.fork",
   "jobs.output",
   "jobs.list",
   "jobs.kill",
@@ -114,6 +131,8 @@ export function createOrchestrationFactory(
     const newAttemptId = options.newAttemptId ?? (() => `attempt-${NodeCrypto.randomUUID()}`);
     const newSessionId = options.newSessionId ?? (() => NodeCrypto.randomUUID());
     const newMessageId = options.newMessageId ?? (() => `m05-message-${NodeCrypto.randomUUID()}`);
+    const newThreadId =
+      options.newThreadId ?? (() => `thread:aetheria-fork:${NodeCrypto.randomUUID()}`);
 
     const watchRoot = (state: Running, rootThreadId: string): void => {
       if (state.watchers.has(rootThreadId)) return;
@@ -128,6 +147,13 @@ export function createOrchestrationFactory(
         const current = state();
         if (created.ok && current !== undefined) watchRoot(current, created.lineage.rootThreadId);
         return created;
+      },
+      // A fork's runs settle through the same watch. Only a depth-0 session can fork (M03: `subagent_fork` is generic delegation), so its thread is the root.
+      forkThread: async (input) => {
+        const forked = await deps.threads.forkThread(input);
+        const current = state();
+        if (forked.ok && current !== undefined) watchRoot(current, input.parentThreadId);
+        return forked;
       },
     });
 
@@ -178,6 +204,7 @@ export function createOrchestrationFactory(
         threadOfSession: deps.threadOfSession,
         lineage: deps.lineage,
         newMessageId,
+        newThreadId,
       });
       state = { store, identity, children, watchers };
       try {
@@ -188,8 +215,16 @@ export function createOrchestrationFactory(
           identity,
         });
         options.onBoot?.(report);
+        // Step 13: a child T3 cut at the restart becomes idle (interrupted, backend-restarted) and its parent is told once. Boot's own pre-acceptance cleanup ran first.
+        const restarted = await children.reconcileRestarts({
+          bootEpoch: deps.now(),
+          afterResume: (sessionId) => deps.resume.resumed(sessionId),
+          ...(options.notifyRestart === undefined ? {} : { notify: options.notifyRestart }),
+        });
+        options.onRestart?.(restarted);
         for (const thread of bootThreads)
-          if (thread.relationshipToParent === "subagent") watchRoot(state, thread.rootThreadId);
+          if (thread.relationshipToParent === "subagent" || thread.relationshipToParent === "fork")
+            watchRoot(state, thread.rootThreadId);
       } catch (error) {
         for (const watcher of watchers.values()) watcher.unsubscribe();
         store.close();
@@ -238,6 +273,26 @@ export function createOrchestrationFactory(
       const result = await state.children.spawnChild({
         caller: caller.caller,
         args: args as Parameters<ChildService["spawnChild"]>[0]["args"],
+        signal,
+      });
+      return result as OrchestrationOutcome;
+    };
+
+    /**
+     * Step 11: a native fork. The caller is the carrier's session with the trusted T3 context of its thread (never an argument); the allow-list was decoded strictly and the authorizer
+     * (M03's verdict, M05's rule) decides what it may hold. The user's own authority and the caller's depth are the authorizer's: a delegated session cannot reach `subagent_fork`.
+     */
+    const fork = async (
+      state: Running,
+      who: OrchestrationCaller,
+      args: unknown,
+      signal: AbortSignal | undefined,
+    ): Promise<OrchestrationOutcome> => {
+      const caller = await callerOf(who);
+      if (!caller.ok) return caller.outcome;
+      const result = await state.children.forkChild({
+        caller: caller.caller,
+        args: args as Parameters<ChildService["forkChild"]>[0]["args"],
         signal,
       });
       return result as OrchestrationOutcome;
@@ -318,6 +373,8 @@ export function createOrchestrationFactory(
       const ticket = attempts;
       const work = (async (): Promise<OrchestrationOutcome> => {
         try {
+          if (operation === "children.fork")
+            return await fork(state, who, args, handleOptions?.signal);
           return operation === "children.spawn"
             ? await spawn(state, who, args, handleOptions?.signal)
             : await control(

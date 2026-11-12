@@ -31,6 +31,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as NodeFS from "node:fs";
 
 import * as ServerConfig from "../config.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -65,6 +66,8 @@ const scriptedProvider = Effect.fn("childThreadPort.scriptedProvider")(function*
     requested: [] as Array<string | undefined>,
     ensuredCwd: new Map<string, string | null>(),
     started: [] as ProviderAdapter.ProviderAdapterV2TurnInput[],
+    /** The app thread of every provider thread T3 asked this provider to interrupt. */
+    interrupted: [] as string[],
   };
   let counter = 0;
   const adapter: ProviderAdapter.ProviderAdapterV2["Service"] = {
@@ -174,7 +177,8 @@ const scriptedProvider = Effect.fn("childThreadPort.scriptedProvider")(function*
               });
             }),
           steerTurn: () => Effect.void,
-          interruptTurn: () => Effect.void,
+          interruptTurn: (input) =>
+            Effect.sync(() => void log.interrupted.push(String(input.providerThread.appThreadId))),
           respondToRuntimeRequest: () => Effect.void,
           readThreadSnapshot: () => Effect.die("unused"),
           rollbackThread: () => Effect.die("unused"),
@@ -438,6 +442,142 @@ it.effect(
         assert.equal(!result.ok && result.reason, "not-terminal");
         const missing = yield* Effect.promise(() =>
           port.readChildResult({ threadId: "thread:nobody" }),
+        );
+        assert.isFalse(missing.ok);
+        assert.equal(!missing.ok && missing.reason, "unavailable");
+      }),
+    ),
+);
+
+/** A parent with one released child; returns the parent, the child's thread id and a reader of its delegated task status. */
+const parentWithRunningChild = (script: Script) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+    const port = yield* portOver;
+    const parent = yield* startParent(script.cwd);
+    const children: string[] = [];
+    // One released child: one running delegated task is enough to tell T3's per-thread stop from its cascade. The child's folder must exist for T3 to open its session.
+    yield* Effect.sync(() => NodeFS.mkdirSync(`${script.cwd}/child-work`, { recursive: true }));
+    for (const n of [1]) {
+      const created = yield* Effect.promise(() =>
+        port.createChildThread({
+          ...spawnInput(parent, `${script.cwd}/child-work`),
+          commandId: `m05-test-spawn:${n}`,
+        }),
+      );
+      assert.isTrue(created.ok, JSON.stringify(created));
+      if (!created.ok) return yield* Effect.die("create failed");
+      yield* worker.drain();
+      const bound = yield* Effect.promise(() =>
+        port.bindChildSession({
+          threadId: created.threadId,
+          heldMessageId: created.heldMessageId,
+          piSessionId: CHOSEN,
+        }),
+      );
+      assert.isTrue(bound.ok, JSON.stringify(bound));
+      const released = yield* Effect.promise(() =>
+        port.releaseFirstTurn({ threadId: created.threadId, heldMessageId: created.heldMessageId }),
+      );
+      assert.isTrue(released.ok, JSON.stringify(released));
+      children.push(created.threadId);
+    }
+    yield* worker.drain();
+    /** The delegated task's status on the parent and the child's own newest run status: both must stay as they were for a per-thread stop. */
+    const taskStatuses = () =>
+      Effect.gen(function* () {
+        const projection = yield* orchestrator.getThreadProjection(parent.parent);
+        const out: string[] = [];
+        for (const id of children) {
+          const task = projection.subagents.find((s) => String(s.childThreadId) === id);
+          const child = yield* orchestrator.getThreadProjection(ThreadId.make(id));
+          const run = [...child.runs].sort((a, b) => b.ordinal - a.ordinal)[0];
+          out.push(`${task?.status}/${run?.status}`);
+        }
+        return out;
+      });
+    return { port, parent, children, taskStatuses, worker };
+  });
+
+it.effect(
+  "the root's stop through the port (stopDelegatedTasks false) interrupts the root's own run and never asks the provider to interrupt the child's (this test can fail: see the contrast)",
+  () =>
+    scenario("root-stop", (script) =>
+      Effect.gen(function* () {
+        const { port, parent, children, taskStatuses, worker } =
+          yield* parentWithRunningChild(script);
+        assert.deepEqual(yield* taskStatuses(), ["running/running"]);
+        const stopped = yield* Effect.promise(() =>
+          port.close({ threadId: String(parent.parent) }),
+        );
+        assert.isTrue(stopped.ok, JSON.stringify(stopped));
+        yield* worker.drain();
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const parentRun = (yield* orchestrator.getThreadProjection(parent.parent)).runs[0];
+        assert.equal(parentRun?.status, "interrupted", "the stop took effect on the root");
+        assert.include(
+          script.log.interrupted,
+          String(parent.parent),
+          "the root's own turn was interrupted",
+        );
+        assert.notInclude(script.log.interrupted, children[0], "the child's turn was not");
+        assert.deepEqual(
+          (yield* taskStatuses())[0],
+          "running/running",
+          "its task and run are untouched",
+        );
+      }),
+    ),
+);
+
+it.effect(
+  "contrast: T3's own cascade (ThreadManagementService.stopDelegatedTasks, what its Stop button uses) does stop the child, so the test above can fail",
+  () =>
+    scenario("root-stop-cascade", (script) =>
+      Effect.gen(function* () {
+        const { parent, taskStatuses, worker } = yield* parentWithRunningChild(script);
+        const threads = yield* ThreadManagementService.ThreadManagementService;
+        yield* threads.dispatch({
+          type: "thread.stop",
+          commandId: CommandId.make("m05-test-native-stop"),
+          threadId: parent.parent,
+          reason: "contrast",
+          stopDelegatedTasks: false,
+        });
+        yield* threads.stopDelegatedTasks({
+          threadId: parent.parent,
+          commandId: CommandId.make("m05-test-native-stop"),
+          reason: "contrast",
+        });
+        yield* worker.drain();
+        assert.notDeepEqual(yield* taskStatuses(), ["running/running"]);
+      }),
+    ),
+);
+
+it.effect(
+  "readLastRun answers the newest run: a held child's unreleased run is active, a thread T3 does not know is unavailable (never null or idle)",
+  () =>
+    scenario("last-run", (script) =>
+      Effect.gen(function* () {
+        const port = yield* portOver;
+        const parent = yield* startParent(script.cwd);
+        const created = yield* Effect.promise(() =>
+          port.createChildThread(spawnInput(parent, `${script.cwd}/child-work`)),
+        );
+        assert.isTrue(created.ok, JSON.stringify(created));
+        if (!created.ok) return;
+        const held = yield* Effect.promise(() => port.readLastRun({ threadId: created.threadId }));
+        assert.isTrue(held.ok);
+        assert.equal(held.ok && held.run?.outcome, "active");
+        assert.equal(held.ok && held.run?.settledAt, null);
+        const parentRun = yield* Effect.promise(() =>
+          port.readLastRun({ threadId: String(parent.parent) }),
+        );
+        assert.isTrue(parentRun.ok && parentRun.run !== null);
+        const missing = yield* Effect.promise(() =>
+          port.readLastRun({ threadId: "thread:nobody" }),
         );
         assert.isFalse(missing.ok);
         assert.equal(!missing.ok && missing.reason, "unavailable");
