@@ -48,6 +48,7 @@ import * as DocumentText from "../provider/DocumentText.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { makeChildThreadPort, piSessionIdOf, terminalOutcomeOf } from "./threadPort.ts";
+import { forkSlotKey, requestPiSessionId } from "./piSessionIdSeam.ts";
 
 const driver = ProviderDriverKind.make("codex");
 const instanceId = ProviderInstanceId.make("codex");
@@ -609,6 +610,39 @@ it.effect(
           globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>
         )[Symbol.for("aetheria.pi.session-id-seam")];
         assert.isUndefined(seam?.take("fork:thread:fork-detail-target"));
+        assert.isUndefined(
+          seam?.take("thread:fork-detail-target"),
+          "and not under the plain key either",
+        );
+      }),
+    ),
+);
+
+it.effect(
+  "the chosen session id is requested under both keys and released by withdrawForkRequest and by close: the plain key for the portable route's open launch, `fork:<id>` for the native route's --fork launch",
+  () =>
+    scenario("fork-keys", (script) =>
+      Effect.gen(function* () {
+        void script;
+        const port = yield* portOver;
+        const take = (key: string): string | undefined =>
+          (globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>)[
+            Symbol.for("aetheria.pi.session-id-seam")
+          ]?.take(key);
+        // Make the requests the way forkThread does (the dispatch itself needs a finished parent turn, which the native run covers), then release them through the port.
+        requestPiSessionId("thread:fork-keys", "id-1");
+        requestPiSessionId(forkSlotKey("thread:fork-keys"), "id-1");
+        const released = yield* Effect.promise(() =>
+          port.withdrawForkRequest({ threadId: "thread:fork-keys" }),
+        );
+        assert.deepEqual(released, { ok: true, released: true });
+        assert.isUndefined(take("thread:fork-keys"));
+        assert.isUndefined(take(forkSlotKey("thread:fork-keys")));
+        requestPiSessionId("thread:fork-closed", "id-2");
+        requestPiSessionId(forkSlotKey("thread:fork-closed"), "id-2");
+        yield* Effect.promise(() => port.close({ threadId: "thread:fork-closed" }));
+        assert.isUndefined(take("thread:fork-closed"), "close releases the plain key");
+        assert.isUndefined(take(forkSlotKey("thread:fork-closed")), "and the fork key");
       }),
     ),
 );

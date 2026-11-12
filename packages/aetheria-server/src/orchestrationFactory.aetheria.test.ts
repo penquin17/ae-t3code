@@ -139,6 +139,7 @@ function fakeThreads(): Fake {
       activity.set(targetThreadId, "idle");
       return { ok: true, threadId: targetThreadId };
     },
+    withdrawForkRequest: async () => ({ ok: true, released: true }),
     startTurn: async ({ threadId, content, delivery, messageId }) => {
       calls.push("startTurn");
       // The fork thread's first turn makes the Pi session copy under the id the Backend asked for.

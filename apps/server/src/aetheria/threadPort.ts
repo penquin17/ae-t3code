@@ -71,6 +71,12 @@ export const terminalOutcomeOf = (status: unknown): ChildTurnOutcome | null =>
     ? (TERMINAL[status] as ChildTurnOutcome)
     : null;
 
+/** Releases a fork thread's requested session id under both keys (the plain one and `fork:<id>`). */
+const withdrawForkKeys = (threadId: string): void => {
+  withdrawPiSessionIdRequest(threadId);
+  withdrawPiSessionIdRequest(forkSlotKey(threadId));
+};
+
 const tagOf = (error: unknown): string => String((error as { _tag?: unknown } | null)?._tag ?? "");
 /**
  * The typed failure inside an Effect `Cause`: the first `Fail` reason's `error`. A Cause has no `.error` of its own (it holds `reasons`), so reading `.error` off it gave `undefined` and
@@ -286,9 +292,10 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
-    // T3's `thread.fork` creates only the fork THREAD: the Pi session copy is made when its first turn starts (`PiAdapter.forkThread`, `pi --fork <file>`). The Backend's chosen session
-    // id is asked for in the IP-25 slot under `fork:<threadId>` (not the plain thread id, which the thread's own open launch would consume), so the copy is made under that id and the
-    // identity can be activated before it exists. The request is withdrawn when the fork fails or the thread is closed first.
+    // T3's `thread.fork` creates only the fork THREAD, and its first turn makes the Pi session one of two ways: a native copy (`PiAdapter.forkThread`, `pi --fork <file>`, only when no run of
+    // the parent is active) or, as for every tool call, a portable fork that opens a NEW session under the thread's own key and carries the history as a summary. The Backend's chosen
+    // session id is asked for under BOTH keys, `fork:<threadId>` for the first and the plain thread key for the second, so either route makes the session under that id and the identity can
+    // be activated before it exists. `withdrawForkRequest`, a failed fork and `close` release both.
     forkThread: ({ parentThreadId, sourcePoint, targetThreadId, piSessionId }) =>
       runPromise(
         Effect.gen(function* () {
@@ -314,6 +321,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             }
           }
           requestPiSessionId(forkSlotKey(targetThreadId), piSessionId);
+          requestPiSessionId(targetThreadId, piSessionId);
           yield* threads.dispatch({
             type: "thread.fork",
             commandId: CommandId.make(`m05-fork:${targetThreadId}`),
@@ -329,11 +337,16 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           return { ok: true as const, threadId: targetThreadId };
         }).pipe(
           Effect.catchCause((cause) => {
-            withdrawPiSessionIdRequest(forkSlotKey(targetThreadId));
+            withdrawForkKeys(targetThreadId);
             return Effect.succeed(fail("fork-failed" as const, detailOf(failureOf(cause))));
           }),
         ),
       ),
+
+    withdrawForkRequest: ({ threadId }) => {
+      withdrawForkKeys(threadId);
+      return Promise.resolve({ ok: true as const, released: true as const });
+    },
 
     startTurn: ({ threadId, content, delivery, messageId }) =>
       runPromise(
@@ -592,7 +605,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
 
     close: ({ threadId }) => {
       // A fork thread closed before its first turn must not leave its requested session id for a later launch.
-      withdrawPiSessionIdRequest(forkSlotKey(threadId));
+      withdrawForkKeys(threadId);
       return runPromise(
         threads
           .dispatch({

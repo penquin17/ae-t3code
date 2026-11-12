@@ -11,6 +11,7 @@ export const THREAD_PORT_CALLS = [
   "bindChildSession",
   "releaseFirstTurn",
   "forkThread",
+  "withdrawForkRequest",
   "startTurn",
   "interrupt",
   "status",
@@ -133,6 +134,10 @@ export interface ChildThreadPort {
   }): Promise<
     PortResult<{ readonly threadId: string }, "fork-failed" | "prefix-unsupported" | "unavailable">
   >;
+  /** Releases the Pi session id asked for at `forkThread` (requested under two keys, one per fork route); called when the fork is over. Idempotent. */
+  withdrawForkRequest(input: {
+    readonly threadId: string;
+  }): Promise<PortResult<{ readonly released: true }, "unavailable">>;
   /** The adapter derives T3's command id from the message id, so a repeated message id counts as accepted. */
   startTurn(input: {
     readonly threadId: string;

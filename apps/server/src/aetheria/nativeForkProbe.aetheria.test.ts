@@ -383,9 +383,13 @@ describe("T3's native Pi fork carries Pi custom entries at the fork prefix", () 
             const launchesBefore = launches.length;
 
             // Identity-first fork (native round 2): the Backend's chosen Pi session id, asked for under `fork:<threadId>`, is passed as `--session-id` beside `--fork`.
-            const seam = (
-              globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>
-            )[Symbol.for("aetheria.pi.session-id-seam")];
+            // Read the slot when asked: it is installed by the first request, so a handle taken before that would be undefined and every `take` below vacuous.
+            const seam = {
+              take: (key: string): string | undefined =>
+                (
+                  globalThis as Record<symbol, { take(id: string): string | undefined } | undefined>
+                )[Symbol.for("aetheria.pi.session-id-seam")]?.take(key),
+            };
             // (a) at the LATEST turn only `--fork` runs: the copy carries the chosen id, in its file name and its header.
             const chosen = NodeCrypto.randomUUID();
             const latestTarget = ThreadId.make("thread-native-fork-latest");
@@ -408,7 +412,61 @@ describe("T3's native Pi fork carries Pi custom entries at the fork prefix", () 
                 targetThreadId: insideTarget,
               }),
             );
+            // (c) The PORTABLE route (a busy parent, as every tool call is): the fork thread's first turn opens a plain new Pi session under the thread's own key. The chosen id is asked
+            // for under BOTH keys, so this launch carries it, and no `--fork` runs.
+            const portableTarget = ThreadId.make("thread-native-fork-portable");
+            const portableId = NodeCrypto.randomUUID();
+            requestPiSessionId(portableTarget, portableId);
+            requestPiSessionId(forkSlotKey(portableTarget), portableId);
+            const portableRuntime = yield* adapter.openSession({
+              threadId: portableTarget,
+              providerSessionId: ProviderSessionId.make("provider-session-native-fork-portable"),
+              modelSelection: selection,
+              runtimePolicy,
+            });
+            const portable = yield* portableRuntime.ensureThread({
+              threadId: portableTarget,
+              modelSelection: selection,
+              runtimePolicy,
+            });
+            const launchesAfterPortable = launches.length;
+            // (d) The NATIVE route after the same open launch: the open launch consumed the plain key, then `forkThread` makes its own launch with the fork key; both carry the same id and
+            // the copy is still a real fork of the source.
+            const bothTarget = ThreadId.make("thread-native-fork-both");
+            const bothId = NodeCrypto.randomUUID();
+            requestPiSessionId(bothTarget, bothId);
+            requestPiSessionId(forkSlotKey(bothTarget), bothId);
+            const bothRuntime = yield* adapter.openSession({
+              threadId: bothTarget,
+              providerSessionId: ProviderSessionId.make("provider-session-native-fork-both"),
+              modelSelection: selection,
+              runtimePolicy,
+            });
+            const bothOpened = yield* bothRuntime.ensureThread({
+              threadId: bothTarget,
+              modelSelection: selection,
+              runtimePolicy,
+            });
+            const both = yield* bothRuntime.forkThread({
+              sourceProviderThread: source,
+              sourceProviderTurns: [turn1, turn2],
+              providerTurnId: turn2.id,
+              targetThreadId: bothTarget,
+            });
+            const leftover = {
+              portablePlain: seam?.take(portableTarget),
+              portableFork: seam?.take(forkSlotKey(portableTarget)),
+              bothPlain: seam?.take(bothTarget),
+              bothFork: seam?.take(forkSlotKey(bothTarget)),
+            };
             return {
+              portable,
+              portableId,
+              launchesAfterPortable,
+              bothOpened,
+              both,
+              bothId,
+              leftover,
               launchesBefore,
               chosen,
               latest,
@@ -481,6 +539,25 @@ describe("T3's native Pi fork carries Pi custom entries at the fork prefix", () 
           evidence.parentAfterFork.sha,
           "the parent is still untouched",
         );
+
+        // Both keys (route m05-fork-route): the portable route's open launch carries the chosen id (no `--fork`), and so do both launches of the native route; the fork keeps the history.
+        const fileOf = (thread: {
+          readonly nativeThreadRef?: { readonly nativeId?: string | null } | null;
+        }) => NodePath.basename(thread.nativeThreadRef?.nativeId ?? "");
+        assert.include(fileOf(evidence.portable), `_${evidence.portableId}.jsonl`);
+        assert.include(fileOf(evidence.bothOpened), `_${evidence.bothId}.jsonl`);
+        assert.include(fileOf(evidence.both), `_${evidence.bothId}.jsonl`);
+        assert.include(
+          NodeFS.readFileSync(evidence.both.nativeThreadRef?.nativeId ?? "", "utf8"),
+          "probe prompt 1",
+          "the native copy holds the source's history",
+        );
+        assert.deepEqual(evidence.leftover, {
+          portablePlain: undefined,
+          portableFork: evidence.portableId,
+          bothPlain: undefined,
+          bothFork: undefined,
+        });
         const forkLaunch = launches.find((launch) => launch.args.includes("--fork"));
         assert.isDefined(forkLaunch);
         const forkArgs = forkLaunch!.args;
