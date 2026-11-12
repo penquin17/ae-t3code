@@ -810,3 +810,93 @@ it("maps only terminal T3 run statuses, treats waiting and the unknown as not te
   assert.isUndefined(piSessionIdOf("native-thread:x"));
   assert.isUndefined(piSessionIdOf(undefined));
 });
+
+// Step 16 (the dedup proof the outbox waits on): T3's command-id dedupe against the real services, and the receipt lookup that reads the projection.
+// A message id is the outbox's whole idempotency key. startTurn derives T3's command id from it (`m05-turn:<messageId>`), so a repeat (the first reply lost, a retry after a
+// crash, another delivery mode) must change NOTHING in T3: one message, one run, one provider turn. And `readMessageReceipt` must say found only for a message T3 holds on
+// THAT thread, absent for one it does not, and never guess when the projection cannot be read.
+it.effect(
+  "a repeated message id changes nothing in T3 (one message, one run, one provider turn) whatever the mode, and readMessageReceipt reads the projection",
+  () =>
+    scenario("turn-dedup-receipt", (script) =>
+      Effect.gen(function* () {
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const port = yield* portOver;
+        const parent = yield* startParent(script.cwd);
+        const created = yield* Effect.promise(() =>
+          port.createChildThread(spawnInput(parent, script.cwd)),
+        );
+        if (!created.ok) return assert.fail(JSON.stringify(created));
+        yield* Effect.promise(() =>
+          port.bindChildSession({
+            threadId: created.threadId,
+            heldMessageId: created.heldMessageId,
+            piSessionId: CHOSEN,
+          }),
+        );
+        yield* Effect.promise(() =>
+          port.releaseFirstTurn({
+            threadId: created.threadId,
+            heldMessageId: created.heldMessageId,
+          }),
+        );
+        yield* worker.drain();
+        const receipt = (messageId: string, threadId = created.threadId) =>
+          Effect.promise(() => port.readMessageReceipt({ threadId, messageId }));
+        const send = (delivery: "queue" | "steer", messageId = "outbox-dedup-1") =>
+          Effect.promise(() =>
+            port.startTurn({ threadId: created.threadId, content: "notice", delivery, messageId }),
+          );
+
+        assert.deepEqual(yield* receipt("outbox-dedup-1"), { ok: true, found: false });
+        assert.isTrue((yield* send("queue")).ok);
+        yield* worker.drain();
+        assert.deepEqual(yield* receipt("outbox-dedup-1"), { ok: true, found: true });
+        const projectionOf = () =>
+          orchestrator.getThreadProjection(ThreadId.make(created.threadId));
+        const before = yield* projectionOf();
+        const startedBefore = script.log.started.length;
+
+        // The repeats: same id, the other mode, and a fresh port over the same services (a restarted Backend has no memory of the first call).
+        const fresh = yield* portOver;
+        for (const again of [
+          yield* send("queue"),
+          yield* send("steer"),
+          yield* Effect.promise(() =>
+            fresh.startTurn({
+              threadId: created.threadId,
+              content: "notice",
+              delivery: "queue",
+              messageId: "outbox-dedup-1",
+            }),
+          ),
+        ])
+          assert.isTrue(again.ok, JSON.stringify(again));
+        yield* worker.drain();
+        const after = yield* projectionOf();
+        assert.equal(
+          after.messages.filter((message) => message.id === "outbox-dedup-1").length,
+          1,
+          "one message",
+        );
+        assert.equal(after.messages.length, before.messages.length, "no other message either");
+        assert.equal(after.runs.length, before.runs.length, "no second run");
+        assert.equal(script.log.started.length, startedBefore, "no second provider turn");
+
+        // A different id is a different message (the proof is not vacuous: T3 does take a new one).
+        assert.isTrue((yield* send("queue", "outbox-dedup-2")).ok);
+        yield* worker.drain();
+        assert.equal((yield* projectionOf()).messages.length, before.messages.length + 1);
+        assert.deepEqual(yield* receipt("outbox-dedup-2"), { ok: true, found: true });
+        // The receipt is for THIS thread: the same id asked about another thread is absent, and an unknown thread is unavailable, never absent.
+        assert.deepEqual(yield* receipt("outbox-dedup-1", String(parent.parent)), {
+          ok: true,
+          found: false,
+        });
+        const unknown = yield* receipt("outbox-dedup-1", "mcp:no-such-thread");
+        assert.isFalse(unknown.ok);
+        if (!unknown.ok) assert.equal(unknown.reason, "unavailable");
+      }),
+    ),
+);

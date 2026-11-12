@@ -686,6 +686,10 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
         name: "an owner claim",
         value: { runKey: "run_abc", label: "x", mode: "background", ownerSessionId: "sess_other" },
       },
+      {
+        name: "a root claim",
+        value: { runKey: "run_abc", label: "x", mode: "background", rootSessionId: "sess_other" },
+      },
     ],
   },
   jobsReserveResult: {
@@ -760,6 +764,10 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
     refuse: [
       { name: "an unknown cause", value: { jobId: "job_1", via: "user" } },
       { name: "no cause", value: { jobId: "job_1" } },
+      {
+        name: "an owner claim",
+        value: { jobId: "job_1", via: "background", ownerSessionId: "sess_other" },
+      },
     ],
   },
   jobsAdoptedResult: {
@@ -792,6 +800,11 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
       },
       { name: "no exit", value: { jobId: "job_1" } },
       { name: "a fractional code", value: { jobId: "job_1", exit: { code: 1.5, signal: null } } },
+      { name: "a callback key", value: { jobId: "job_1", exit: exitCode, onExit: "cb" } },
+      {
+        name: "an exit with an extra key",
+        value: { jobId: "job_1", exit: { code: 0, signal: null, resolve: "x" } },
+      },
     ],
   },
   jobsExitedResult: {

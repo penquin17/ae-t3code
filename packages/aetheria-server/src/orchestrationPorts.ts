@@ -21,6 +21,7 @@ export const THREAD_PORT_CALLS = [
   "suppressCompletionDelivery",
   "readChildResult",
   "readLastRun",
+  "readMessageReceipt",
   "close",
 ] as const;
 
@@ -209,6 +210,14 @@ export interface ChildThreadPort {
       "unavailable"
     >
   >;
+  /**
+   * Step 16 (the outbox, C4): whether T3 holds a message under this id on this thread, read from the thread projection. `found: false` is known absent; an unreadable projection (an
+   * unknown thread included) is `unavailable`, never absent.
+   */
+  readMessageReceipt(input: {
+    readonly threadId: string;
+    readonly messageId: string;
+  }): Promise<PortResult<{ readonly found: boolean }, "unavailable">>;
   /** T3 `thread.stop` with `stopDelegatedTasks: false`, never `thread.delete`. A not-found error is treated as closed. */
   close(input: {
     readonly threadId: string;

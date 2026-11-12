@@ -119,7 +119,7 @@ describe("orchestration Backend module — registration", () => {
     };
     expect(bare.compat.artifacts).toEqual({
       "@aetheria/orchestration": {
-        stamp: "sha256:95a297104a5b5a87f5d8dd114fed9051032d49d220675a305ff3674efa50d931",
+        stamp: "sha256:e4f52060c1e7e5a2750d4b649f1adb45666cb78b8894785254660692ca454b45",
       },
     });
     expect(ORCHESTRATION_PINNED_ARTIFACT.stamp).toBe(

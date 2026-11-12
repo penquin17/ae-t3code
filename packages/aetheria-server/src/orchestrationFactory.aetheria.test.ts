@@ -165,6 +165,11 @@ function fakeThreads(): Fake {
     readDelegatedCompletion: async () => ({ ok: false, reason: "unavailable" }),
     readRestartNotes: async () => ({ ok: true, notes: [] }),
     readLastRun: async ({ threadId }) => ({ ok: true, run: lastRuns.get(threadId) ?? null }),
+    // T3's receipt: found when a turn was accepted for this thread under this message id.
+    readMessageReceipt: async ({ threadId, messageId }) => ({
+      ok: true,
+      found: turns.some((turn) => turn.threadId === threadId && turn.messageId === messageId),
+    }),
     suppressCompletionDelivery: async ({ threadId }) => {
       calls.push("suppress");
       suppressed.push(threadId);
@@ -561,10 +566,14 @@ describe("the operations that are not built", () => {
     "children.await-report",
     "children.cancel",
     "children.fork",
+    "jobs.reserve",
+    "jobs.attach",
+    "jobs.adopted",
+    "jobs.exited",
   ];
   const unbuilt = ORCHESTRATION_OPERATIONS.filter((name) => !built.includes(name));
-  it("are eight (the jobs operations) and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
-    expect(unbuilt).toHaveLength(8);
+  it("are four (the jobs operations of steps 17 and 18) and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
+    expect(unbuilt).toHaveLength(4);
     const w = world();
     const { service } = await started(w);
     for (const name of unbuilt) {
@@ -596,6 +605,118 @@ describe("the operations that are not built", () => {
       status: "done",
     });
     await registration.activation.drain("test");
+  });
+});
+
+describe("the job lifecycle operations (step 16)", () => {
+  const RUN = "0197d3c0-aaaa-4000-8000-00000000beef";
+  const host = (over: Record<string, unknown> = {}) => ({
+    startTime: async () => "Thu Nov 12 10:00:00 2026",
+    probeGroup: () => ({ state: "live" as const }),
+    inspectRun: async () => ({ ok: true as const }),
+    ...over,
+  });
+  const identity = { pid: 4242, startTime: "Thu Nov 12 10:00:00 2026" };
+
+  it("carries reserve, attach, adopted and exited for the carrier's caller, writes jobs/<id>/record.json, and records one completion entry", async () => {
+    const w = world();
+    let n = 0;
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(),
+      newJobId: () => `job-${++n}`,
+    });
+    const reserved = ok(
+      await service.handle("jobs.reserve", who, {
+        runKey: RUN,
+        label: "npm test",
+        mode: "background",
+      }),
+    );
+    expect(reserved).toEqual({ jobId: "job-1", state: "starting" });
+    const file = NodePath.join(w.stateRoot, "jobs", "job-1", "record.json");
+    expect(JSON.parse(NodeFS.readFileSync(file, "utf8"))).toMatchObject({
+      ownerSessionId: MAIN,
+      rootSessionId: MAIN,
+      runKey: RUN,
+      output: RUN,
+      state: "starting",
+      pid: null,
+    });
+    expect(
+      ok(
+        await service.handle("jobs.attach", who, {
+          jobId: "job-1",
+          pid: 4242,
+          pgid: 4242,
+          startIdentity: identity,
+        }),
+      ),
+    ).toEqual({ jobId: "job-1", attached: true });
+    expect(JSON.parse(NodeFS.readFileSync(file, "utf8"))).toMatchObject({
+      state: "running",
+      pid: 4242,
+    });
+    expect(
+      ok(await service.handle("jobs.adopted", who, { jobId: "job-1", via: "background" })),
+    ).toEqual({ jobId: "job-1", confirmation: "adopted:job-1" });
+    expect(
+      ok(
+        await service.handle("jobs.exited", who, {
+          jobId: "job-1",
+          exit: { code: 0, signal: null },
+        }),
+      ),
+    ).toEqual({ jobId: "job-1", recorded: true, supplemental: false });
+    const record = JSON.parse(NodeFS.readFileSync(file, "utf8"));
+    expect(record).toMatchObject({ state: "exited", exit: { code: 0, signal: null } });
+    expect(record.outbox.map((e: { key: string; state: string }) => [e.key, e.state])).toEqual([
+      ["job:job-1:completion", "pending"],
+    ]);
+    expect(w.fake.calls).toEqual([]);
+    await service.drain();
+  });
+
+  it("answers a foreign owner as not found, a mismatching attach as an identity mismatch, and leaves the file unchanged", async () => {
+    const w = world();
+    const { service } = await started(w, callerOk, {
+      hostProcess: host({ startTime: async () => "Fri Nov 13 00:00:00 2026" }),
+      newJobId: () => "job-1",
+    });
+    ok(await service.handle("jobs.reserve", who, { runKey: RUN, label: "x", mode: "foreground" }));
+    const file = NodePath.join(w.stateRoot, "jobs", "job-1", "record.json");
+    const bytes = NodeFS.readFileSync(file, "utf8");
+    const mismatch = await service.handle("jobs.attach", who, {
+      jobId: "job-1",
+      pid: 4242,
+      pgid: 4242,
+      startIdentity: identity,
+    });
+    expect(mismatch).toMatchObject({ ok: false, code: "JOB_IDENTITY_MISMATCH" });
+    const stranger = { sessionId: "other-session", rootSessionId: "other-session", kind: "main" };
+    const foreign = await service.handle("jobs.adopted", stranger, {
+      jobId: "job-1",
+      via: "background",
+    });
+    expect(foreign).toMatchObject({ ok: false, code: "JOB_NOT_FOUND" });
+    expect(NodeFS.readFileSync(file, "utf8")).toBe(bytes);
+    await service.drain();
+  });
+
+  it("a store that cannot be written answers ORCHESTRATION_UNAVAILABLE for a reserve and records nothing", async () => {
+    const w = world();
+    const { service } = await started(w, callerOk, { hostProcess: host() });
+    NodeFS.chmodSync(NodePath.join(w.stateRoot, "jobs"), 0o500);
+    try {
+      expect(
+        await service.handle("jobs.reserve", who, { runKey: RUN, label: "x", mode: "background" }),
+      ).toMatchObject({ ok: false, code: "ORCHESTRATION_UNAVAILABLE" });
+    } finally {
+      NodeFS.chmodSync(NodePath.join(w.stateRoot, "jobs"), 0o700);
+    }
+    expect(
+      NodeFS.readdirSync(NodePath.join(w.stateRoot, "jobs")).filter((name) => name !== "FORMAT"),
+    ).toEqual([]);
+    await service.drain();
   });
 });
 

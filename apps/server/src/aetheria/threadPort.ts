@@ -582,6 +582,22 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         ),
       ),
 
+    // Step 16 (the outbox, C4): whether T3 holds a message under this id on THIS thread, read from the thread projection. Found only when the projection lists it; absent only when the
+    // projection was read and does not; a projection that cannot be read (an unknown thread included) is unavailable, never absent. T3 derives its command id from the message id
+    // (startTurn), so a found receipt and a repeated insert agree on what T3 holds.
+    readMessageReceipt: ({ threadId, messageId }) =>
+      runPromise(
+        projectionOf(threadId).pipe(
+          Effect.map((projection) => ({
+            ok: true as const,
+            found: projection.messages.some((message) => String(message.id) === messageId),
+          })),
+          Effect.catchCause((cause) =>
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
+          ),
+        ),
+      ),
+
     readRestartNotes: ({ threadId }) =>
       runPromise(
         projectionOf(threadId).pipe(

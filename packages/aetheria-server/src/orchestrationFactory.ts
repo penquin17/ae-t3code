@@ -29,11 +29,16 @@ import {
   createChildIdentityWriter,
   createChildService,
   createIdentityStore,
+  createJobLifecycle,
+  createJobRegistry,
+  nodeHostProcessPort,
   nodeStoreDeps,
   openJobsStore,
   openOrchestrationStore,
   reconcileChildren,
   type BootReport,
+  type HostProcessPort,
+  type JobLifecycle,
   type JobsStore,
   type CallerContext,
   type ChildService,
@@ -87,6 +92,10 @@ export interface OrchestrationFactoryOptions {
   readonly newSessionId?: (() => string) | undefined;
   /** Test seam: the id of each message a control operation sends. Default: random. */
   readonly newMessageId?: (() => string) | undefined;
+  /** Test seam: the host the job lifecycle checks an attach against. Default: the Node-backed port over M09's process-group primitives and the state root's run folders. */
+  readonly hostProcess?: HostProcessPort | undefined;
+  /** Test seam: the id of each new job. Default: `job-<uuid>`. */
+  readonly newJobId?: (() => string) | undefined;
   /** Test seam: the T3 thread id of each fork's copy. Default: random. */
   readonly newThreadId?: (() => string) | undefined;
 }
@@ -106,15 +115,12 @@ const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOper
   "jobs.list",
   "jobs.kill",
   "jobs.cancel",
-  "jobs.reserve",
-  "jobs.attach",
-  "jobs.adopted",
-  "jobs.exited",
 ]);
 
 interface Running {
   readonly store: OrchestrationStore;
   readonly jobs: JobsStore;
+  readonly lifecycle: JobLifecycle;
   readonly identity: ManagedIdentityWriter;
   readonly children: ChildService;
   readonly watchers: Map<string, { unsubscribe(): void }>;
@@ -208,10 +214,10 @@ export function createOrchestrationFactory(
         planMode: deps.planMode,
         store,
         jobs,
-        // The outbox derives a message id from its keys. T3's command id derives from that id, but the adapter has no test of the replay against T3's real services yet, so an unsettled
-        // attempt is not retried blind: it waits for a receipt (see the outbox) and stays `delivery-uncertain` until then.
+        // The outbox derives a message id from its keys and T3's command id derives from that id. childThreadPort.aetheria.test.ts proves against T3's real services that a repeated id
+        // (same or other mode, fresh adapter) changes nothing: one message, one run, one provider turn. So an unsettled attempt may be retried blind under the same id.
         sha256Hex: nodeStoreDeps().sha256Hex,
-        inboxDedupEstablished: false,
+        inboxDedupEstablished: true,
         clock: { now: deps.now },
         authorizer: deps.spawnAuthorizer,
         availability: null,
@@ -223,7 +229,16 @@ export function createOrchestrationFactory(
         newMessageId,
         newThreadId,
       });
-      state = { store, jobs, identity, children, watchers };
+      // Step 16: the lifecycle facts the Agent's runner reports. The registry is the only writer of the job records; the host port only reads and probes.
+      const lifecycle = createJobLifecycle({
+        registry: createJobRegistry({
+          store: jobs,
+          now: deps.now,
+          newJobId: options.newJobId ?? (() => `job-${NodeCrypto.randomUUID()}`),
+        }),
+        host: options.hostProcess ?? nodeHostProcessPort({ stateRoot: deps.stateRoot }),
+      });
+      state = { store, jobs, lifecycle, identity, children, watchers };
       try {
         const report = await reconcileChildren({
           threads,
@@ -384,6 +399,26 @@ export function createOrchestrationFactory(
       }
     };
 
+    /** Step 16: the four lifecycle facts. The caller is the carrier's (session and root), never an argument; the arguments were decoded strictly by the module. */
+    const lifecycle = async (
+      state: Running,
+      operation: "jobs.reserve" | "jobs.attach" | "jobs.adopted" | "jobs.exited",
+      who: OrchestrationCaller,
+      args: unknown,
+    ): Promise<OrchestrationOutcome> => {
+      const caller = { sessionId: who.sessionId, rootSessionId: who.rootSessionId };
+      switch (operation) {
+        case "jobs.reserve":
+          return (await state.lifecycle.reserve(caller, args as never)) as OrchestrationOutcome;
+        case "jobs.attach":
+          return (await state.lifecycle.attach(caller, args as never)) as OrchestrationOutcome;
+        case "jobs.adopted":
+          return (await state.lifecycle.adopted(caller, args as never)) as OrchestrationOutcome;
+        case "jobs.exited":
+          return (await state.lifecycle.exited(caller, args as never)) as OrchestrationOutcome;
+      }
+    };
+
     const handle: OrchestrationService["handle"] = (operation, who, args, handleOptions) => {
       const state = running;
       if (draining || state === undefined)
@@ -394,6 +429,13 @@ export function createOrchestrationFactory(
       const ticket = attempts;
       const work = (async (): Promise<OrchestrationOutcome> => {
         try {
+          if (
+            operation === "jobs.reserve" ||
+            operation === "jobs.attach" ||
+            operation === "jobs.adopted" ||
+            operation === "jobs.exited"
+          )
+            return await lifecycle(state, operation, who, args);
           if (operation === "children.fork")
             return await fork(state, who, args, handleOptions?.signal);
           return operation === "children.spawn"
