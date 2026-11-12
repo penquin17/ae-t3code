@@ -85,6 +85,7 @@ const makeFake = (
       drains += 1;
       return drained;
     },
+    direct: () => undefined,
   };
   return { service, calls, starts: () => starts, drains: () => drains };
 };
@@ -118,7 +119,7 @@ describe("orchestration Backend module — registration", () => {
     };
     expect(bare.compat.artifacts).toEqual({
       "@aetheria/orchestration": {
-        stamp: "sha256:a30f25e0ed3f124ac62c6cfc19e13bbcf9c40599feb7cd0d518bc9a5d1f448cd",
+        stamp: "sha256:67c2b9b4b5b8356ca2248e2660f191bc9e2417e5827b473e1757c38c7a15561e",
       },
     });
     expect(ORCHESTRATION_PINNED_ARTIFACT.stamp).toBe(
@@ -320,6 +321,7 @@ describe("orchestration Backend module — long waits", () => {
         });
       }) as OrchestrationService["handle"],
       drain: async () => drained,
+      direct: () => undefined,
     };
     const registration = createOrchestrationBackendRegistration({ create: () => service });
     await registration.activation.start({ id: "orchestration-backend" });

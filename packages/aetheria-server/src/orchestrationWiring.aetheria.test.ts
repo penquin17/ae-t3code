@@ -20,6 +20,7 @@ const service = (reply: unknown): OrchestrationService & { calls: unknown[][] } 
       return reply;
     }) as OrchestrationService["handle"],
     drain: async () => ({ stopped: [], stillLive: [] }),
+    direct: () => undefined,
   };
 };
 const bound = new Set(["root-1", "child-1"]);

@@ -789,6 +789,53 @@ describe("the control operations (step 10) through the factory", () => {
   });
 });
 
+describe("the direct Backend API (step 14)", () => {
+  const module = { kind: "backend-module", module: "m07-goals" } as const;
+
+  it("is available only while the service runs, admits a turn to an idle main session once per key, and is not an XC-6 operation", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w);
+    const direct = service.direct();
+    expect(direct).toBeDefined();
+    expect(ORCHESTRATION_OPERATIONS.some((name) => /admit|settled/i.test(name))).toBe(false);
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    const request = {
+      authority: module,
+      sessionId: MAIN,
+      origin: { kind: "goal-round" },
+      content: "next",
+      key: "k1",
+    };
+    const first = await direct!.admitTurn(request);
+    expect(first).toMatchObject({ status: "admitted" });
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    expect(await direct!.admitTurn(request)).toEqual(first);
+    expect(w.fake.turns.filter((t) => t.threadId === CALLER_THREAD)).toHaveLength(1);
+    expect(
+      await direct!.admitTurn({ ...request, authority: { kind: "model" }, key: "k2" }),
+    ).toEqual({ status: "refused", reason: "unauthorized" });
+    const events: unknown[] = [];
+    const sub = direct!.subscribeSettled({
+      authority: module,
+      scope: { sessionId: MAIN },
+      handler: (event) => void events.push(event),
+    });
+    expect(sub.status).toBe("subscribed");
+    w.fake.emit({
+      threadId: CALLER_THREAD,
+      turnId: "run-1",
+      outcome: "completed",
+      settledAt: "2026-11-12T10:00:00.000Z",
+    });
+    expect(events).toMatchObject([
+      { sessionId: MAIN, settleSeq: 1, runId: "run-1", outcome: "completed" },
+    ]);
+    await service.drain();
+    expect(service.direct()).toBeUndefined();
+  });
+});
+
 describe("children.fork through the factory (step 11)", () => {
   const forkArgs = { prefix: "all", prompt: "carry on from here", allow: ["read", "grep"] };
   const withThreads = (n: { value: number } = { value: 0 }) => ({

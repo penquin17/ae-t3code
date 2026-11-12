@@ -425,6 +425,9 @@ export function createOrchestrationFactory(
       return { stopped: [], stillLive };
     };
 
-    return { start, handle, drain };
+    // The direct API for trusted Backend modules (step 14): the running archive service, nothing wrapped, nothing registered as an XC-6 operation.
+    const direct: OrchestrationService["direct"] = () => (draining ? undefined : running?.children);
+
+    return { start, handle, drain, direct };
   };
 }

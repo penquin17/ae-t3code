@@ -141,6 +141,7 @@ describe("the orchestration module in the assembled Backend", () => {
         drains += 1;
         return { stopped: [], stillLive: [] };
       },
+      direct: () => undefined,
     };
     const options = baseOptions();
     const service = build({
@@ -184,6 +185,7 @@ describe("the orchestration module in the assembled Backend", () => {
         start: async () => ({ ok: false, code: "STORE_UNSUPPORTED" }),
         handle: async () => ({ ok: true, value: {} }),
         drain: async () => ({ stopped: [], stillLive: [] }),
+        direct: () => undefined,
       }),
     });
     expect((await service.start()).outcome).not.toBe("started");

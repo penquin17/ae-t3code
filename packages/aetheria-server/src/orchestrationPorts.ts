@@ -69,6 +69,11 @@ export interface ChildTurnCompletedEvent {
   readonly settledAt: string;
   /** Redacted, from the run's error item. */
   readonly errorText?: string | undefined;
+  /**
+   * The provider's stop reason, when the run's projection carries one. T3's run does not today (Pi's `stopReason` stays inside the adapter), so the real adapter sets none and
+   * `max-tokens` is never an outcome in production until it does; a token-limit failure reads `failed` / `max-tokens-unconfirmed`.
+   */
+  readonly stopReason?: string | undefined;
 }
 
 export type DelegatedCompletionState =

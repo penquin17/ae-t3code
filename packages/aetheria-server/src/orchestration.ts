@@ -31,6 +31,7 @@ import {
 } from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "./adapter.ts";
+import type { ChildService } from "./library.ts";
 import type {
   ChildLineageReader,
   ChildThreadPort,
@@ -86,7 +87,25 @@ export interface OrchestrationService {
   ): Promise<OrchestrationOutcome>;
   /** Ends every wait and stops accepting work; reports what was stopped and what may still be live. */
   drain(): Promise<OrchestrationDrainReport>;
+  /**
+   * The direct Backend API (Plan step 14): what trusted Backend modules call, never XC-6 and never model input. `undefined` before start and after drain. Turn admission, interruption
+   * and settled events need a backend module's authority argument; the user's close, tree cancel, list and report read are for M10, which has already checked the device and names
+   * the root. None of these is registered as an XC-6 operation.
+   */
+  direct(): OrchestrationDirectApi | undefined;
 }
+
+export type OrchestrationDirectApi = Pick<
+  ChildService,
+  | "admitTurn"
+  | "interruptTurn"
+  | "subscribeSettled"
+  | "closeChild"
+  | "cancelTree"
+  | "cancelParentTurn"
+  | "listChildren"
+  | "readReport"
+>;
 
 /** What a service factory is given: the Backend's own seams, nothing else. The identity store, job registry and outbox are the service's, under `stateRoot`. */
 export interface OrchestrationServiceDeps {
