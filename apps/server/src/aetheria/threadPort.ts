@@ -72,10 +72,27 @@ export const terminalOutcomeOf = (status: unknown): ChildTurnOutcome | null =>
     : null;
 
 const tagOf = (error: unknown): string => String((error as { _tag?: unknown } | null)?._tag ?? "");
-const detailOf = (error: unknown): string =>
-  error instanceof Error && error.message.length > 0
-    ? error.message.slice(0, 300)
-    : tagOf(error) || "the T3 call failed";
+/**
+ * The typed failure inside an Effect `Cause`: the first `Fail` reason's `error`. A Cause has no `.error` of its own (it holds `reasons`), so reading `.error` off it gave `undefined` and
+ * every detail read "the T3 call failed" (native sp3-fork-branch) and a not-found never read as one.
+ */
+const failureOf = (cause: unknown): unknown => {
+  const reasons = (cause as { reasons?: unknown } | null)?.reasons;
+  if (!Array.isArray(reasons)) return (cause as { error?: unknown } | null)?.error;
+  const fail = reasons.find((reason) => (reason as { _tag?: unknown } | null)?._tag === "Fail");
+  return (fail as { error?: unknown } | undefined)?.error;
+};
+
+// T3's dispatch errors (OrchestratorDispatchError and kin) keep their reason in a string `cause` and have an empty message; reading only `message` told the model "the T3 call failed".
+const detailOf = (error: unknown): string => {
+  const message = error instanceof Error && error.message.length > 0 ? error.message : "";
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  const reason = typeof cause === "string" && cause.length > 0 ? cause : "";
+  const text = [tagOf(error), message, reason]
+    .filter((part, index, all) => part.length > 0 && all.indexOf(part) === index)
+    .join(": ");
+  return text.length > 0 ? text.slice(0, 300) : "the T3 call failed";
+};
 const isNotFound = (error: unknown): boolean => /NotFound/.test(tagOf(error));
 
 const fail = <R extends string>(
@@ -144,7 +161,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           };
         }).pipe(
           Effect.catchCause((cause) => {
-            const error = (cause as unknown as { error?: unknown }).error;
+            const error = failureOf(cause);
             return Effect.succeed(
               fail(
                 /Parent|not active|stopping/.test(detailOf(error))
@@ -217,12 +234,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
         }).pipe(
           Effect.ensuring(Effect.sync(() => withdrawPiSessionIdRequest(threadId))),
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "bind-failed" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("bind-failed" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -257,10 +269,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
                   Effect.map((after) =>
                     after !== undefined && after.status !== "preparing"
                       ? { ok: true as const, accepted: true as const }
-                      : fail(
-                          "delivery-unavailable" as const,
-                          detailOf((cause as unknown as { error?: unknown }).error),
-                        ),
+                      : fail("delivery-unavailable" as const, detailOf(failureOf(cause))),
                   ),
                   Effect.catchCause(() =>
                     Effect.succeed(
@@ -272,12 +281,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             );
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "delivery-unavailable" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("delivery-unavailable" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -304,12 +308,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             : { ok: true as const, threadId: targetThreadId, forkSessionId };
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "fork-failed" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("fork-failed" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -333,7 +332,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           .pipe(
             Effect.as({ ok: true as const, accepted: true as const, messageId }),
             Effect.catchCause((cause) => {
-              const error = (cause as unknown as { error?: unknown }).error;
+              const error = failureOf(cause);
               return Effect.succeed(
                 /SubagentThreadReadOnly|Closed|stopped/i.test(tagOf(error))
                   ? fail("not-resumable" as const, detailOf(error))
@@ -356,7 +355,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           return { ok: true as const, accepted: true as const };
         }).pipe(
           Effect.catchCause((cause) => {
-            const error = (cause as unknown as { error?: unknown }).error;
+            const error = failureOf(cause);
             return Effect.succeed(
               isNotFound(error)
                 ? { ok: true as const, accepted: true as const }
@@ -386,12 +385,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           };
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "unavailable" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -470,12 +464,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           };
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "unavailable" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -501,12 +490,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           return { ok: true as const, suppressed: true as const };
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "unavailable" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -530,12 +514,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           return { ok: true as const, status, text: task.result ?? "" };
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "unavailable" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -563,12 +542,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             };
           }),
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "unavailable" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -589,12 +563,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             return { ok: true as const, notes };
           }),
           Effect.catchCause((cause) =>
-            Effect.succeed(
-              fail(
-                "unavailable" as const,
-                detailOf((cause as unknown as { error?: unknown }).error),
-              ),
-            ),
+            Effect.succeed(fail("unavailable" as const, detailOf(failureOf(cause)))),
           ),
         ),
       ),
@@ -613,7 +582,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           .pipe(
             Effect.as({ ok: true as const, closed: true as const }),
             Effect.catchCause((cause) => {
-              const error = (cause as unknown as { error?: unknown }).error;
+              const error = failureOf(cause);
               return Effect.succeed(
                 isNotFound(error)
                   ? { ok: true as const, closed: true as const }

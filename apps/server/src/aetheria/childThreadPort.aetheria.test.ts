@@ -585,6 +585,28 @@ it.effect(
     ),
 );
 
+it.effect(
+  "a fork with no stable source run is fork-failed and the detail carries T3's own reason (its dispatch error keeps the reason in `cause`), not 'the T3 call failed'",
+  () =>
+    scenario("fork-detail", (script) =>
+      Effect.gen(function* () {
+        const port = yield* portOver;
+        const parent = yield* startParent(script.cwd);
+        // The parent's first turn is still running: there is no completed run with a checkpoint to fork from.
+        const forked = yield* Effect.promise(() =>
+          port.forkThread({
+            parentThreadId: String(parent.parent),
+            sourcePoint: "latest_stable",
+            targetThreadId: "thread:fork-detail-target",
+          }),
+        );
+        assert.isFalse(forked.ok);
+        assert.equal(!forked.ok && forked.reason, "fork-failed");
+        assert.match(!forked.ok ? (forked.detail ?? "") : "", /No stable source run/);
+      }),
+    ),
+);
+
 it.effect("refuses an unknown parent and reports a bind it cannot do, never success", () =>
   scenario("failures", (script) =>
     Effect.gen(function* () {

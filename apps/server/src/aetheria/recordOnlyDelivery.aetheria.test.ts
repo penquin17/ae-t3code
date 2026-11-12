@@ -47,6 +47,9 @@ import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderRepl
 import * as DocumentText from "../provider/DocumentText.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
+import { makeChildThreadPort } from "./threadPort.ts";
 import { PI_INSTANCE_ID, makePi, makeWorld, selection, waitFor } from "./piProbeKit.ts";
 
 const FAUX_RETRY = NodePath.join(
@@ -214,7 +217,17 @@ const flow = (
         yield* worker.drain();
       }
       const projection = yield* orchestrator.getThreadProjection(parent);
+      // The adapter's terminal read of a child's result against the same real services (step 14 addendum: native sp3-record-only-absence read it too early).
+      const port = yield* makeChildThreadPort({
+        threads,
+        orchestrator,
+        sessions: yield* ProviderSessionManager.ProviderSessionManagerV2,
+        sink: yield* EventSink.EventSinkV2,
+        ids: yield* IdAllocator.IdAllocatorV2,
+      });
+      const childResult = yield* Effect.promise(() => port.readChildResult({ threadId: child }));
       return {
+        childResult,
         deliveries: projection.messages.filter((m) => m.delegatedCompletion !== undefined),
         parentRequests: readTrace().filter((r) => r.kind === "request" && r.parent === true),
         parentRuns: projection.runs.length,
@@ -234,6 +247,18 @@ const assertNothingReachedTheParent = (r: Effect.Success<ReturnType<typeof flow>
   assert.equal(r.parentRuns, 1, "no parent run was opened for a delivery");
   assert.equal(r.task.status, "completed", "the child itself completed");
   assert.equal(r.task.completionDelivery?.state, "disposed");
+  // The terminal path: T3's own status and the child's final text, from the parent's task, once the child has completed.
+  assert.deepEqual(
+    [r.childResult.ok, r.childResult.ok && r.childResult.status],
+    [true, "completed"],
+    JSON.stringify(r.childResult),
+  );
+  assert.equal(
+    r.childResult.ok && r.childResult.text,
+    r.task.result,
+    "the text is the task's recorded result",
+  );
+  assert.isAbove(r.childResult.ok ? r.childResult.text.length : 0, 0);
 };
 
 it.live(
