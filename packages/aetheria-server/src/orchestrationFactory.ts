@@ -33,6 +33,7 @@ import {
   createJobOutput,
   createJobRegistry,
   createJobWakes,
+  jobLostKey,
   nodeHostProcessPort,
   nodeJobOutputPort,
   nodeStoreDeps,
@@ -40,6 +41,8 @@ import {
   orchestrationParameter,
   openOrchestrationStore,
   reconcileChildren,
+  reconcileForkRollbacks,
+  retireRolledBackMain,
   type BootReport,
   type HostProcessPort,
   type JobLifecycle,
@@ -116,11 +119,29 @@ const unavailable = (detail: string): OrchestrationOutcome => ({
 });
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+const lostJobText = (job: {
+  readonly jobId: string;
+  readonly label: string | null;
+  readonly pid: number | null;
+  readonly pgid: number | null;
+  readonly lost: {
+    readonly livenessIndeterminate: boolean;
+    readonly terminationUnconfirmed: boolean;
+  } | null;
+}): string => {
+  const name = job.label === null ? job.jobId : `${job.label} (${job.jobId})`;
+  const identity = `pid ${String(job.pid)}, process group ${String(job.pgid)}`;
+  const reason =
+    job.lost?.livenessIndeterminate === true
+      ? `may still be running: M05 could not verify ${identity}, so it sent no signal`
+      : job.lost?.terminationUnconfirmed === true
+        ? `may still be running: TERM/grace/KILL did not prove ${identity} empty; boot will retry`
+        : "was marked lost; no process exit was observed";
+  return `Background job ${name} ${reason}. Its output is retained; read it with the job tools.`;
+};
 
 /** Operations whose service logic is not built in this slice. They answer unavailable; the module maps that onto the XC-6 `unavailable` reply. */
-const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOperation>([
-  "jobs.kill",
-]);
+const NOT_BUILT: ReadonlySet<OrchestrationOperation> = new Set<OrchestrationOperation>([]);
 
 interface Running {
   readonly store: OrchestrationStore;
@@ -131,6 +152,7 @@ interface Running {
   readonly identity: ManagedIdentityWriter;
   readonly children: ChildService;
   readonly watchers: Map<string, { unsubscribe(): void }>;
+  readonly notifyLost: (jobId: string, boot: boolean) => Promise<void>;
 }
 
 export function createOrchestrationFactory(
@@ -235,6 +257,12 @@ export function createOrchestrationFactory(
         lineage: deps.lineage,
         newMessageId,
         newThreadId,
+        killJobs: async (ownerSessionId) => {
+          if (state === undefined) throw new Error("job lifecycle is not running");
+          const killed = await state.lifecycle.killOwner(ownerSessionId);
+          for (const jobId of killed) await state.notifyLost(jobId, false);
+          return killed;
+        },
       });
       // Step 16: the lifecycle facts the Agent's runner reports. The registry is the only writer of the job records; the host port only reads and probes.
       const registry = createJobRegistry({
@@ -245,6 +273,7 @@ export function createOrchestrationFactory(
       const lifecycle = createJobLifecycle({
         registry,
         host: options.hostProcess ?? nodeHostProcessPort({ stateRoot: deps.stateRoot }),
+        now: deps.now,
       });
       // Step 17: completion wakes are bounded and coalesced. The outbox is the service's (it holds the notices in the job, child and main records); the cap is the carried parameter, the
       // resume barrier is M06's, and a human message is read as a change of the newest user-created message on the owner's thread.
@@ -258,6 +287,72 @@ export function createOrchestrationFactory(
           detail: "the child service built no outbox",
         };
       }
+      const notifyLost = async (jobId: string, boot: boolean): Promise<void> => {
+        const found = jobs.readJob(jobId);
+        if (found.status !== "ok" || found.record.state !== "lost" || found.record.lost === null)
+          return;
+        const job = found.record;
+        const key = jobLostKey(job.jobId);
+        const owner = { kind: "job", jobId: job.jobId } as const;
+        const existing = job.outbox.find((entry) => entry.key === key);
+        if (boot) {
+          const threadId = deps.threadOfSession(job.ownerSessionId);
+          if (threadId === undefined) {
+            if (existing === undefined)
+              outbox.enqueue(owner, {
+                key,
+                targetSessionId: job.ownerSessionId,
+                kind: "job-lost",
+                volatile: false,
+                text: lostJobText(job),
+              });
+            return;
+          }
+          let notes: Awaited<ReturnType<ChildThreadPort["readRestartNotes"]>>;
+          try {
+            notes = await threads.readRestartNotes({ threadId });
+          } catch {
+            notes = { ok: false, reason: "unavailable" };
+          }
+          if (!notes.ok) {
+            if (existing === undefined)
+              outbox.enqueue(owner, {
+                key,
+                targetSessionId: job.ownerSessionId,
+                kind: "job-lost",
+                volatile: false,
+                text: lostJobText(job),
+              });
+            return;
+          }
+          const sameShell =
+            job.label !== null &&
+            notes.notes.some(
+              (note) => note.kind === "shell" && note.id === job.runKey && note.label === job.label,
+            );
+          if (sameShell) {
+            if (existing?.state === "pending" && existing.batchId === null)
+              await outbox.withdraw(owner, [key]);
+            return;
+          }
+        }
+        if (existing === undefined) {
+          const made = outbox.enqueue(owner, {
+            key,
+            targetSessionId: job.ownerSessionId,
+            kind: "job-lost",
+            volatile: false,
+            text: lostJobText(job),
+          });
+          if (!made.ok) return;
+        }
+        try {
+          await deps.resume.resumed(job.ownerSessionId);
+        } catch {
+          return;
+        }
+        await outbox.deliver(owner, [key]);
+      };
       const wakes = createJobWakes({
         outbox,
         wakeCap: () => orchestrationParameter("maxConsecutiveWakes"),
@@ -301,7 +396,7 @@ export function createOrchestrationFactory(
         waitDefaultMs: () => orchestrationParameter("waitDefaultMs"),
         waitCapMs: () => orchestrationParameter("waitCapMs"),
       });
-      state = { store, jobs, lifecycle, output, wakes, identity, children, watchers };
+      state = { store, jobs, lifecycle, output, wakes, identity, children, watchers, notifyLost };
       try {
         const report = await reconcileChildren({
           threads,
@@ -309,6 +404,37 @@ export function createOrchestrationFactory(
           store,
           identity,
         });
+        // `m05-stray-main`: once per boot, M03's own narrow API retires the stray `main` identity of a rolled-back fork (only on M05's tombstone and T3's closed, idle fork thread); then the stale
+        // `orchestration/main` records go. A thing boot cannot prove stays and is named in the report, never retried blindly.
+        const forkRollback = await reconcileForkRollbacks({
+          threads,
+          lineage: lineageWithRouteGuard(store),
+          store,
+          stateRoot: deps.stateRoot,
+          identityApi: { retireRolledBackMain },
+        });
+        report.problems.push(
+          ...forkRollback.problems,
+          ...forkRollback.unknown.map(
+            (held) => `fork rollback ${held.threadId} retained: ${held.why}`,
+          ),
+        );
+        const jobReport = await lifecycle.reconcileBoot();
+        if (jobReport.unreadable > 0 || jobReport.problems.length > 0)
+          throw new Error(
+            `job boot reconciliation is incomplete (${jobReport.unreadable} unreadable, ${jobReport.problems.length} problem(s))`,
+          );
+        // A job this boot just reconciled gets its one notice (stable key, so a retried boot repeats nothing). A job lost at an earlier boot is offered again only while its notice is still
+        // undelivered: a notice M05 suppressed because T3 already tells the owner leaves no entry, and must not be rebuilt once T3's note is gone.
+        const reconciledNow = new Set(jobReport.reconciled);
+        for (const job of jobReport.lostJobs) {
+          const key = jobLostKey(job.jobId);
+          const undelivered = job.outbox.some(
+            (entry) =>
+              entry.key === key && (entry.state === "pending" || entry.state === "attempting"),
+          );
+          if (reconciledNow.has(job.jobId) || undelivered) await notifyLost(job.jobId, true);
+        }
         options.onBoot?.(report);
         // Step 15: a volatile outbox entry that never became final is dropped before anything is delivered.
         children.reconcileOutbox();
@@ -495,7 +621,7 @@ export function createOrchestrationFactory(
 
     const lifecycle = async (
       state: Running,
-      operation: "jobs.reserve" | "jobs.attach" | "jobs.adopted" | "jobs.exited",
+      operation: "jobs.reserve" | "jobs.attach" | "jobs.adopted" | "jobs.exited" | "jobs.kill",
       who: OrchestrationCaller,
       args: unknown,
     ): Promise<OrchestrationOutcome> => {
@@ -509,6 +635,12 @@ export function createOrchestrationFactory(
           return (await state.lifecycle.adopted(caller, args as never)) as OrchestrationOutcome;
         case "jobs.exited":
           return (await state.lifecycle.exited(caller, args as never)) as OrchestrationOutcome;
+        case "jobs.kill": {
+          const result = await state.lifecycle.kill(caller, args as never);
+          if (result.ok && result.value.state === "lost")
+            await state.notifyLost(result.value.jobId, false);
+          return result as OrchestrationOutcome;
+        }
       }
     };
 
@@ -532,7 +664,8 @@ export function createOrchestrationFactory(
             operation === "jobs.reserve" ||
             operation === "jobs.attach" ||
             operation === "jobs.adopted" ||
-            operation === "jobs.exited"
+            operation === "jobs.exited" ||
+            operation === "jobs.kill"
           )
             return await lifecycle(state, operation, who, args);
           if (operation === "children.fork")

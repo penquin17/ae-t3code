@@ -18,10 +18,9 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { ORCHESTRATION_OPERATIONS, type Xc6OperationContext } from "@t3tools/aetheria-contracts";
 
 import { ORCHESTRATION_PINNED_ARTIFACT } from "./artifact.ts";
-import { openOrchestrationStore, nodeStoreDeps } from "./library.ts";
+import { createIdentityStore, openOrchestrationStore, nodeStoreDeps } from "./library.ts";
 import {
   createOrchestrationBackendRegistration,
-  type OrchestrationOperation,
   type OrchestrationOutcome,
   type OrchestrationServiceDeps,
 } from "./orchestration.ts";
@@ -577,20 +576,22 @@ describe("the operations that are not built", () => {
     "jobs.attach",
     "jobs.adopted",
     "jobs.exited",
+    "jobs.kill",
     "jobs.output",
     "jobs.list",
     "jobs.cancel",
   ];
   const unbuilt = ORCHESTRATION_OPERATIONS.filter((name) => !built.includes(name));
-  it("are one (jobs.kill, step 18) and each answers ORCHESTRATION_UNAVAILABLE without touching T3", async () => {
-    expect(unbuilt).toHaveLength(1);
+  it("builds every declared operation, and an absent job kill is refused without touching T3", async () => {
+    expect(unbuilt).toHaveLength(0);
     const w = world();
     const { service } = await started(w);
-    for (const name of unbuilt) {
-      const outcome = await service.handle(name as OrchestrationOperation, who, {});
-      expect(outcome, name).toMatchObject({ ok: false, code: "ORCHESTRATION_UNAVAILABLE" });
-    }
+    expect(await service.handle("jobs.kill", who, { jobId: "missing-job" })).toMatchObject({
+      ok: false,
+      code: "JOB_NOT_FOUND",
+    });
     expect(w.fake.calls).toEqual([]);
+    await service.drain();
   });
 
   it("reach the wire as the XC-6 `unavailable` reply, and spawn as `done`", async () => {
@@ -608,8 +609,8 @@ describe("the operations that are not built", () => {
     });
     const operations = registration.operations ?? {};
     expect(await operations["jobs.kill"]!(context({ jobId: "job-1" }))).toMatchObject({
-      status: "unavailable",
-      code: "ORCHESTRATION_UNAVAILABLE",
+      status: "done",
+      result: { ok: false, code: "JOB_NOT_FOUND" },
     });
     expect(await operations["children.spawn"]!(context({ ...SPAWN }))).toMatchObject({
       status: "done",
@@ -727,6 +728,226 @@ describe("the job lifecycle operations (step 16)", () => {
       NodeFS.readdirSync(NodePath.join(w.stateRoot, "jobs")).filter((name) => name !== "FORMAT"),
     ).toEqual([]);
     await service.drain();
+  });
+});
+
+describe("job kill and Backend boot reconciliation (step 18)", () => {
+  const RUN = "0197d3c0-aaaa-4000-8000-00000000d00d";
+  const termination = {
+    state: "confirmed-empty" as const,
+    signalsSent: ["SIGTERM" as const],
+    detail: "the group answered ESRCH and the leader was reaped",
+  };
+  const host = (
+    terminateGroup: (target: {
+      pid: number;
+      pgid: number;
+      startTime: string;
+    }) => Promise<typeof termination> = async () => termination,
+  ) => ({
+    startTime: async () => "T",
+    probeGroup: () => ({ state: "live" as const }),
+    inspectRun: async () => ({ ok: true as const }),
+    terminateGroup,
+  });
+  async function reserveAndAdopt(
+    w: World,
+    service: Awaited<ReturnType<typeof started>>["service"],
+    jobId: string,
+    owner = who,
+    runKey = RUN,
+  ) {
+    ok(
+      await service.handle("jobs.reserve", owner, {
+        runKey,
+        label: "npm test",
+        mode: "background",
+      }),
+    );
+    const folder = NodePath.join(w.stateRoot, "shell", "runs", runKey);
+    NodeFS.mkdirSync(folder, { recursive: true, mode: 0o700 });
+    NodeFS.writeFileSync(NodePath.join(folder, "stdout"), "kept");
+    NodeFS.writeFileSync(NodePath.join(folder, "stderr"), "");
+    ok(
+      await service.handle("jobs.attach", owner, {
+        jobId,
+        pid: 4242,
+        pgid: 4242,
+        startIdentity: { pid: 4242, startTime: "T" },
+      }),
+    );
+    ok(await service.handle("jobs.adopted", owner, { jobId, via: "background" }));
+    return { jobId, runKey, stdout: NodePath.join(folder, "stdout") };
+  }
+
+  it("kills only the carrier's own job and returns the final state; a repeated kill is idempotent", async () => {
+    const w = world();
+    let signals = 0;
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(async () => {
+        signals += 1;
+        return termination;
+      }),
+      newJobId: () => "job-kill",
+    });
+    const { jobId } = await reserveAndAdopt(w, service, "job-kill", who, RUN);
+    const stranger = { sessionId: "stranger", rootSessionId: MAIN, kind: "main" };
+    expect(await service.handle("jobs.kill", stranger, { jobId })).toMatchObject({
+      ok: false,
+      code: "JOB_NOT_FOUND",
+    });
+    expect(signals).toBe(0);
+    expect(ok(await service.handle("jobs.kill", who, { jobId }))).toEqual({
+      jobId,
+      state: "killed",
+    });
+    expect(ok(await service.handle("jobs.kill", who, { jobId }))).toEqual({
+      jobId,
+      state: "killed",
+    });
+    expect(signals).toBe(1);
+    const record = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(w.stateRoot, "jobs", jobId, "record.json"), "utf8"),
+    );
+    expect(record).toMatchObject({ state: "killed", exit: null });
+    await service.drain();
+  });
+
+  it("closing a one-shot child kills its adopted jobs and includes their ids in the report", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const signals: string[] = [];
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(async (target) => {
+        signals.push(`${target.pid}:${target.pgid}`);
+        return termination;
+      }),
+      newJobId: () => "job-child",
+    });
+    const child = ok(await service.handle("children.spawn", who, SPAWN));
+    const childCaller = { sessionId: "pi-thread-child-1", rootSessionId: MAIN, kind: "child" };
+    const { jobId } = await reserveAndAdopt(w, service, "job-child", childCaller, RUN);
+    const closed = ok(await service.handle("children.close", who, { target: child.childId }));
+    expect(closed.killedJobs).toEqual([jobId]);
+    expect(signals).toEqual(["4242:4242"]);
+    expect(
+      JSON.parse(
+        NodeFS.readFileSync(NodePath.join(w.stateRoot, "jobs", jobId, "record.json"), "utf8"),
+      ).state,
+    ).toBe("killed");
+    await service.drain();
+  });
+
+  it("boot marks every running job lost without an observed exit, retains output and delivers one keyed notice", async () => {
+    const first = world();
+    const initial = await started(first, callerOk, {
+      hostProcess: host(),
+      newJobId: () => "job-boot",
+    });
+    const job = await reserveAndAdopt(first, initial.service, "job-boot", who, RUN);
+    await initial.service.drain();
+    const second = world(first.stateRoot);
+    second.fake.activity.set(CALLER_THREAD, "idle");
+    let signals = 0;
+    const rebooted = await started(second, callerOk, {
+      hostProcess: host(async () => {
+        signals += 1;
+        return termination;
+      }),
+    });
+    const record = JSON.parse(
+      NodeFS.readFileSync(
+        NodePath.join(second.stateRoot, "jobs", job.jobId, "record.json"),
+        "utf8",
+      ),
+    );
+    expect(record).toMatchObject({
+      state: "lost",
+      exit: null,
+      output: RUN,
+      lost: { livenessIndeterminate: false, terminationUnconfirmed: false },
+    });
+    expect(NodeFS.readFileSync(job.stdout, "utf8")).toBe("kept");
+    expect(signals).toBe(1);
+    expect(second.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toHaveLength(1);
+    expect(record.outbox).toContainEqual(
+      expect.objectContaining({
+        key: `job:${job.jobId}:lost`,
+        kind: "job-lost",
+        state: "inserted",
+      }),
+    );
+    await rebooted.service.drain();
+  });
+
+  it("only a positive matching shell id and label suppress the M05 lost notice", async () => {
+    const first = world();
+    const initial = await started(first, callerOk, {
+      hostProcess: host(),
+      newJobId: () => "job-note",
+    });
+    await reserveAndAdopt(first, initial.service, "job-note", who, RUN);
+    await initial.service.drain();
+    const second = world(first.stateRoot);
+    second.fake.activity.set(CALLER_THREAD, "idle");
+    second.fake.port.readRestartNotes = async () => ({
+      ok: true,
+      notes: [{ kind: "shell", id: RUN, label: "npm test" }],
+    });
+    const rebooted = await started(second, callerOk, { hostProcess: host() });
+    const record = JSON.parse(
+      NodeFS.readFileSync(
+        NodePath.join(second.stateRoot, "jobs", "job-note", "record.json"),
+        "utf8",
+      ),
+    );
+    expect(record.state).toBe("lost");
+    expect(record.outbox).toEqual([]);
+    expect(second.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toEqual([]);
+    await rebooted.service.drain();
+  });
+
+  it("an ambiguous restart note without its work id does not suppress; an unreadable note is held without delivery", async () => {
+    for (const notes of [
+      { ok: true as const, notes: [{ kind: "shell", label: "npm test" }] },
+      { ok: false as const, reason: "unavailable" as const },
+    ]) {
+      const first = world();
+      const initial = await started(first, callerOk, {
+        hostProcess: host(),
+        newJobId: () => "job-uncertain",
+      });
+      await reserveAndAdopt(first, initial.service, "job-uncertain", who, RUN);
+      await initial.service.drain();
+      const second = world(first.stateRoot);
+      second.fake.activity.set(CALLER_THREAD, "idle");
+      second.fake.port.readRestartNotes = async () => notes;
+      const rebooted = await started(second, callerOk, { hostProcess: host() });
+      const record = JSON.parse(
+        NodeFS.readFileSync(
+          NodePath.join(second.stateRoot, "jobs", "job-uncertain", "record.json"),
+          "utf8",
+        ),
+      );
+      expect(record.state).toBe("lost");
+      if (notes.ok) {
+        expect(second.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toHaveLength(1);
+        expect(record.outbox).toContainEqual(
+          expect.objectContaining({ key: "job:job-uncertain:lost", state: "inserted" }),
+        );
+      } else {
+        // Uncertain, not suppressed and not delivered: the notice is kept pending so a later boot, with a readable note, can send or withdraw it.
+        expect(second.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toEqual([]);
+        expect(record.outbox).toEqual([
+          expect.objectContaining({
+            key: "job:job-uncertain:lost",
+            state: "pending",
+            batchId: null,
+          }),
+        ]);
+      }
+      await rebooted.service.drain();
+    }
   });
 });
 
@@ -1307,6 +1528,104 @@ describe("boot reconciliation", () => {
     expect(b.boots[0]).toMatchObject({ lineage: "unavailable" });
     expect(unreadable.fake.closed).toEqual([]);
     await b.service.drain();
+  });
+
+  it("retires only an unaccepted stray main identity bound to a rolled-back fork and removes both M05 main records idempotently", async () => {
+    const w = world();
+    const expectedSessionId = "fork-selected";
+    const straySessionId = "pi-created-unexpectedly";
+    const forkThreadId = "mcp:fork-rolled-back";
+    const hostIdentity = createIdentityStore({ stateRoot: w.stateRoot, writer: "agent-host" });
+    const mainIdentity = {
+      sessionId: straySessionId,
+      kind: "main",
+      rootSessionId: straySessionId,
+      parentChain: [],
+      role: null,
+      roleOrigin: null,
+      roleDigest: null,
+      authoritySource: "main",
+    };
+    expect(hostIdentity.stage("host-stray", mainIdentity).ok).toBe(true);
+    expect(hostIdentity.activate("host-stray", straySessionId).ok).toBe(true);
+    const childIdentity = createIdentityStore({ stateRoot: w.stateRoot, writer: "managed-work" });
+    const child = {
+      sessionId: expectedSessionId,
+      kind: "child",
+      rootSessionId: MAIN,
+      parentChain: [MAIN],
+      role: null,
+      roleOrigin: null,
+      roleDigest: null,
+      authoritySource: "spawn-explicit",
+      explicitAllow: ["read"],
+    };
+    expect(childIdentity.stage("fork-attempt", child).ok).toBe(true);
+    expect(childIdentity.activate("fork-attempt", expectedSessionId).ok).toBe(true);
+    expect(childIdentity.retire(expectedSessionId, "fork-rolled-back").ok).toBe(true);
+    const marker = {
+      kind: "fork-rolled-back" as const,
+      threadId: forkThreadId,
+      sessionId: expectedSessionId,
+    };
+    const opened = openOrchestrationStore(nodeStoreDeps(), { stateRoot: w.stateRoot });
+    if (!opened.ok) throw new Error(`the orchestration store did not open: ${opened.reason}`);
+    const { store } = opened;
+    const staleMain = (sessionId: string, forkRollback?: typeof marker) => ({
+      v: 1 as const,
+      sessionId,
+      settle: { settleSeq: 0, lastTurnId: null, status: null, cause: null, seenTurnIds: [] },
+      outbox: [],
+      admissions: [],
+      pendingRequest: null,
+      ...(forkRollback === undefined ? {} : { forkRollback }),
+    });
+    expect(store.writeMain(staleMain(expectedSessionId, marker))).toEqual({ ok: true });
+    expect(store.writeMain(staleMain(straySessionId))).toEqual({ ok: true });
+    store.close();
+    w.lineage.threads = [
+      {
+        threadId: forkThreadId,
+        parentThreadId: CALLER_THREAD,
+        rootThreadId: ROOT_THREAD,
+        relationshipToParent: "fork",
+        sessionId: straySessionId,
+        closed: true,
+      },
+    ];
+    w.fake.activity.set(forkThreadId, "idle");
+
+    const first = await started(w);
+    const identityFile = NodePath.join(w.stateRoot, "identity", `${straySessionId}.json`);
+    expect(JSON.parse(NodeFS.readFileSync(identityFile, "utf8"))).toMatchObject({
+      state: "retired",
+      writer: "agent-host",
+      acceptedPrompt: false,
+      retiredReason: "fork-rolled-back",
+    });
+    expect(
+      NodeFS.existsSync(
+        NodePath.join(w.stateRoot, "orchestration", "main", `${straySessionId}.json`),
+      ),
+    ).toBe(false);
+    expect(
+      NodeFS.existsSync(
+        NodePath.join(w.stateRoot, "orchestration", "main", `${expectedSessionId}.json`),
+      ),
+    ).toBe(false);
+    await first.service.drain();
+
+    const secondWorld = world(w.stateRoot);
+    secondWorld.lineage.threads = [w.lineage.threads[0]!];
+    secondWorld.fake.activity.set(forkThreadId, "idle");
+    const second = await started(secondWorld);
+    expect(JSON.parse(NodeFS.readFileSync(identityFile, "utf8")).state).toBe("retired");
+    expect(
+      NodeFS.existsSync(
+        NodePath.join(secondWorld.stateRoot, "orchestration", "main", `${straySessionId}.json`),
+      ),
+    ).toBe(false);
+    await second.service.drain();
   });
 
   it("refuses to start over a store it cannot declare (a nonempty folder with no FORMAT)", async () => {

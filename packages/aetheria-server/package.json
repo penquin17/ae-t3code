@@ -28,7 +28,7 @@
     "@aetheria/awareness": {
       "archive": "artifacts/aetheria-awareness-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:684f0a16af6facffce78ba65e4ded6223025049179bfdde7e9fafe59946d775b"
+      "stamp": "sha256:ccd53cb6bc54e5767496d82dc18bf95cf82283560ea99a80d7c051884081610c"
     },
     "@aetheria/evidence": {
       "archive": "artifacts/aetheria-evidence-0.1.0.tgz",
@@ -43,7 +43,7 @@
     "@aetheria/orchestration": {
       "archive": "artifacts/aetheria-orchestration-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:145af70d024b750d19f5c2e3ddde97062aae0c3676553be4e38ba796fe9e09aa"
+      "stamp": "sha256:f567906d4650621024f1e070a0fdafff6081ccff63b371295663ed2b02d963a8"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",
