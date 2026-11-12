@@ -15,5 +15,22 @@ export const captureName = (
   state?: SidebarState,
 ) => `slice3-${surface}-${width}-${mode}${state ? `-${state}` : ""}.png`;
 
+/** The surfaces added for F1: Settings → Appearance, a live palette preview, both dialogs and the standalone page header. */
+export type SurfaceB =
+  | "appearance"
+  | "preview"
+  | "wizard"
+  | "update"
+  | "standalone"
+  | "safearea-hero"
+  | "safearea-wizard"
+  | "safearea-update";
+
+export const captureNameB = (surface: SurfaceB, width: number, mode: "light" | "dark") =>
+  `slice3b-${surface}-${width}-${mode}.png`;
+
+/** Insets of a notched phone, for the safe-area check at 390 px: top status bar and bottom home indicator. */
+export const PHONE_SAFE_AREA = { top: 47, bottom: 34, left: 0, right: 0 } as const;
+
 /** Phone touch target from the accepted tokens (`--ae-size-touch-min`). */
 export const TOUCH_MIN_PX = 44;

@@ -45,7 +45,7 @@ describe("text painted by the real app", () => {
     const app = await mountRoute(THREAD_PATH);
     await using _screen = app.screen;
     await expect.element(page.getByText(LAST_ANSWER)).toBeVisible();
-    const rows = summarize(sampleText(document.body)).filter((row) => !row.disabled);
+    const rows = summarize(sampleText(document.body));
     const failing = rows.filter((row) => row.ratio < 4.5 && !isProjectAvatar(row));
     expect(failing.length, `${mode} thread\n${table(rows)}`).toBe(0);
   });
@@ -57,7 +57,7 @@ describe("text painted by the real app", () => {
     await expect
       .poll(() => document.querySelectorAll("[data-aetheria-headline]").length, { timeout: 15_000 })
       .toBe(1);
-    const rows = summarize(sampleText(document.body)).filter((row) => !row.disabled);
+    const rows = summarize(sampleText(document.body));
     const failing = rows.filter((row) => row.ratio < 4.5 && !isProjectAvatar(row));
     expect(failing.length, `${mode} hero\n${table(rows)}`).toBe(0);
   });
@@ -76,6 +76,26 @@ describe("text painted by the real app", () => {
     const rows = summarize(sampleText(screen.container));
     const failing = rows.filter((row) => row.ratio < 4.5);
     expect(failing.length, `${mode} standalone header\n${table(rows)}`).toBe(0);
+  });
+});
+
+describe("disabled controls cannot hide an enabled one", () => {
+  it("keeps an enabled low-contrast text that shares its colours with an earlier disabled control", async () => {
+    await using screen = await render(
+      <div style={{ background: "#ffffff" }}>
+        <button type="button" disabled style={{ color: "#bbbbbb", background: "#ffffff" }}>
+          Disabled first
+        </button>
+        <span style={{ color: "#bbbbbb" }}>Enabled faint text</span>
+      </div>,
+    );
+    const rows = summarize(sampleText(screen.container));
+    const enabled = rows.filter((row) => row.text.includes("Enabled"));
+    expect(enabled, "the enabled text is a row of its own").toHaveLength(1);
+    expect(enabled[0]!.disabled).toBe(false);
+    expect(enabled[0]!.ratio).toBeLessThan(4.5);
+    expect(rows.some((row) => row.text.includes("Disabled first"))).toBe(false);
+    expect(rows.filter((row) => row.ratio < 4.5)).toHaveLength(1);
   });
 });
 

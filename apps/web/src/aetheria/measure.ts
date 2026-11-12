@@ -155,10 +155,15 @@ export function sampleText(root: Element): TextSample[] {
   return samples;
 }
 
-/** Unique foreground/background pairs with the lowest ratio, one sample text each, worst first. */
+/**
+ * Unique foreground/background pairs of the ENABLED text, one sample text each, worst first. Disabled controls
+ * are exempt from the contrast rule and are dropped before pairs are merged, so one cannot stand in for an
+ * enabled text that shares its colours.
+ */
 export function summarize(samples: readonly TextSample[]) {
   const pairs = new Map<string, TextSample & { count: number }>();
   for (const sample of samples) {
+    if (sample.disabled) continue;
     const key = `${sample.foreground}/${sample.background}`;
     const known = pairs.get(key);
     if (known) known.count += 1;

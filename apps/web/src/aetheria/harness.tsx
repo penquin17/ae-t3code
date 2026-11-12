@@ -27,6 +27,63 @@ export const LAST_ANSWER = `Answer 2 for ${THREAD_ID}.`;
 
 installFakeEnvironment([THREAD]);
 
+/** A control's accessible name: its label, labelled-by text, own text, image alt or title. */
+export function accessibleName(element: Element): string {
+  const label = element.getAttribute("aria-label")?.trim();
+  if (label) return label;
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (labelledBy) {
+    const text = labelledBy
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ")
+      .trim();
+    if (text) return text;
+  }
+  const text = (element.textContent ?? "").trim();
+  if (text) return text;
+  const alt = element.querySelector("img[alt]:not([alt=''])")?.getAttribute("alt")?.trim();
+  if (alt) return alt;
+  // A native input is named by a <label> that wraps it or points at it.
+  const id = element.getAttribute("id");
+  const wrapping = element.closest("label")?.textContent?.trim();
+  const pointing = id
+    ? document.querySelector(`label[for="${id}"]`)?.textContent?.trim()
+    : undefined;
+  return wrapping || pointing || element.getAttribute("title")?.trim() || "";
+}
+
+/** The controls a person or a screen reader can reach inside `root`: visible, not aria-hidden. */
+export function interactiveIn(root: ParentNode): HTMLElement[] {
+  return [
+    ...root.querySelectorAll<HTMLElement>(
+      "button, a[href], [role='button'], [role='checkbox'], input:not([type='hidden']), select, textarea",
+    ),
+  ].filter(
+    (element) =>
+      element.getBoundingClientRect().width > 0 && element.closest("[aria-hidden='true']") === null,
+  );
+}
+
+interface Insets {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+}
+
+/** Insets the browser reports through `env(safe-area-inset-*)`, as on a notched phone; undone when the returned value is disposed. */
+export async function safeAreaInsets(insets: Insets): Promise<AsyncDisposable> {
+  await cdp().send("Emulation.setSafeAreaInsetsOverride", { insets });
+  return {
+    [Symbol.asyncDispose]: async () => {
+      await cdp().send("Emulation.setSafeAreaInsetsOverride", {
+        insets: { top: 0, bottom: 0, left: 0, right: 0 },
+      });
+    },
+  };
+}
+
 /** Emulates the browser's reduced-motion preference (or removes the emulation). */
 export async function setReducedMotion(reduce: boolean): Promise<void> {
   await cdp().send("Emulation.setEmulatedMedia", {
