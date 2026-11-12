@@ -53,7 +53,7 @@ The mark is the Y4 star above an open wreath, with no tile, in a light and a dar
 
 The icon set is generated, not drawn by hand: one adaptive SVG favicon that follows the browser's light or dark scheme (not the app's Appearance), an `.ico` of 16, 32 and 48 pixel images, 16 and 32 pixel PNGs and the 180 pixel apple-touch icon, all rasterised from the light mark by Chromium, plus both marks for the in-app wordmark. The page and the manifest point at them under `/aetheria/`; T3's stock icons stay in place, unused.
 
-The new-thread headline, "Knowledge comes together", is one rule in the stylesheet keyed by `[data-aetheria-headline]`: `min(26px, calc(8vw - 4px))`, one line, no wrapping rule, from 1280 px down to 320 px.
+The new-thread headline, "Knowledge comes together", is one rule in the stylesheet keyed by `[data-aetheria-headline]`: `min(26px, calc(8vw - 4px))`, kept on one line with `white-space: nowrap` (the rule has no overflow, ellipsis or wrapping fallback, so the size alone must make it fit), from 1280 px down to 320 px.
 
 ## Do and do not
 

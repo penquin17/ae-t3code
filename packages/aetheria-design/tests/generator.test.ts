@@ -181,6 +181,59 @@ describe("strict validation", () => {
   });
 });
 
+describe("reduced-motion overrides", () => {
+  const withOverride = (value: unknown) =>
+    edited((s) => {
+      s.semantic.motion.fast.$extensions.aetheria.reducedMotion = value;
+    });
+
+  const BAD: ReadonlyArray<readonly [string, unknown]> = [
+    ["a malformed duration", "not-a-duration"],
+    ["a number", 0],
+    ["null", null],
+    ["a list", ["0ms"]],
+    ["an object", { value: "0ms" }],
+    ["a declaration-breaking string", "0ms; color: red"],
+    ["a block-breaking string", "0ms} body { color: red"],
+    ["a duration with trailing text", "0ms /* x */"],
+    ["an empty string", ""],
+  ];
+
+  it.each(BAD)("refuses %s with a reason naming the token", (_label, value) => {
+    expect(() => build(withOverride(value))).toThrow(/semantic\.motion\.fast.*reducedMotion/);
+  });
+
+  it.each(BAD)("writes nothing when %s is the override", (_label, value) => {
+    const bad = NodePath.join(tempDir(), "tokens.json");
+    NodeFS.writeFileSync(bad, JSON.stringify(withOverride(value)));
+    const out = tempDir();
+    const result = NodeChildProcess.spawnSync(
+      process.execPath,
+      [script, "--tokens", bad, "--out", out],
+      { encoding: "utf8" },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("reducedMotion");
+    expect(NodeFS.readdirSync(out)).toEqual([]);
+  });
+
+  it("accepts another valid duration, and emits it as given", () => {
+    const outputs = build(withOverride("30ms"));
+    expect(outputs["aetheria.css"]).toContain("--ae-motion-fast: 30ms;");
+    expect(outputs["aetheria.css"]).toContain("--ae-motion-fast: 120ms;");
+  });
+
+  it("still generates the committed motion block byte for byte from the accepted 0ms tokens", () => {
+    const css = build(readSource())["aetheria.css"]!;
+    const committed = NodeFS.readFileSync(
+      NodePath.join(packageRoot, "src", "generated", "aetheria.css"),
+      "utf8",
+    );
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(css).toBe(committed);
+  });
+});
+
 describe("a changed source reaches both modes and the mapping without touching consumers", () => {
   it("carries a changed accent into the variables and the resolved pairs", () => {
     const source = edited((s) => {

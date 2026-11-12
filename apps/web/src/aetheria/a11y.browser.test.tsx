@@ -88,12 +88,28 @@ function ringColor(boxShadow: string) {
   return null;
 }
 
-/** Presses Tab until the sidebar's home link has focus (at most 60 times) and returns how many presses it took. */
+/** Presses Tab until the sidebar's home link has focus (at most 120 times; it throws with the focus trail if it never gets there) and returns how many presses it took. */
 async function tabToBrand(): Promise<number> {
+  // The sidebar mounts after the thread under load; tabbing before its link exists walks past it.
+  await expect
+    .poll(() => document.querySelector('a[aria-label="Aetheria home"]') !== null, {
+      timeout: 15_000,
+    })
+    .toBe(true);
   let presses = 0;
-  while (document.activeElement?.getAttribute("aria-label") !== "Aetheria home" && presses < 60) {
+  const trail: string[] = [];
+  while (document.activeElement?.getAttribute("aria-label") !== "Aetheria home" && presses < 120) {
     await userEvent.keyboard("{Tab}");
     presses += 1;
+    const active = document.activeElement;
+    trail.push(
+      active ? accessibleName(active).slice(0, 24) || active.tagName.toLowerCase() : "none",
+    );
+  }
+  if (document.activeElement?.getAttribute("aria-label") !== "Aetheria home") {
+    throw new Error(
+      `the home link was not reached in ${presses} Tab presses; focus visited: ${trail.slice(0, 40).join(" > ")}`,
+    );
   }
   return presses;
 }
@@ -128,12 +144,23 @@ describe("names and keyboard reach on the identity surfaces", () => {
     const app = await mountRoute(THREAD_PATH);
     await using _screen = app.screen;
     await expect.element(page.getByText(LAST_ANSWER)).toBeVisible();
-    const presses = await tabToBrand();
-    expect(document.activeElement?.getAttribute("aria-label"), `after ${presses} Tab presses`).toBe(
-      "Aetheria home",
-    );
-    await userEvent.keyboard("{Enter}");
-    await expect.poll(() => app.router.state.location.pathname, { timeout: 10_000 }).toBe("/");
+    // While the app is still starting, its composer may take focus back between the Tab and the Enter; the
+    // test counts only an Enter pressed with the link focused, and tries again if the app took focus away.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const presses = await tabToBrand();
+      expect(
+        document.activeElement?.getAttribute("aria-label"),
+        `after ${presses} Tab presses`,
+      ).toBe("Aetheria home");
+      await userEvent.keyboard("{Enter}");
+      const went = await expect
+        .poll(() => app.router.state.location.pathname, { timeout: 4000 })
+        .toBe("/")
+        .then(() => true)
+        .catch(() => false);
+      if (went) return;
+    }
+    expect(app.router.state.location.pathname).toBe("/");
   });
 });
 

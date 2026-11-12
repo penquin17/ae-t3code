@@ -3,7 +3,7 @@
 // opened from a trigger with fixture state). Contrast, names, keyboard, identity strings and actions.
 import { useState } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { page, userEvent } from "vite-plus/test/browser";
+import { userEvent } from "vite-plus/test/browser";
 import type * as Context from "effect/Context";
 import { EnvironmentId } from "@t3tools/contracts";
 
@@ -93,7 +93,12 @@ describe("the welcome wizard, opened through the real /welcome route", () => {
     await prepare(1280, 800, mode);
     const app = await mountRoute("/welcome");
     await expect.poll(() => dialog() !== null, { timeout: 15_000 }).toBe(true);
-    await expect.element(page.getByText("Connect your computers")).toBeVisible();
+    // Scoped to the dialog, not the page: a mount left behind by a timed-out test must not make this ambiguous.
+    await expect
+      .poll(() => dialog()?.innerText.includes("Connect your computers") ?? false, {
+        timeout: 10_000,
+      })
+      .toBe(true);
     await dialogSettled();
     return app;
   }
@@ -246,7 +251,9 @@ describe("the update dialog, driven with fixture state", () => {
     trigger.focus();
     await userEvent.keyboard("{Enter}");
     await expect.poll(() => dialog() !== null, { timeout: 5000 }).toBe(true);
-    await expect.element(page.getByText("Machine")).toBeVisible();
+    await expect
+      .poll(() => dialog()?.innerText.includes("Machine") ?? false, { timeout: 10_000 })
+      .toBe(true);
     await dialogSettled();
     return { screen, onConfirm, trigger };
   }

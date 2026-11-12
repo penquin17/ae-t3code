@@ -33,7 +33,9 @@ interface Token {
   readonly type: string;
   readonly value: unknown;
   readonly dark: string | undefined;
-  readonly reducedMotion: string | undefined;
+  /** The raw reduced-motion override as written; checked in buildOutputs before anything is emitted. */
+  readonly reducedMotion: unknown;
+  readonly hasReducedMotion: boolean;
 }
 
 const TIERS = ["primitive", "semantic", "component"] as const;
@@ -145,7 +147,8 @@ function walk(
       type: type!,
       value: node.$value,
       dark: aetheria.dark as string | undefined,
-      reducedMotion: aetheria.reducedMotion as string | undefined,
+      reducedMotion: aetheria.reducedMotion,
+      hasReducedMotion: "reducedMotion" in aetheria,
     });
     return;
   }
@@ -295,8 +298,16 @@ export function buildOutputs(
     if (token.dark !== undefined && !(token.tier === "semantic" && token.type === "color")) {
       fail(`"${token.path}": a dark value is allowed only on a semantic colour`);
     }
-    if (token.reducedMotion !== undefined && token.type !== "duration") {
-      fail(`"${token.path}": reducedMotion is allowed only on a duration`);
+    if (token.hasReducedMotion) {
+      if (token.type !== "duration") {
+        fail(`"${token.path}": reducedMotion is allowed only on a duration`);
+      }
+      // The same check as an ordinary duration, so nothing that could end the declaration is ever emitted.
+      if (!VALUE_CHECKS.duration!(token.reducedMotion)) {
+        fail(
+          `"${token.path}": reducedMotion must be a duration such as "0ms", not ${JSON.stringify(token.reducedMotion)}`,
+        );
+      }
     }
   }
   const light = new Map<Token, string>();
@@ -314,8 +325,8 @@ export function buildOutputs(
     .filter((token) => dark.get(token) !== light.get(token))
     .map((token) => [cssName(token), dark.get(token)!] as const);
   const motionEntries = emitted
-    .filter((token) => token.reducedMotion !== undefined)
-    .map((token) => [cssName(token), token.reducedMotion!] as const);
+    .filter((token) => token.hasReducedMotion)
+    .map((token) => [cssName(token), String(token.reducedMotion)] as const);
 
   const seen = new Set<string>();
   const mapped = mapping.map((entry) => {
