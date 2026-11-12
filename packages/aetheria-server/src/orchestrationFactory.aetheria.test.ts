@@ -813,6 +813,39 @@ describe("job kill and Backend boot reconciliation (step 18)", () => {
     await service.drain();
   });
 
+  it("a kill answered after the Agent's exit report won the race is a sighting: the completion notice that exit raised is withdrawn and the owner is not woken", async () => {
+    const w = world();
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    let signals = 0;
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(async () => {
+        signals += 1;
+        return termination;
+      }),
+      newJobId: () => "job-raced",
+    });
+    const { jobId } = await reserveAndAdopt(w, service, "job-raced", who, RUN);
+    ok(
+      await service.handle("jobs.exited", who, { jobId, exit: { code: null, signal: "SIGTERM" } }),
+    );
+    const answered = ok(await service.handle("jobs.kill", who, { jobId }));
+    expect(answered).toMatchObject({
+      jobId,
+      state: "exited",
+      exit: { code: null, signal: "SIGTERM" },
+    });
+    expect(signals).toBe(0);
+    const record = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(w.stateRoot, "jobs", jobId, "record.json"), "utf8"),
+    );
+    expect(typeof record.collectedAt).toBe("number");
+    expect(record.outbox).toContainEqual(
+      expect.objectContaining({ key: `job:${jobId}:completion`, state: "abandoned" }),
+    );
+    expect(w.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toHaveLength(0);
+    await service.drain();
+  });
+
   it("closing a one-shot child kills its adopted jobs and includes their ids in the report", async () => {
     const w = world();
     writeMainRecord(w.stateRoot, MAIN);
@@ -877,6 +910,35 @@ describe("job kill and Backend boot reconciliation (step 18)", () => {
         state: "inserted",
       }),
     );
+    await rebooted.service.drain();
+  });
+
+  it("boot marks a reserved job that never got a process identity lost and owes the model no notice", async () => {
+    const first = world();
+    const initial = await started(first, callerOk, {
+      hostProcess: host(),
+      newJobId: () => "job-never",
+    });
+    ok(
+      await initial.service.handle("jobs.reserve", who, {
+        runKey: RUN,
+        label: "never ran",
+        mode: "foreground",
+      }),
+    );
+    await initial.service.drain();
+    const second = world(first.stateRoot);
+    second.fake.activity.set(CALLER_THREAD, "idle");
+    const rebooted = await started(second, callerOk, { hostProcess: host() });
+    const record = JSON.parse(
+      NodeFS.readFileSync(
+        NodePath.join(second.stateRoot, "jobs", "job-never", "record.json"),
+        "utf8",
+      ),
+    );
+    expect(record).toMatchObject({ state: "lost", pid: null, exit: null });
+    expect(record.outbox).toEqual([]);
+    expect(second.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toHaveLength(0);
     await rebooted.service.drain();
   });
 

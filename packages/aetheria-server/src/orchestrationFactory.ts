@@ -34,6 +34,7 @@ import {
   createJobRegistry,
   createJobWakes,
   jobLostKey,
+  lostNoticeOwed,
   nodeHostProcessPort,
   nodeJobOutputPort,
   nodeStoreDeps,
@@ -291,6 +292,8 @@ export function createOrchestrationFactory(
         const found = jobs.readJob(jobId);
         if (found.status !== "ok" || found.record.state !== "lost" || found.record.lost === null)
           return;
+        // A job that never got a process identity never ran a command: its record is lost, and nothing is owed to the model.
+        if (!lostNoticeOwed(found.record)) return;
         const job = found.record;
         const key = jobLostKey(job.jobId);
         const owner = { kind: "job", jobId: job.jobId } as const;
@@ -639,6 +642,8 @@ export function createOrchestrationFactory(
           const result = await state.lifecycle.kill(caller, args as never);
           if (result.ok && result.value.state === "lost")
             await state.notifyLost(result.value.jobId, false);
+          // The final state is the answer to the owner's own kill, so it is seen: a completion notice the Agent's exit report raised (it can win the race against this commit) is withdrawn.
+          else if (result.ok) await state.output.seen(caller, result.value.jobId);
           return result as OrchestrationOutcome;
         }
       }
