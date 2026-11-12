@@ -39,10 +39,10 @@ import {
 } from "../panelAnimations";
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
-import ThreadSidebar from "./Sidebar";
+// AETHERIA-IP:IP-2 — the Aetheria sidebar replaces T3's thread sidebar (import).
+import { AetheriaSidebar } from "../aetheria/sessions/AetheriaSidebar";
 import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
-import type { SidebarRouteReveal } from "./sidebar/routeReveal";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
 import {
   clampThreadSidebarWidth,
@@ -403,10 +403,6 @@ function SidebarControl() {
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const sidebarArea = workspaceAreaProps("sidebar", 0, "Threads");
-  const [sidebarRouteReveal] = useState<SidebarRouteReveal>(() => ({
-    observedKey: null,
-    pendingKey: null,
-  }));
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -469,7 +465,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           }}
           style={windowControlsInsetStyle}
         >
-          <ThreadSidebar routeReveal={sidebarRouteReveal} />
+          {/* AETHERIA-IP:IP-2 — T3's ThreadSidebar and its route-reveal state are replaced here (render). */}
+          <AetheriaSidebar />
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
         {children}
