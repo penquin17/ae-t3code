@@ -64,6 +64,8 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+// AETHERIA-IP:IP-45 the Aetheria Stop for background work (Backend tree Stop)
+import { useAetheriaStop } from "../../aetheria/run/useAetheriaStop";
 import {
   backgroundWorkNowItem,
   childInputNowItem,
@@ -183,9 +185,8 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
-  const interruptThreadTurn = useOrchestrationCommand(threadEnvironment.interruptTurn, {
-    reportFailure: false,
-  });
+  // AETHERIA-IP:IP-45 stopping background work is the Aetheria Backend's tree Stop, never T3's cascading thread.stop (M10 step 5, R1)
+  const { stop: aetheriaStop } = useAetheriaStop();
 
   const serverConfigLoaded = serverConfig !== null;
   const activeThreadPinned = serverConfigLoaded && activeThreadShell?.pinnedAt != null;
@@ -429,30 +430,26 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       retryAt: null,
     };
     setBackgroundWorkStops((current) => ({ ...current, [request.threadKey]: request }));
-    const result = await interruptThreadTurn({
+    // AETHERIA-IP:IP-45 one Aetheria Stop; it reports its own outcome. A Stop that was refused or never reached the Backend can be tried again; one that was confirmed, partly done or
+    // whose reply was lost may have landed, so the request stays pending until its deadline and is never sent again by itself.
+    const result = await aetheriaStop({
       environmentId,
-      input: { threadId: activeThread.id },
+      threadId: activeThread.id,
+      rootThreadId: activeThread.id,
+      isSubagent: false,
     });
+    const notSent =
+      !result.sent || result.outcome.kind === "refused" || result.outcome.kind === "unavailable";
     setBackgroundWorkStops((current) =>
       current[request.threadKey] !== request
         ? current
         : {
             ...current,
-            [request.threadKey]:
-              result._tag === "Failure"
-                ? undefined
-                : { ...request, retryAt: Date.now() + BACKGROUND_WORK_STOP_RETRY_AFTER_MS },
+            [request.threadKey]: notSent
+              ? undefined
+              : { ...request, retryAt: Date.now() + BACKGROUND_WORK_STOP_RETRY_AFTER_MS },
           },
     );
-    if (result._tag === "Failure") {
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          activeThread.id,
-          error instanceof Error ? error.message : "Failed to stop background work.",
-        );
-      }
-    }
   };
   const handleStopBackgroundWorkStable = useStableCallback(handleStopBackgroundWork);
   const openRelatedThreadGenerationRef = useRef(0);

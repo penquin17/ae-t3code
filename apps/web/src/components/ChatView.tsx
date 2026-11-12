@@ -120,7 +120,6 @@ import { useStore } from "zustand";
 import { shallow } from "zustand/vanilla/shallow";
 import { useShallow } from "zustand/react/shallow";
 import {
-  isAtomCommandInterrupted,
   mapAtomCommandResult,
   squashAtomCommandFailure,
   type AtomCommandResult,
@@ -351,6 +350,8 @@ import { assetEnvironment } from "../state/assets";
 import { readEnvironmentScope, readPreparedConnection } from "../state/session";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
+// AETHERIA-IP:IP-43 the Aetheria Stop (Backend tree Stop or per-child stop)
+import { useAetheriaStop } from "../aetheria/run/useAetheriaStop";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { observeResize } from "~/lib/observeResize";
 import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
@@ -455,9 +456,8 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
     refresh: true,
   });
-  const interruptThreadTurn = useOrchestrationCommand(threadEnvironment.interruptTurn, {
-    reportFailure: false,
-  });
+  // AETHERIA-IP:IP-43 Stop is the Aetheria Backend's tree Stop (or a per-child stop), never T3's cascading thread.stop (M10 step 5, R1)
+  const { stop: aetheriaStop } = useAetheriaStop();
   const loadEarlierThreadHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     label: "load earlier thread history",
     reportFailure: false,
@@ -1813,17 +1813,13 @@ export default function ChatView(props: ChatViewProps) {
       !readEnvironmentScope(activeThread.environmentId, AuthOrchestrationOperateScope)
     )
       return;
-    const result = await interruptThreadTurn({
+    // AETHERIA-IP:IP-43 the one Stop for the button and the thread.stop shortcut: it reports its own outcome and sends nothing while a Stop for this thread is in flight
+    await aetheriaStop({
       environmentId,
-      input: { threadId: activeThread.id },
+      threadId: activeThread.id,
+      rootThreadId: activeThread.lineage.rootThreadId,
+      isSubagent: activeThread.lineage.relationshipToParent === "subagent",
     });
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      setThreadError(
-        activeThread.id,
-        error instanceof Error ? error.message : "Failed to interrupt the current turn.",
-      );
-    }
   };
   const onInterruptStable = useStableCallback(onInterrupt);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window listener for the desktop snapshot event that focuses the composer

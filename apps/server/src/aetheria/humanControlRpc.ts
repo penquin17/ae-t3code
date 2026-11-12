@@ -76,7 +76,7 @@ const unavailable = (detail: string) => ({ ok: false as const, code: UNAVAILABLE
 const notFound = (detail: string) => ({ ok: false as const, code: NOT_FOUND, detail });
 
 /** What the persistent session row says now: usable, revoked (or gone, or expired), or not readable. */
-type Standing = "active" | "revoked" | "unreadable";
+export type Standing = "active" | "revoked" | "unreadable";
 
 /** Per actor, the check of its device session. An actor with no entry has no check (see the header). */
 const standings = new WeakMap<ClientActor, Effect.Effect<Standing>>();
@@ -111,7 +111,8 @@ const readStanding = Effect.fn("AetheriaHumanControl.readStanding")(
   Effect.orElseSucceed((): Standing => "unreadable"),
 );
 
-const standingOf = (actor: ClientActor): Effect.Effect<Standing> =>
+/** Exported for M10's children handlers (childrenControlRpc.ts): the one per-call check of the device session; its outcomes for M06 are unchanged. */
+export const standingOf = (actor: ClientActor): Effect.Effect<Standing> =>
   standings.get(actor) ?? Effect.succeed("active");
 
 /**

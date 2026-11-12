@@ -85,6 +85,8 @@ import { openSideChatTab } from "../../lib/sideChatPane";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+// AETHERIA-IP:IP-44 the Aetheria per-child Stop
+import { useAetheriaStop } from "../../aetheria/run/useAetheriaStop";
 import { Spinner } from "../ui/spinner";
 import { cn } from "~/lib/utils";
 import {
@@ -417,6 +419,8 @@ export function ThreadRelationshipsPanel(props: {
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
+  // AETHERIA-IP:IP-44 the Aetheria per-child Stop (interrupt a continuable child, close a one-shot)
+  const { stop: aetheriaStop } = useAetheriaStop();
   const stopWorkflowCommand = useAtomCommand(orchestrationEnvironment.stopWorkflow);
   const canOperateWorkflow = useAtomValue(
     orchestrationEnvironment.stopWorkflow.permissionAtom(props.environmentId),
@@ -609,10 +613,22 @@ export function ThreadRelationshipsPanel(props: {
 
   const stopSubagent = async (
     childThreadId: ThreadId,
-    agent: Pick<OrchestrationV2Subagent, "id" | "threadId">,
+    agent: Pick<OrchestrationV2Subagent, "id" | "threadId" | "origin">,
   ) => {
     if (stoppingId !== null) return;
     setStoppingId(childThreadId);
+    // AETHERIA-IP:IP-44 an app-owned child (an Aetheria child) is stopped by the Backend, one child at a time: interrupt when it is continuable, close when it is one-shot. It reports
+    // its own outcome. A provider-native subagent is not an Aetheria child, so it keeps T3's single-subagent interrupt (M10 step 5, R1).
+    if (agent.origin === "app_owned") {
+      await aetheriaStop({
+        environmentId: props.environmentId,
+        threadId: childThreadId,
+        rootThreadId: currentThread?.lineage.rootThreadId ?? props.threadId,
+        isSubagent: true,
+      });
+      setStoppingId(null);
+      return;
+    }
     const result = await interruptTurn({
       environmentId: props.environmentId,
       input: { threadId: agent.threadId, subagentId: agent.id },

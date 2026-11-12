@@ -237,6 +237,11 @@ const RPC_AGGREGATES = {
   [AETHERIA_WS_METHODS.planDecide]: "aetheria",
   [AETHERIA_WS_METHODS.planModeSet]: "aetheria",
   [AETHERIA_WS_METHODS.authorizationGrant]: "aetheria",
+  // AETHERIA-IP:IP-41 span-aggregate label for the user's children controls (M10 step 3); same exhaustive map
+  [AETHERIA_WS_METHODS.childrenList]: "aetheria",
+  [AETHERIA_WS_METHODS.childrenCancelTree]: "aetheria",
+  [AETHERIA_WS_METHODS.childrenInterrupt]: "aetheria",
+  [AETHERIA_WS_METHODS.childrenClose]: "aetheria",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

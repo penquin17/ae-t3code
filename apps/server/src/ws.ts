@@ -11,6 +11,8 @@ import { compositionStatus as aetheriaCompositionStatus } from "./aetheria/aethe
 import { backendDigestRefusal } from "./aetheria/connectionGate.ts";
 // AETHERIA-IP:IP-22 the XC-18 human-control handlers (Aetheria-owned); the actor comes from the connection
 import * as AetheriaHumanControl from "./aetheria/humanControlRpc.ts";
+// AETHERIA-IP:IP-42 the user's children controls (Aetheria-owned); the actor comes from the connection
+import * as AetheriaChildrenControl from "./aetheria/childrenControlRpc.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 
@@ -3437,6 +3439,15 @@ export const layerWsRpc = (
           AetheriaHumanControl.planModeSet(aetheriaBackend, aetheriaActor, input),
         [AETHERIA_WS_METHODS.authorizationGrant]: (input) =>
           AetheriaHumanControl.authorizationGrant(aetheriaBackend, aetheriaActor, input),
+        // AETHERIA-IP:IP-42 the user's children controls (M10 step 3, R1). T3 authorizes each scope before these run (IP-40); the handlers re-read the device session on every call and call M05's direct API
+        [AETHERIA_WS_METHODS.childrenCancelTree]: (input) =>
+          AetheriaChildrenControl.childrenCancelTree(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.childrenList]: (input) =>
+          AetheriaChildrenControl.childrenList(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.childrenInterrupt]: (input) =>
+          AetheriaChildrenControl.childrenInterrupt(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.childrenClose]: (input) =>
+          AetheriaChildrenControl.childrenClose(aetheriaBackend, aetheriaActor, input),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =

@@ -5,6 +5,16 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 
+import {
+  ClientChildrenCancelTreePayload,
+  ClientChildrenCancelTreeResult,
+  ClientChildrenClosePayload,
+  ClientChildrenCloseResult,
+  ClientChildrenInterruptPayload,
+  ClientChildrenInterruptResult,
+  ClientChildrenListPayload,
+  ClientChildrenListResult,
+} from "./childrenControlOperations.ts";
 import { AetheriaCompositionStatus } from "./compositionStatus.ts";
 import {
   AuthorizationGrantPayload,
@@ -40,6 +50,11 @@ export const AETHERIA_WS_METHODS = {
   planDecide: "aetheria.plan.decide",
   planModeSet: "aetheria.planMode.set",
   authorizationGrant: "aetheria.authorization.grant",
+  // M10 step 3 (R1): the user's tree Stop and per-child controls. `list` is a read; the other three need `orchestration:operate`.
+  childrenCancelTree: "aetheria.children.cancelTree",
+  childrenList: "aetheria.children.list",
+  childrenInterrupt: "aetheria.children.interrupt",
+  childrenClose: "aetheria.children.close",
 } as const;
 
 /** The Backend is not attached or has not produced a status; the caller sees this instead of an invented value. */
@@ -123,6 +138,31 @@ export const AetheriaInteractionRpcGroup = RpcGroup.make(
   AetheriaAuthorizationGrantRpc,
 );
 
-export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc).merge(
-  AetheriaInteractionRpcGroup,
+// The user's children controls (M10 step 3). Payloads name threads only; a failure is a coded value in the reply, never an empty success.
+const AetheriaChildrenCancelTreeRpc = Rpc.make(AETHERIA_WS_METHODS.childrenCancelTree, {
+  payload: ClientChildrenCancelTreePayload,
+  success: ClientChildrenCancelTreeResult,
+});
+const AetheriaChildrenListRpc = Rpc.make(AETHERIA_WS_METHODS.childrenList, {
+  payload: ClientChildrenListPayload,
+  success: ClientChildrenListResult,
+});
+const AetheriaChildrenInterruptRpc = Rpc.make(AETHERIA_WS_METHODS.childrenInterrupt, {
+  payload: ClientChildrenInterruptPayload,
+  success: ClientChildrenInterruptResult,
+});
+const AetheriaChildrenCloseRpc = Rpc.make(AETHERIA_WS_METHODS.childrenClose, {
+  payload: ClientChildrenClosePayload,
+  success: ClientChildrenCloseResult,
+});
+
+export const AetheriaChildrenRpcGroup = RpcGroup.make(
+  AetheriaChildrenCancelTreeRpc,
+  AetheriaChildrenListRpc,
+  AetheriaChildrenInterruptRpc,
+  AetheriaChildrenCloseRpc,
 );
+
+export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc)
+  .merge(AetheriaInteractionRpcGroup)
+  .merge(AetheriaChildrenRpcGroup);

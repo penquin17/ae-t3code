@@ -225,6 +225,11 @@ export const RPC_REQUIRED_SCOPES = {
   [AETHERIA_WS_METHODS.planDecide]: AuthOrchestrationOperateScope,
   [AETHERIA_WS_METHODS.planModeSet]: AuthOrchestrationOperateScope,
   [AETHERIA_WS_METHODS.authorizationGrant]: AuthOrchestrationOperateScope,
+  // AETHERIA-IP:IP-40 explicit scopes for the user's children controls (M10 step 3): the list is a read, the tree Stop and the per-child interrupt and close need orchestration:operate
+  [AETHERIA_WS_METHODS.childrenList]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.childrenCancelTree]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.childrenInterrupt]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.childrenClose]: AuthOrchestrationOperateScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {
