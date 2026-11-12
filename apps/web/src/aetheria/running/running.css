@@ -1,0 +1,63 @@
+/*
+ * The running indicator's mark and motion, in design tokens only. The whole logo (stalks, blades,
+ * grains and the star) starts as a faint ghost at --ae-running-faint. Grain i (0 at the stalk's foot
+ * to 12 at its tip, both stalks the same) rises to full during the grain step that begins at
+ * i x --ae-motion-grain, and stays. When the last grain is lit the stalks, blades and star rise to
+ * full over one more grain step. The complete logo holds, then the whole logo fades back together
+ * to the ghost, ending as the loop (--ae-motion-loop) ends. Nothing is ever dimmer than the ghost.
+ *
+ * One animation drives a registered number, --ae-run-t, from 0 to 1 over the loop; every part
+ * computes its own opacity from it. tan(atan2(a, b)) is a / b as a number, so --ae-run-s is one
+ * grain step as a share of the loop. If a token is missing the declarations are invalid, there is
+ * no animation, and the logo stays full.
+ */
+@property --ae-run-t {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+[data-ae-run="mark"] {
+  flex: none;
+  width: var(--ae-running-mark, 1em);
+  height: var(--ae-running-mark, 1em);
+  --ae-run-s: tan(atan2(var(--ae-motion-grain), var(--ae-motion-loop)));
+  --ae-run-built: calc((var(--ae-run-grains) + 1) * var(--ae-run-s));
+  --ae-run-keep: clamp(0, 2 * (1 - var(--ae-run-t)) / (1 - var(--ae-run-built)), 1);
+  animation: ae-running-gather var(--ae-motion-loop) linear infinite;
+}
+
+[data-ae-run="grain"] {
+  opacity: calc(
+    var(--ae-running-faint) + (1 - var(--ae-running-faint)) *
+      clamp(0, (var(--ae-run-t) - var(--ae-run-i) * var(--ae-run-s)) / var(--ae-run-s), 1) *
+      var(--ae-run-keep)
+  );
+}
+
+[data-ae-run="body"] {
+  opacity: calc(
+    var(--ae-running-faint) + (1 - var(--ae-running-faint)) *
+      clamp(0, (var(--ae-run-t) - var(--ae-run-grains) * var(--ae-run-s)) / var(--ae-run-s), 1) *
+      var(--ae-run-keep)
+  );
+}
+
+@keyframes ae-running-gather {
+  from {
+    --ae-run-t: 0;
+  }
+  to {
+    --ae-run-t: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ae-run="mark"] {
+    animation: none;
+  }
+  [data-ae-run="grain"],
+  [data-ae-run="body"] {
+    opacity: 1;
+  }
+}

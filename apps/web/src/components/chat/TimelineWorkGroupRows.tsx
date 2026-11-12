@@ -54,6 +54,8 @@ import {
   workEntryIconName,
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
+// AETHERIA-IP:IP-39 — the Aetheria running indicator replaces the "Working for" and "Thinking" rows (import).
+import { AetheriaRunning } from "../../aetheria/running/AetheriaRunning";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -278,18 +280,16 @@ const workEntryKey = (entry: TimelineWorkEntry) => entry.id;
 export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
   const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup } =
     use(TimelineRowActivityCtx);
+  const { threadRef } = use(TimelineRowCtx);
   const compacting = row.compacting === true || isCompacting;
   const shimmer = isPreparingWorktree || compacting;
+  // AETHERIA-IP:IP-39 — T3's worktree-setup and compaction labels stay; the running label is Aetheria's.
   const label = isPreparingWorktree ? (
     "Setting up worktree…"
   ) : compacting ? (
     <CompactingLabel createdAt={row.createdAt} />
-  ) : row.createdAt ? (
-    <>
-      Working for <WorkingTimer createdAt={row.createdAt} />
-    </>
   ) : (
-    "Working..."
+    <AetheriaRunning createdAt={row.createdAt} threadRef={threadRef} />
   );
   return (
     <div className="border-b border-border/60 pb-2 pt-1">
@@ -368,7 +368,8 @@ export function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind:
     <LiveActivityRow label="Thinking" iconName="brain" active={live} shimmer={live} />
   );
   const { groupId } = row;
-  if (groupId === undefined) return activity;
+  // AETHERIA-IP:IP-39 — the working row carries the one indicator; only the failed-group toggle stays.
+  if (groupId === undefined) return null;
   return (
     <button
       type="button"
