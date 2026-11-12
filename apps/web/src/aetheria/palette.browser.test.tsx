@@ -89,7 +89,7 @@ function expectAetheria(mode: Mode, host?: HTMLElement) {
     expectClose(
       rendered(entry.variable, host),
       expectedPixel(entry.variable, mode),
-      entry.overlay ? 2 : 1,
+      entry.overlay || entry.mix ? 2 : 1,
       `${mode} ${entry.variable}`,
     );
   }

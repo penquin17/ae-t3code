@@ -329,18 +329,43 @@ export function buildOutputs(
       entry.overlay === undefined
         ? undefined
         : mappingToken(entry, entry.overlay, tokens, "number");
+    if (entry.mix !== undefined) {
+      if (entry.overlay !== undefined)
+        fail(`mapping ${entry.variable} has both an overlay and a mix`);
+      for (const percent of [entry.mix.light, entry.mix.dark]) {
+        if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+          fail(`mapping ${entry.variable}: a mix is a whole percent from 1 to 100, not ${percent}`);
+        }
+      }
+    }
     const resolve = (mode: Mode): string => {
       const base = (mode === "dark" ? dark : light).get(role)!;
-      if (opacity === undefined) return base;
+      if (opacity === undefined && entry.mix === undefined) return base;
       if (!/^#[0-9a-fA-F]{6}$/.test(base))
-        fail(`mapping ${entry.variable}: an overlay needs an opaque #RRGGBB role, not ${base}`);
-      return `${base}${alphaHex(light.get(opacity)!)}`;
+        fail(
+          `mapping ${entry.variable}: an overlay or mix needs an opaque #RRGGBB role, not ${base}`,
+        );
+      return entry.mix === undefined
+        ? `${base}${alphaHex(light.get(opacity!)!)}`
+        : `${base}${alphaHex(String(entry.mix[mode] / 100))}`;
     };
+    const mixOf = (percent: number) =>
+      `color-mix(in srgb, var(${cssName(role)}) ${percent}%, transparent)`;
     const reference =
-      opacity === undefined
-        ? `var(${cssName(role)})`
-        : `color-mix(\n    in srgb,\n    var(${cssName(role)}) calc(var(${cssName(opacity)}) * 100%),\n    transparent\n  )`;
-    return { variable: entry.variable, reference, light: resolve("light"), dark: resolve("dark") };
+      entry.mix !== undefined
+        ? mixOf(entry.mix.light)
+        : opacity === undefined
+          ? `var(${cssName(role)})`
+          : `color-mix(\n    in srgb,\n    var(${cssName(role)}) calc(var(${cssName(opacity)}) * 100%),\n    transparent\n  )`;
+    const darkReference =
+      entry.mix !== undefined && entry.mix.dark !== entry.mix.light ? mixOf(entry.mix.dark) : null;
+    return {
+      variable: entry.variable,
+      reference,
+      darkReference,
+      light: resolve("light"),
+      dark: resolve("dark"),
+    };
   });
 
   let css = `/* ${header} */\n:root {\n${declarations(lightEntries)}\n}\n\n:root.dark {\n${declarations(darkEntries)}\n}\n`;
@@ -352,6 +377,15 @@ export function buildOutputs(
     `   A selected or custom palette matches none of these selectors, so it keeps control. */\n` +
     `${DEFAULT_APPEARANCE},\n${DEFAULT_APPEARANCE} [data-app-sidebar] {\n` +
     `${declarations(mapped.map((entry) => [entry.variable, entry.reference] as const))}\n}\n`;
+  const darkMixes = mapped.flatMap((entry) =>
+    entry.darkReference === null ? [] : [[entry.variable, entry.darkReference] as const],
+  );
+  if (darkMixes.length > 0) {
+    // The same selectors, narrowed to the dark appearance: specificity (0,4,0) beats the block above.
+    css +=
+      `\n${DEFAULT_APPEARANCE}.dark,\n${DEFAULT_APPEARANCE}.dark [data-app-sidebar] {\n` +
+      `${declarations(darkMixes)}\n}\n`;
+  }
   css += HEADLINE_RULE;
 
   const tsHeader = `// ${header}\n`;

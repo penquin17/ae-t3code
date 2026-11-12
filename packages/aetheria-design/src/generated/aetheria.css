@@ -136,7 +136,7 @@
   );
   --accent-foreground: var(--ae-color-label-primary);
   --border: var(--ae-color-border);
-  --input: var(--ae-color-border);
+  --input: color-mix(in srgb, var(--ae-color-label-primary) 50%, transparent);
   --ring: var(--ae-color-accent);
   --message-surface: color-mix(
     in srgb,
@@ -155,6 +155,11 @@
   --sidebar-row-active: var(--ae-color-bg-base);
   --sidebar-row-selected: var(--ae-color-bg-base);
   --sidebar-border: var(--ae-color-border);
+}
+
+:root:not([data-theme-id]):not([data-theme-id=""]).dark,
+:root:not([data-theme-id]):not([data-theme-id=""]).dark [data-app-sidebar] {
+  --input: color-mix(in srgb, var(--ae-color-label-primary) 40%, transparent);
 }
 
 /* The slogan in the new-thread hero: one line at every width, sized from the viewport. */

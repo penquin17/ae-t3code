@@ -101,7 +101,7 @@ export const t3Resolved: Readonly<Record<string, ResolvedPair>> = {
   "--accent": { light: "#0F172A14", dark: "#F8FAFC14" },
   "--accent-foreground": { light: "#0F172A", dark: "#F8FAFC" },
   "--border": { light: "#E2E8F0", dark: "#334155" },
-  "--input": { light: "#E2E8F0", dark: "#334155" },
+  "--input": { light: "#0F172A80", dark: "#F8FAFC66" },
   "--ring": { light: "#2563EB", dark: "#60A5FA" },
   "--message-surface": { light: "#0F172A14", dark: "#F8FAFC14" },
   "--message-foreground": { light: "#0F172A", dark: "#F8FAFC" },

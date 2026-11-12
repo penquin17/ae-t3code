@@ -40,7 +40,7 @@ const EXPECTED_MAPPING: ReadonlyArray<readonly [string, string, string | null, s
   ["--accent", FOREGROUND_ON_PRIMARY, HOVER, "#0F172A14", "#F8FAFC14"],
   ["--accent-foreground", FOREGROUND_ON_PRIMARY, null, "#0F172A", "#F8FAFC"],
   ["--border", "semantic.color.border", null, "#E2E8F0", "#334155"],
-  ["--input", "semantic.color.border", null, "#E2E8F0", "#334155"],
+  ["--input", FOREGROUND_ON_PRIMARY, null, "#0F172A80", "#F8FAFC66"],
   ["--ring", "semantic.color.accent", null, "#2563EB", "#60A5FA"],
   ["--message-surface", FOREGROUND_ON_PRIMARY, HOVER, "#0F172A14", "#F8FAFC14"],
   ["--message-foreground", FOREGROUND_ON_PRIMARY, null, "#0F172A", "#F8FAFC"],
@@ -216,7 +216,8 @@ describe("the consumed stylesheet", () => {
 
   it("gates every T3 variable to the default appearance, the sidebar subtree included", () => {
     expect(css).toContain(`${gate},\n${gate} [data-app-sidebar] {`);
-    const block = css.slice(css.indexOf(`${gate},`));
+    const start = css.indexOf(`${gate},`);
+    const block = css.slice(start, css.indexOf("\n}\n", start));
     const declared = [...block.matchAll(/^\s+(--[a-z0-9-]+):/gm)].map((match) => match[1]);
     expect(declared.sort()).toEqual(design.t3Mapping.map((entry) => entry.variable).sort());
     // Outside the gated block only the --ae namespace is declared.
@@ -278,6 +279,38 @@ describe("raw colours", () => {
 
 describe("mapped contrast, both modes", () => {
   const modes = ["light", "dark"] as const;
+
+  it("draws field outlines as the text colour at 50% in light and 40% in dark, as a mix inside the layer", () => {
+    const css = read("src", "generated", "aetheria.css");
+    const gate = ':root:not([data-theme-id]):not([data-theme-id=""])';
+    const mix = (percent: number) =>
+      `--input: color-mix(in srgb, var(--ae-color-label-primary) ${percent}%, transparent);`;
+    expect(css).toContain(mix(50));
+    // The dark value is a second block that only the dark appearance matches, in the sidebar subtree too.
+    expect(css).toContain(`${gate}.dark,\n${gate}.dark [data-app-sidebar] {\n  ${mix(40)}\n}`);
+    expect(design.t3Mapping.find((entry) => entry.variable === "--input")!.mix).toEqual({
+      light: 50,
+      dark: 40,
+    });
+    // No token changed: the border role keeps its accepted values.
+    expect(design.tokenValues["--ae-color-border"]).toEqual({ light: "#E2E8F0", dark: "#334155" });
+  });
+
+  it("claims the field outline at 3:1 on the canvas, a layer, a floating surface and the sidebar, in both modes", () => {
+    for (const background of ["--background", "--card", "--popover", "--sidebar"]) {
+      const claimed = design.mappedPairs.find(
+        (pair) => pair.foreground === "--input" && pair.background === background,
+      );
+      expect(claimed, `--input on ${background}`).toBeDefined();
+      expect(claimed!.minimum).toBe(3);
+      for (const mode of ["light", "dark"] as const) {
+        expect(design.pairRatio(claimed!, mode)).toBeGreaterThanOrEqual(3);
+        // Visibly lighter than text: the outline stays well below the text ratio.
+        expect(design.pairRatio(claimed!, mode)).toBeLessThan(6);
+      }
+    }
+    expect(design.notClaimedPairs.some((pair) => pair.foreground === "--input")).toBe(false);
+  });
 
   it("has pairs for text, controls, sidebar states and state indicators", () => {
     expect(design.mappedPairs.length).toBeGreaterThanOrEqual(25);

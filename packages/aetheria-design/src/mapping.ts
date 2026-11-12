@@ -11,6 +11,11 @@ export interface MappingEntry {
   readonly role: string;
   /** Dotted path of a semantic opacity token: the entry is the role at that opacity. */
   readonly overlay?: string;
+  /**
+   * The role at this opacity in percent, per appearance: a CSS-only mix inside the layer, so a variable
+   * can be drawn stronger than any single accepted role without changing a token value.
+   */
+  readonly mix?: { readonly light: number; readonly dark: number };
   /** Where T3 reads the variable, so a reviewer can judge the role. */
   readonly consumer: string;
 }
@@ -121,8 +126,10 @@ export const t3Mapping: readonly MappingEntry[] = [
   },
   {
     variable: "--input",
-    role: "semantic.color.border",
-    consumer: "Input and select outlines (border-input).",
+    role: "semantic.color.label.primary",
+    mix: { light: 50, dark: 40 },
+    consumer:
+      "Input and select outlines (border-input): the text colour at 50% (light) or 40% (dark), 3:1 or more on the canvas and the layers and well below the text's own ratio.",
   },
   {
     variable: "--ring",
@@ -438,6 +445,30 @@ export const mappedPairs: readonly MappedPair[] = [
     consumer: "A solid action against the canvas.",
   },
   {
+    foreground: "--input",
+    background: "--background",
+    minimum: 3,
+    consumer: "A field outline on the canvas.",
+  },
+  {
+    foreground: "--input",
+    background: "--card",
+    minimum: 3,
+    consumer: "A field outline on a card or the composer.",
+  },
+  {
+    foreground: "--input",
+    background: "--popover",
+    minimum: 3,
+    consumer: "A field outline in a menu or dialog.",
+  },
+  {
+    foreground: "--input",
+    background: "--sidebar",
+    minimum: 3,
+    consumer: "A field outline in the sidebar.",
+  },
+  {
     foreground: "--error",
     background: "--background",
     minimum: 3,
@@ -483,12 +514,5 @@ export const notClaimedPairs: readonly MappedPair[] = [
     minimum: 4.5,
     consumer:
       "Secondary text on the hover surface in light mode: below 4.5:1 with the accepted tokens.",
-  },
-  {
-    foreground: "--input",
-    background: "--background",
-    minimum: 3,
-    consumer:
-      "An input outline on the canvas: the border role is a hairline, below 3:1 in light mode.",
   },
 ];
