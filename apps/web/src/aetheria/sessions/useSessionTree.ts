@@ -1,10 +1,13 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useSyncExternalStore } from "react";
 
+import type { Known } from "../core/known";
+import type { GroupRecord } from "../groups/record";
 import { useThreadRouteTarget } from "../../hooks/useThreadRouteTarget";
 import { useProjects, useQuietThreadShells } from "../../state/entities";
+import { groupSources } from "./groupSources";
 import { forkLinkSource } from "./links";
-import { noSuggestions, toTreeModel } from "./model";
+import { toTreeModel } from "./model";
 import { toListFacts } from "./t3Facts";
 import type { TreeModel } from "./types";
 
@@ -22,16 +25,25 @@ function useMinuteClock(): number {
 }
 
 /**
- * The session tree for the current T3 data, search text and minute. Read-only over T3's shells: it
- * reads no state of its own, writes nothing and edits no row.
+ * The session tree for the current T3 data, search text, minute and the Backend's confirmed group record.
+ * Read-only: it reads no state of its own, writes nothing and edits no row. Without a known record the
+ * tree shows fork groups alone and no suggestions.
  */
-export function useSessionTree(query: string): { readonly model: TreeModel; readonly now: number } {
+export function useSessionTree(
+  query: string,
+  record: Known<GroupRecord>,
+): { readonly model: TreeModel; readonly now: number } {
   const shells = useQuietThreadShells();
   const projects = useProjects();
   const routeTarget = useThreadRouteTarget();
   const now = useMinuteClock();
   const openKey = routeTarget?.kind === "server" ? scopedThreadKey(routeTarget.threadRef) : null;
   const facts = toListFacts({ shells, projects, openKey, now });
-  const model = toTreeModel(facts, forkLinkSource(facts), noSuggestions, { now, query });
+  const sources = groupSources(forkLinkSource(facts), record);
+  const model = toTreeModel(facts, sources.links, sources.suggestions, {
+    now,
+    query,
+    names: sources.names,
+  });
   return { model, now };
 }

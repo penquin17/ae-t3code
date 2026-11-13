@@ -16,6 +16,7 @@ import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { createActionRunner, type OutcomeStep, type RunResult } from "../core/outcome";
 import { sendResultFromCommand } from "./commandResult";
+import { forkThenRename } from "./forkSequence";
 
 type ThreadRef = NonNullable<ReturnType<typeof parseScopedThreadKey>>;
 
@@ -25,6 +26,8 @@ export interface SessionActions {
   archive(sessionId: string): Promise<RunResult<unknown>>;
   rename(sessionId: string, title: string): Promise<RunResult<unknown>>;
   fork(sessionId: string): Promise<RunResult<unknown>>;
+  /** Fork, then name the fork; a fork that applied with a rename that did not ends as `partial`. */
+  forkAndRename(sessionId: string, title: string): Promise<RunResult<unknown>>;
   startSession(workspaceId: string): Promise<RunResult<unknown>>;
 }
 
@@ -92,8 +95,33 @@ export function useSessionActions(): SessionActions {
       (await waitForThreadShell(target)) ? { tag: "shows" } : { tag: "absent" },
   });
 
+  const renameStep = (ref: ThreadRef, title: string): OutcomeStep<unknown> => ({
+    label: "Rename",
+    send: async () =>
+      sendResultFromCommand(
+        await updateMetadata({
+          environmentId: ref.environmentId,
+          input: { threadId: ref.threadId, title },
+        }),
+      ),
+  });
+
   return {
     open,
+    forkAndRename: (sessionId, title) => {
+      const ref = parseScopedThreadKey(sessionId);
+      if (ref === null) {
+        return runner.runSequence(sessionId, [
+          {
+            label: "Fork",
+            send: async () => ({ tag: "unavailable", reason: "the session is not a T3 thread" }),
+          },
+        ]);
+      }
+      return forkThenRename(runner, sessionId, forkStep(ref), (target) =>
+        renameStep(target, title),
+      );
+    },
     pin: (sessionId, pinned) =>
       onThread(sessionId, pinned ? "Pin" : "Unpin", (ref) => ({
         label: pinned ? "Pin" : "Unpin",
@@ -104,17 +132,7 @@ export function useSessionActions(): SessionActions {
         label: "Archive",
         send: async () => sendResultFromCommand(await archiveThread(ref)),
       })),
-    rename: (sessionId, title) =>
-      onThread(sessionId, "Rename", (ref) => ({
-        label: "Rename",
-        send: async () =>
-          sendResultFromCommand(
-            await updateMetadata({
-              environmentId: ref.environmentId,
-              input: { threadId: ref.threadId, title },
-            }),
-          ),
-      })),
+    rename: (sessionId, title) => onThread(sessionId, "Rename", (ref) => renameStep(ref, title)),
     fork: (sessionId) => onThread(sessionId, "Fork", forkStep),
     startSession: (workspaceId) =>
       runner.run(workspaceId, {

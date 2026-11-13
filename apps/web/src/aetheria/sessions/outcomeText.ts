@@ -5,6 +5,13 @@ export interface OutcomeNotice {
   readonly text: string;
 }
 
+/** The code and the Backend's message exactly as supplied, when the outcome is a refusal, for a refusal notice. */
+export function refusalOf(
+  outcome: ActionOutcome<unknown>,
+): { readonly code: string; readonly message: string } | undefined {
+  return outcome.kind === "refused" ? { code: outcome.code, message: outcome.message } : undefined;
+}
+
 function failedText(failed: FailedOutcome): string {
   switch (failed.kind) {
     case "refused":
