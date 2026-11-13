@@ -78,7 +78,12 @@ interface Fake {
   readonly turns: Array<{ threadId: string; content: string; delivery: string; messageId: string }>;
   /** Resolves when the next turn is accepted (an event, not a sleep). */
   nextTurn(): Promise<void>;
-  failNext: { create?: boolean; release?: boolean; bindAs?: (chosen: string) => string };
+  failNext: {
+    create?: boolean;
+    release?: boolean;
+    releaseEndsRun?: boolean;
+    bindAs?: (chosen: string) => string;
+  };
 }
 function fakeThreads(): Fake {
   let counter = 0;
@@ -131,7 +136,11 @@ function fakeThreads(): Fake {
     },
     releaseFirstTurn: async ({ threadId }) => {
       calls.push("release");
-      if (failNext.release === true) return { ok: false, reason: "delivery-unavailable" };
+      if (failNext.release === true) {
+        // A refusal that ended the held run reads idle; one that left it unread stays running.
+        if (failNext.releaseEndsRun === true) activity.set(threadId, "idle");
+        return { ok: false, reason: "delivery-unavailable" };
+      }
       releases.push(threadId);
       return { ok: true, accepted: true };
     },
@@ -452,9 +461,10 @@ describe("children.spawn through the real children service", () => {
     expect(envelope.acceptedPrompt).toBe(false);
   });
 
-  it("a refused release is rolled back too: no id, the thread closed", async () => {
+  it("a refused release whose held run reads idle is rolled back: no id, the thread closed", async () => {
     const w = world();
     w.fake.failNext.release = true;
+    w.fake.failNext.releaseEndsRun = true;
     const { service } = await started(w);
     expect(await service.handle("children.spawn", who, SPAWN)).toMatchObject({
       ok: false,
@@ -463,6 +473,18 @@ describe("children.spawn through the real children service", () => {
     });
     expect(w.fake.releases).toEqual([]);
     expect(w.fake.closed).toEqual(["thread-child-1"]);
+  });
+
+  it("a refused release whose held run still reads running is an unknown outcome: the child is kept, nothing closed (review 1 finding 2)", async () => {
+    const w = world();
+    w.fake.failNext.release = true;
+    const { service } = await started(w);
+    expect(await service.handle("children.spawn", who, SPAWN)).toMatchObject({
+      ok: false,
+      code: "CHILD_START_FAILED",
+      cause: "release-outcome-unknown",
+    });
+    expect(w.fake.closed).toEqual([]);
   });
 
   it("a Pi that opens another session than the one asked for is rolled back: thread closed, the chosen record retired, no release, no identity for the other id", async () => {
