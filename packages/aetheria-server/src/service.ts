@@ -39,6 +39,7 @@ import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
 import { createResumeSignal } from "./identity/resume.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
 import { createSessionDirectory } from "./identity/sessionDirectory.ts";
+import { createSessionKind, type SessionKind } from "./identity/sessionKind.ts";
 import { createLifecycleTracker, type LifecycleTracker } from "./identity/lifecycle.ts";
 import {
   createIdentityResolver,
@@ -162,6 +163,8 @@ export interface AetheriaBackendService {
   noteFeed(reason: Extract<UnknownReason, "feed-ended" | "feed-failed">): void;
   readonly liveness: LivenessService;
   readonly index: ThreadIndex;
+  /** `child` for an active child identity record, `not-child` for a main, absent or retired one, `unavailable` when the record cannot be trusted. Never throws (identity/sessionKind.ts). */
+  identityKind(sessionId: string): SessionKind;
   readonly tracker: LifecycleTracker;
   readonly backend: BackendAdapter;
   /** The route policy T3's Pi adapter consults before it sends a model or effort (M09 step 11). Capabilities are unknown until the service runs. */
@@ -524,6 +527,7 @@ export function createAetheriaBackendService(
     board,
     liveness,
     index,
+    identityKind: createSessionKind(identityReader),
     tracker,
     backend,
     piSelectionSeam: createPiSelectionSeam({

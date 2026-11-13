@@ -120,6 +120,8 @@ interface Options {
   /** Thread ids the index knows (thread → Pi session) and whether each is a subagent; default: root and other root as mains, child as a subagent. */
   readonly bindings?: Record<string, { sessionId: string; subagent: boolean | null }>;
   readonly corruptThreads?: ReadonlyArray<string>;
+  /** The kind M03's identity record gives a Pi session (default: pi-child is a child, any other session a main); `unreadable` sessions answer unavailable. */
+  readonly sessionKinds?: Record<string, "not-child" | "child" | "unavailable">;
   readonly noInteractions?: boolean;
   readonly noOrchestration?: boolean;
   readonly noDirect?: boolean;
@@ -194,6 +196,12 @@ const fakeBackend = (options: Options = {}) => {
     },
   };
   const backend = Option.some({
+    identityKind: (sessionId: string) => {
+      calls.push({ method: "identityKind", args: [sessionId] });
+      return (
+        options.sessionKinds?.[sessionId] ?? (sessionId === "pi-child" ? "child" : "not-child")
+      );
+    },
     interactions: () => (options.noInteractions === true ? undefined : interactions),
     orchestration: () =>
       options.noOrchestration === true
@@ -481,6 +489,76 @@ describe("nothing reaches M05 unless the connection may make the call", () => {
             code: "CHILDREN_UNAVAILABLE",
           });
           expect(mutating(corrupt.calls)).toEqual([]);
+        }),
+      ),
+  );
+
+  // M10 native slice finding: every M05 child binding in the thread index carries `subagent: null` (the index never learns it), so the `subagent === true` refusal alone let a child be named
+  // as a root and Stopped as one. The child's own identity record (kind "child", M03) is the proof, read through the Backend.
+  it.effect(
+    "a child named as a root is refused in every method although the index says subagent null; nothing reaches M05",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const actor = yield* actorOf();
+          const bindings = { [CHILD]: { sessionId: "pi-child", subagent: null } };
+          const calls = [
+            (b: never) => childrenCancelTree(b, actor, { rootThreadId: CHILD }),
+            (b: never) => childrenList(b, actor, { rootThreadId: CHILD }),
+            (b: never) =>
+              childrenInterrupt(b, actor, { rootThreadId: CHILD, childThreadId: "thread-x" }),
+            (b: never) =>
+              childrenClose(b, actor, { rootThreadId: CHILD, childThreadId: "thread-x" }),
+          ];
+          for (const call of calls) {
+            const fake = fakeBackend({ bindings });
+            expect(yield* call(fake.backend)).toMatchObject({
+              ok: false,
+              code: "CHILDREN_NOT_FOUND",
+            });
+            expect(
+              fake.calls.filter((c) =>
+                ["cancelTree", "listChildren", "interruptTurn", "closeChild", "canAccess"].includes(
+                  c.method,
+                ),
+              ),
+            ).toEqual([]);
+          }
+          // A main thread (identity kind main) is still a root.
+          const main = fakeBackend({
+            bindings: { [ROOT]: { sessionId: "pi-root", subagent: null } },
+          });
+          expect(
+            yield* childrenCancelTree(main.backend, actor, { rootThreadId: ROOT }),
+          ).toMatchObject({ ok: true });
+        }),
+      ),
+  );
+
+  it.effect(
+    "a root whose identity record cannot be read is not stopped or listed: unavailable, nothing reaches M05",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const actor = yield* actorOf();
+          const fake = fakeBackend({ sessionKinds: { "pi-root": "unavailable" } });
+          expect(
+            yield* childrenCancelTree(fake.backend, actor, { rootThreadId: ROOT }),
+          ).toMatchObject({ ok: false, code: "CHILDREN_UNAVAILABLE" });
+          expect(yield* childrenList(fake.backend, actor, { rootThreadId: ROOT })).toMatchObject({
+            ok: false,
+            code: "CHILDREN_UNAVAILABLE",
+          });
+          expect(
+            fake.calls.filter((c) =>
+              ["cancelTree", "listChildren", "canAccess"].includes(c.method),
+            ),
+          ).toEqual([]);
+          // A record that is absent or retired does not prove a child: the root goes on to the host rule and M05, as before.
+          const absent = fakeBackend({ sessionKinds: { "pi-root": "not-child" } });
+          expect(
+            yield* childrenCancelTree(absent.backend, actor, { rootThreadId: ROOT }),
+          ).toMatchObject({ ok: true });
         }),
       ),
   );

@@ -32,6 +32,7 @@ describe("the identity module", () => {
       "resolver.ts",
       "resume.ts",
       "sessionDirectory.ts",
+      "sessionKind.ts",
       "threadIndex.ts",
     ]);
   });

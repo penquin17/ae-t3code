@@ -37,7 +37,7 @@ import * as Schema from "effect/Schema";
 import { standingOf } from "./humanControlRpc.ts";
 
 type Backend = Option.Option<
-  Pick<AetheriaBackendService, "interactions" | "orchestration" | "index">
+  Pick<AetheriaBackendService, "interactions" | "orchestration" | "index" | "identityKind">
 >;
 type Direct = NonNullable<
   ReturnType<NonNullable<ReturnType<AetheriaBackendService["orchestration"]>>["direct"]>
@@ -115,6 +115,14 @@ const openGate = async (
   if (found.binding.subagent === true)
     return refuse("CHILDREN_NOT_FOUND", "not available to this connection");
   const rootSessionId = found.binding.sessionId;
+  // The index's `subagent` flag is never set for an M05 child (every such binding holds null), so the flag alone let a child be Stopped as a root. M03's identity record is the proof: a child is
+  // never a root; a record that cannot be read leaves the root unproven, and nothing is done.
+  const kind = service.identityKind(rootSessionId);
+  if (kind === "child") return refuse("CHILDREN_NOT_FOUND", "not available to this connection");
+  if (kind === "unavailable")
+    return unavailable(
+      "the root's identity record cannot be read, so it cannot be told from a child",
+    );
   let reachable: boolean;
   try {
     reachable = await interactions.canAccess(actor, { sessionId: rootSessionId, rootSessionId });
