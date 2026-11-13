@@ -83,6 +83,19 @@ const NEGATIVE = process.env.M05_FORK_NEGATIVE ?? "";
 const driver = ProviderDriverKind.make("pi");
 const instanceId = ProviderInstanceId.make("pi");
 const modelSelection = { instanceId, model: "test-model" };
+// Pi's real session shape (packages/provider-pi/src/server/adapter.ts PiProviderCapabilitiesV2.sessions): ONE provider thread per session. T3's Orchestrator.providerSessionIdFor derives the
+// shared per-instance session id only for adapters that support several threads per session (Codex, whose capabilities this scripted provider borrowed for everything else); for Pi it allocates
+// a session per thread, so each thread has its own session and its own live runtime, as in production.
+const PiShapedCapabilities = {
+  ...CodexProviderCapabilitiesV2,
+  sessions: {
+    supportsMultipleProviderThreadsPerSession: false,
+    supportsModelSwitchInSession: true,
+    supportsProviderSwitchingViaHandoff: true,
+    supportsRuntimeModeSwitchInSession: false,
+    pendingRequestsSurviveRestart: false,
+  },
+} as const;
 const sessionIdOf = (n: number) => `0197d3c0-0000-7000-8000-${String(n).padStart(12, "0")}`;
 
 // ---------------------------------------------------------------------------------------------------------------------------------- the scripted provider
@@ -137,7 +150,7 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
   const adapter: ProviderAdapter.ProviderAdapterV2["Service"] = {
     instanceId,
     driver,
-    getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+    getCapabilities: () => Effect.succeed(PiShapedCapabilities),
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: (input) =>
       Effect.gen(function* () {
@@ -154,7 +167,7 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
             status: "ready",
             cwd: plain,
             model: modelSelection.model,
-            capabilities: CodexProviderCapabilitiesV2,
+            capabilities: PiShapedCapabilities,
             createdAt: now,
             updatedAt: now,
             lastError: null,
@@ -627,6 +640,28 @@ const makeWorld = Effect.fn("m05.world")(function* (name: string, script: Script
       } satisfies Who;
     });
 
+  /**
+   * Waits until T3's PROJECTION holds a running provider turn for each thread. The scripted provider's `started` list is filled when `startTurn` is called, BEFORE the turn's first
+   * `provider_turn.updated` event has been ingested; an interrupt in that window finds no provider turn in the projection and T3 settles the run itself ("interrupted before its provider turn
+   * started", Orchestrator.ts interrupt decider) without asking the provider. A test that cancels a tree of RUNNING turns must wait for this, not for `started`.
+   */
+  const untilTurnsProjected = (threadIds: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        yield* worker.drain();
+        const projected = yield* Effect.forEach(threadIds, (id) =>
+          orchestrator
+            .getThreadProjection(ThreadId.make(id))
+            .pipe(Effect.map((p) => p.providerTurns.some((turn) => turn.status === "running"))),
+        );
+        if (projected.every(Boolean)) return;
+        yield* Effect.sleep("25 millis");
+      }
+      return yield* Effect.die(
+        new Error(`timed out waiting for a running provider turn on ${threadIds.join(", ")}`),
+      );
+    });
+
   const runOf = (threadId: string) =>
     orchestrator
       .getThreadProjection(ThreadId.make(threadId))
@@ -644,6 +679,7 @@ const makeWorld = Effect.fn("m05.world")(function* (name: string, script: Script
     until,
     mainThread,
     childWho,
+    untilTurnsProjected,
     runOf,
     stateRoot,
     sessions,
@@ -803,6 +839,9 @@ it.live(
         );
         // NOT shown here: the idle-resident branch. The scripted provider cannot complete a turn (a "completed" provider_turn.updated leaves T3's run running: observed), so both
         // children are running; the idle-preserved case is the matrix's op-cancelTree (FX-TP) and needs a provider that settles a turn (real Pi).
+        // Both provider turns must be RUNNING IN T3's projection, not merely started at the provider (review fix 3, finding 3: cancelling in the window between the two left the second
+        // child's provider turn running and never interrupted; see `untilTurnsProjected`).
+        yield* w.untilTurnsProjected([running, idle]);
         const direct = svc.service.orchestration()?.direct();
         assert.isDefined(direct);
         const result = yield* Effect.promise(() =>
@@ -822,9 +861,24 @@ it.live(
         );
         assert.match(String(actions[running]), /interrupt/i);
         assert.match(String(actions[idle]), /interrupt/i);
-        // BOTH children reach T3's terminal `interrupted` state, and the first one's turn was interrupted at the provider (review fix 3: the test used to assert one child only).
-        // The SECOND child's provider interrupt is the todo below: with the harness isolated it is still not asked of the provider (see the todo).
-        assert.include(w.script.interrupted, running);
+        // Each thread has its own provider session, as Pi has in production (one thread per session), so no thread's interrupt can find another's session torn down.
+        const sessionsOfStarted = new Set(
+          w.script.started.map((t) => String(t.providerThread.providerSessionId)),
+        );
+        assert.equal(
+          sessionsOfStarted.size,
+          3,
+          "root and both children each hold their own provider session",
+        );
+        // BOTH children's turns are interrupted at the provider (each call names its own thread and that thread's started provider turn), and both reach T3's terminal `interrupted` state.
+        for (const id of [running, idle]) {
+          const startedTurn = w.script.started.find((t) => String(t.threadId) === id);
+          assert.deepEqual(
+            w.script.interruptCalls.filter((c) => c.thread === id),
+            [{ thread: id, turn: `provider-turn:${startedTurn?.attemptId}` }],
+            `exactly one provider interrupt, for the started turn, on ${id}`,
+          );
+        }
         assert.equal((yield* w.runOf(running))?.status, "interrupted");
         assert.equal((yield* w.runOf(idle))?.status, "interrupted");
         assert.equal(
@@ -838,17 +892,6 @@ it.live(
       }),
     ),
   300_000,
-);
-
-// DIAGNOSED, NOT ASSERTED (review fix 3, finding 3): with the scripted provider's events routed per session and every interrupt recorded per call (`interruptCalls`: thread and provider turn), cancelTree over two
-// running continuable children still asks the provider to interrupt ONE of them (plus the root's thread.stop): `interrupted` = [first child, root]; the second child has a started turn, its row says
-// `interrupted`, its T3 run ends `interrupted`, yet `ProviderAdapterV2.interruptTurn` is never called for it. The harness is not the cause: all three threads share ONE provider session
-// (`provider-session:provider-instance:pi:shared`), so per-session queues are one queue, and the record is taken at the adapter's entry before any event is routed. The silent path is T3's
-// (orchestration-v2/ProviderTurnControlService.ts:153-176 and :191-203, "no live session ... treating as already stopped"), reached through M05's cancel.ts:113 -> control.ts:246 -> threads.interrupt,
-// which reports `interrupted` for any accepted interrupt (cancel.ts:113-114). Whether the second child's run was really stopped by T3 or only projected interrupted is not shown here. Todo until a
-// provider that settles per-thread turns (real Pi) or a T3/M05 decision shows it; do not read the first child's assertions above as covering the second provider interrupt.
-it.todo(
-  "case 1 (DIAGNOSED, todo): cancelTree's interrupt of the SECOND running continuable child reaches the provider's interruptTurn (today only the first child and the root do)",
 );
 
 // =========================================================================================================================================== case 2
