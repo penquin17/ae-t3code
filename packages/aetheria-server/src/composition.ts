@@ -8,6 +8,11 @@ import {
 } from "./agentAwareness.ts";
 import { BACKEND_COMPOSITION_ID } from "./compositionId.ts";
 import {
+  GROUPS_BACKEND_ENTRY,
+  GROUPS_BACKEND_ID,
+  groupsBackendModuleRow,
+} from "./groups/groupsRow.ts";
+import {
   HUMAN_CONTROL_BACKEND_ENTRY,
   HUMAN_CONTROL_BACKEND_ID,
   humanControlBackendModuleRow,
@@ -31,6 +36,7 @@ export const BACKEND_ENTRY_ALLOWLIST: readonly string[] = Object.freeze([
   PROVIDERS_BACKEND_ENTRY,
   HUMAN_CONTROL_BACKEND_ENTRY,
   ORCHESTRATION_BACKEND_ENTRY,
+  GROUPS_BACKEND_ENTRY,
 ]);
 
 /**
@@ -45,6 +51,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
       providersBackendModuleRow(),
       humanControlBackendModuleRow(),
       orchestrationBackendModuleRow(),
+      groupsBackendModuleRow(),
     ],
     compositions: [
       {
@@ -60,6 +67,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
           PROVIDERS_BACKEND_ID,
           HUMAN_CONTROL_BACKEND_ID,
           ORCHESTRATION_BACKEND_ID,
+          GROUPS_BACKEND_ID,
         ],
       },
     ],

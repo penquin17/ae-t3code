@@ -246,6 +246,39 @@ export const LINES: DisplayLines = {
     en: "It is not known whether the request took effect. It was not sent again; check the current state.",
     zh: "不清楚这项请求是否已生效。它没有被重新发送，请查看当前状态。",
   },
+  // M10, the session-group store's own codes
+  GROUPS_INVALID_REQUEST: {
+    en: "The Backend did not accept this group change as written.",
+    zh: "后端不接受这项按原样提交的分组更改。",
+  },
+  GROUPS_REQUEST_TOO_LARGE: {
+    en: "This group change is larger than one request may be (8 KiB), so the Backend did not accept it.",
+    zh: "这项分组更改超过单次请求的上限（8 KiB），后端没有接受。",
+  },
+  GROUPS_NOT_AUTHORIZED: {
+    en: "This device is not allowed to change groups.",
+    zh: "此设备无权更改分组。",
+  },
+  GROUPS_DEVICE_REVOKED: {
+    en: "This device's sign-in was revoked or has expired, so the Backend refused the request.",
+    zh: "此设备的登录已被撤销或已过期，后端拒绝了这项请求。",
+  },
+  GROUPS_SESSION_NOT_FOUND: {
+    en: "One of those sessions is not available to this device.",
+    zh: "其中一个会话此设备无法获取。",
+  },
+  GROUPS_STORE_UNUSABLE: {
+    en: "The saved groups cannot be used right now: the file could not be read, is in an unsupported form, or could not be written. The Backend left it as it was.",
+    zh: "目前无法使用已保存的分组：文件无法读取、格式不受支持或无法写入。后端保持其原样。",
+  },
+  GROUPS_UNAVAILABLE: {
+    en: "The Backend could not take the request.",
+    zh: "后端无法受理这项请求。",
+  },
+  GROUPS_OUTCOME_UNKNOWN: {
+    en: "It is not known whether the group change took effect. It was not sent again; check the groups as they are now.",
+    zh: "不清楚这项分组更改是否已生效。它没有被重新发送，请查看分组的当前状态。",
+  },
   // M05, passed through the children handler
   NOT_AUTHORIZED: {
     en: "This session is not allowed to do that to its children.",

@@ -16,6 +16,8 @@ import {
   ClientChildrenInterruptResult,
   ClientChildrenListPayload,
   ClientChildrenListResult,
+  ClientChildrenReportPayload,
+  ClientChildrenReportResult,
   CHILDREN_PASSTHROUGH_CODES,
 } from "./index.ts";
 
@@ -24,20 +26,70 @@ const decode = <S extends Schema.Top>(schema: S) =>
   Schema.decodeUnknownSync(schema as never, strict) as (input: unknown) => S["Type"];
 
 describe("the children-control client methods", () => {
-  it("adds four methods under aetheria.children. after the XC-18 methods, in group order", () => {
+  it("adds five methods under aetheria.children. after the XC-18 methods, in group order (the fifth, report, is M10 step 10)", () => {
     expect(AETHERIA_WS_METHODS).toMatchObject({
       childrenCancelTree: "aetheria.children.cancelTree",
       childrenList: "aetheria.children.list",
       childrenInterrupt: "aetheria.children.interrupt",
       childrenClose: "aetheria.children.close",
+      childrenReport: "aetheria.children.report",
     });
     expect([...AetheriaChildrenRpcGroup.requests.keys()]).toEqual([
       "aetheria.children.cancelTree",
       "aetheria.children.list",
       "aetheria.children.interrupt",
       "aetheria.children.close",
+      "aetheria.children.report",
     ]);
     expect([...AetheriaRpcGroup.requests.keys()]).toEqual(Object.values(AETHERIA_WS_METHODS));
+  });
+
+  it("reads a stored report by naming a root and a child, and nothing about the caller", () => {
+    expect(
+      decode(ClientChildrenReportPayload)({ rootThreadId: "t-root", childThreadId: "t-child" }),
+    ).toEqual({ rootThreadId: "t-root", childThreadId: "t-child" });
+    for (const bad of [
+      { rootThreadId: "t-root" },
+      { childThreadId: "t-child" },
+      { rootThreadId: "t-root", childThreadId: "t-child", user: true },
+      { rootThreadId: "t-root", childThreadId: "t-child", caller: { user: true } },
+      { rootThreadId: "", childThreadId: "t-child" },
+    ])
+      expect(() => decode(ClientChildrenReportPayload)(bad), JSON.stringify(bad)).toThrow();
+  });
+
+  it("decodes the three states of M05's user report read and a refusal, and nothing else", () => {
+    const report = { status: "completed", text: "done", route: 1 };
+    for (const value of [
+      { state: "reported", report },
+      { state: "reported", report: { ...report, cause: "c", structured: { k: 1 } } },
+      { state: "pending" },
+      { state: "not-record-only" },
+    ])
+      expect(
+        decode(ClientChildrenReportResult)({ ok: true, value }),
+        JSON.stringify(value),
+      ).toBeTruthy();
+    for (const value of [
+      { state: "reported" },
+      { state: "reported", report: { ...report, status: "vanished" } },
+      { state: "reported", report: { ...report, route: 0 } },
+      { state: "pending", report },
+      { state: "waiting" },
+      { report },
+    ])
+      expect(
+        () => decode(ClientChildrenReportResult)({ ok: true, value }),
+        JSON.stringify(value),
+      ).toThrow();
+    for (const code of [
+      ...Object.keys(CHILDREN_CONTROL_CODE_CLASSES),
+      ...CHILDREN_PASSTHROUGH_CODES,
+    ])
+      expect(decode(ClientChildrenReportResult)({ ok: false, code, detail: "d" })).toBeTruthy();
+    expect(() =>
+      decode(ClientChildrenReportResult)({ ok: false, code: "GROUPS_UNAVAILABLE" }),
+    ).toThrow();
   });
 
   it("names a thread and nothing about the caller", () => {

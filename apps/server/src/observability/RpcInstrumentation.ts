@@ -242,6 +242,10 @@ const RPC_AGGREGATES = {
   [AETHERIA_WS_METHODS.childrenCancelTree]: "aetheria",
   [AETHERIA_WS_METHODS.childrenInterrupt]: "aetheria",
   [AETHERIA_WS_METHODS.childrenClose]: "aetheria",
+  // AETHERIA-IP:IP-48 span-aggregate labels for the stored-report read and the session-group store (M10 steps 10 and 7); same exhaustive map
+  [AETHERIA_WS_METHODS.childrenReport]: "aetheria",
+  [AETHERIA_WS_METHODS.groupsRead]: "aetheria",
+  [AETHERIA_WS_METHODS.groupsApply]: "aetheria",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

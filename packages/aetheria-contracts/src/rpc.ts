@@ -14,8 +14,16 @@ import {
   ClientChildrenInterruptResult,
   ClientChildrenListPayload,
   ClientChildrenListResult,
+  ClientChildrenReportPayload,
+  ClientChildrenReportResult,
 } from "./childrenControlOperations.ts";
 import { AetheriaCompositionStatus } from "./compositionStatus.ts";
+import {
+  GroupsApplyPayload,
+  GroupsApplyResult,
+  GroupsReadPayload,
+  GroupsReadResult,
+} from "./groupsOperations.ts";
 import {
   AuthorizationGrantPayload,
   AuthorizationGrantResult,
@@ -55,6 +63,11 @@ export const AETHERIA_WS_METHODS = {
   childrenList: "aetheria.children.list",
   childrenInterrupt: "aetheria.children.interrupt",
   childrenClose: "aetheria.children.close",
+  // M10 step 10: the stored report of one child (a read, `orchestration:read`).
+  childrenReport: "aetheria.children.report",
+  // M10 step 7 (D3): the session-group store. `read` is a read; `apply` (the five-operation union) needs `orchestration:operate`.
+  groupsRead: "aetheria.groups.read",
+  groupsApply: "aetheria.groups.apply",
 } as const;
 
 /** The Backend is not attached or has not produced a status; the caller sees this instead of an invented value. */
@@ -156,13 +169,32 @@ const AetheriaChildrenCloseRpc = Rpc.make(AETHERIA_WS_METHODS.childrenClose, {
   success: ClientChildrenCloseResult,
 });
 
+const AetheriaChildrenReportRpc = Rpc.make(AETHERIA_WS_METHODS.childrenReport, {
+  payload: ClientChildrenReportPayload,
+  success: ClientChildrenReportResult,
+});
+
 export const AetheriaChildrenRpcGroup = RpcGroup.make(
   AetheriaChildrenCancelTreeRpc,
   AetheriaChildrenListRpc,
   AetheriaChildrenInterruptRpc,
   AetheriaChildrenCloseRpc,
+  AetheriaChildrenReportRpc,
 );
+
+// The session-group store (M10 step 7). Payloads name sessions and a name only; a failure is a coded value in the reply, never an empty success.
+const AetheriaGroupsReadRpc = Rpc.make(AETHERIA_WS_METHODS.groupsRead, {
+  payload: GroupsReadPayload,
+  success: GroupsReadResult,
+});
+const AetheriaGroupsApplyRpc = Rpc.make(AETHERIA_WS_METHODS.groupsApply, {
+  payload: GroupsApplyPayload,
+  success: GroupsApplyResult,
+});
+
+export const AetheriaGroupsRpcGroup = RpcGroup.make(AetheriaGroupsReadRpc, AetheriaGroupsApplyRpc);
 
 export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc)
   .merge(AetheriaInteractionRpcGroup)
-  .merge(AetheriaChildrenRpcGroup);
+  .merge(AetheriaChildrenRpcGroup)
+  .merge(AetheriaGroupsRpcGroup);

@@ -29,7 +29,7 @@ export function humanControlBackendModuleRow(
     },
     contract: {
       consumer:
-        "The Agent host's question and plan tools (M06 scenario stacks until M10; the task and audit tools in the local stack), through the XC-6 operations interaction.create, interaction.await, interaction.release, tasks.publish, plan-mode.get, audit.history and origin.verify; T3's authenticated clients, through the XC-18 client RPCs; the Backend's own late-answer delivery, in process into T3's message dispatch.",
+        "The Agent host's question, plan, task and audit tools (all in the ordinary composition since M10 step 11), through the XC-6 operations interaction.create, interaction.await, interaction.release, tasks.publish, plan-mode.get, audit.history and origin.verify; T3's authenticated clients, through the XC-18 client RPCs; the Backend's own late-answer delivery, in process into T3's message dispatch.",
       success:
         "A question is stored before any reply, waited on in segments of at most 5000 ms that never leave an XC-6 pending entry, and settled at most once by an authenticated client session; a late answer reaches the asker's thread as one accepted T3 command; the module drains once, recording every live wait as lost to a host stop.",
       failure:

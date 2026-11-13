@@ -108,6 +108,20 @@ export {
   PINNED_ARTIFACT,
   PROVIDERS_PINNED_ARTIFACT,
 } from "./artifact.ts";
+export {
+  GROUPS_BACKEND_ENTRY,
+  GROUPS_BACKEND_ID,
+  createGroupsBackendRegistration,
+  createGroupsStore,
+  filterGroupsRecord,
+  groupsBackendModuleRow,
+  prepareGroupOperation,
+  type GroupOperation,
+  type GroupsBackendRegistration,
+  type GroupsOutcome,
+  type GroupsRecord,
+  type GroupsService,
+} from "./groups/groups.ts";
 export { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 export { BACKEND_COMPOSITION_ID, BACKEND_ENTRY_ALLOWLIST, backendManifest } from "./composition.ts";
 export type { StoredEventLike } from "./identity/feed.ts";

@@ -55,12 +55,12 @@ describe("reportViewFromReply", () => {
     }
   });
 
-  it("the default transport answers unavailable, in words that say the read is not connected", async () => {
+  it("the no-connection transport answers unavailable, in words that say the read is not connected", async () => {
     const reply = await UNAVAILABLE_REPORTS.read({ rootThreadId: "r", target: "c" });
     const view = reportViewFromReply(reply);
     expect(view).toEqual({
       tag: "unavailable",
-      reason: "The report read is not connected in this build yet",
+      reason: "The report read is not connected",
     });
   });
 });

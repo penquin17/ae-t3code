@@ -1,5 +1,5 @@
-// A child's stored report, read for the user (M10 Plan step 10, D2, C7). `aetheria.children.report` arrives in phase 2b, so the read sits behind a transport the host supplies; the default
-// answers `unavailable` in words that say so. A report is carried as the Backend stored it. Plain TypeScript plus one React context.
+// A child's stored report, read for the user (M10 Plan step 10, D2, C7). `aetheria.children.report` is the Backend's read (reportCommand.ts); the read sits behind a transport so a host or a test
+// can supply another, and `UNAVAILABLE_REPORTS` answers `unavailable` in words that say so. A report is carried as the Backend stored it. Plain TypeScript plus one React context.
 import { createContext, use } from "react";
 
 import type { SettleStatus } from "./model";
@@ -30,18 +30,20 @@ export interface ReportsTransport {
   }) => Promise<ReportReply>;
 }
 
-/** The production default until phase 2b: nothing is read, and nothing is claimed about the report. */
+/** A transport for a view with no connection: nothing is read, and nothing is claimed about the report. */
 export const UNAVAILABLE_REPORTS: ReportsTransport = {
   read: () =>
     Promise.resolve({
       ok: false,
       code: "CHILDREN_UNAVAILABLE",
-      detail: "The report read is not connected in this build yet",
+      detail: "The report read is not connected",
     }),
 };
 
-export const ReportsTransportContext = createContext<ReportsTransport>(UNAVAILABLE_REPORTS);
-export const useReportsTransport = (): ReportsTransport => use(ReportsTransportContext);
+/** Absent in production, where the Backend's own read is used (reportCommand.ts); a host or test provides another here. */
+export const ReportsTransportContext = createContext<ReportsTransport | null>(null);
+export const useProvidedReportsTransport = (): ReportsTransport | null =>
+  use(ReportsTransportContext);
 
 /**
  * What one read said. Only `reported` carries a report; `pending`, `not-record-only`, `missing` (no such child under this root), `unreadable` (held but not readable, or no answer)

@@ -12,6 +12,7 @@
     "test": "vp test run --passWithNoTests --project unit --project browser"
   },
   "dependencies": {
+    "@aetheria/awareness": "file:../../packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz",
     "@base-ui/react": "^1.9.0",
     "@betteroffice/docx": "0.4.3",
     "@betteroffice/fonts": "0.4.0",
@@ -31,6 +32,7 @@
     "@noble/hashes": "catalog:",
     "@pierre/diffs": "catalog:",
     "@pierre/trees": "1.0.0-beta.6",
+    "@t3tools/aetheria-contracts": "workspace:*",
     "@t3tools/aetheria-design": "workspace:*",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
@@ -119,5 +121,5 @@
     "vite": "catalog:",
     "vite-plus": "catalog:"
   },
-  "aetheriaIp": "AETHERIA-IP:IP-28 the Aetheria look package (@t3tools/aetheria-design) is a workspace dependency of the web app, imported once from src/main.tsx"
+  "aetheriaIp": "AETHERIA-IP:IP-28 the Aetheria look package (@t3tools/aetheria-design) is a workspace dependency of the web app, imported once from src/main.tsx; the Aetheria contracts (@t3tools/aetheria-contracts) and the Backend's pinned awareness archive (@aetheria/awareness, the same file: blob, permissions subpath only) are the M10 step 9 additions"
 }

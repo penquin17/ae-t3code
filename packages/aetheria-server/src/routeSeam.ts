@@ -10,6 +10,7 @@ import {
   type RouteCapabilities,
   type RoutePolicyErrorCode,
 } from "./library.ts";
+import { piRouteOfT3 } from "./routeVocabulary.ts";
 
 /** The key the Pi adapter reads (`Symbol.for`, so both sides share it without importing each other). */
 export const PI_SELECTION_SEAM_SLOT: unique symbol = Symbol.for("aetheria.pi.selection-seam");
@@ -110,10 +111,12 @@ export function createPiSelectionSeam(options: PiSelectionSeamOptions): PiSelect
             message: `the child's route state is unknown (${answer?.kind === "unknown" ? answer.detail : "no readable answer"}), so no model command was sent`,
           };
         if (answer.kind === "route") {
+          // The stored route is in T3's form (the instance pi and a slug); the policy and Pi take the provider and the bare model it names.
+          const route = piRouteOfT3(answer.route);
           explicit = {
-            provider: answer.route.provider,
-            model: answer.route.model,
-            ...(answer.route.effort === undefined ? {} : { effort: answer.route.effort }),
+            provider: route.provider,
+            model: route.model,
+            ...(route.effort === undefined ? {} : { effort: route.effort }),
           };
           fromRoute = true;
         }

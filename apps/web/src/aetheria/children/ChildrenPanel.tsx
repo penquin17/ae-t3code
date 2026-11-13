@@ -7,7 +7,14 @@ import { Button } from "../../components/ui/button";
 import { RefusalNotice } from "../refusals/RefusalNotice";
 import { ChildrenCallsContext, useT3ChildrenCalls, type ChildrenCalls } from "./calls";
 import { childStopNotice, rowViews, unattachedDiagnostics, type ChildRowView } from "./model";
-import { structuredText, useReportsTransport, type ReportView } from "./reports";
+import { useT3ReportsTransport } from "./reportCommand";
+import {
+  structuredText,
+  UNAVAILABLE_REPORTS,
+  useProvidedReportsTransport,
+  type ReportsTransport,
+  type ReportView,
+} from "./reports";
 import { useChildren, useReports } from "./useChildren";
 
 export interface ChildrenPanelProps {
@@ -22,21 +29,40 @@ const ROLLBACK_LIMIT =
 
 export function ChildrenPanel(props: ChildrenPanelProps) {
   const injected = use(ChildrenCallsContext);
-  return injected === null ? <T3Children {...props} /> : <Children {...props} calls={injected} />;
+  return injected === null ? (
+    <T3Children {...props} />
+  ) : (
+    <InjectedChildren {...props} calls={injected} />
+  );
 }
 
+/** Production: T3's commands for the list, Stop and the stored-report read (a host or test may still provide a report transport). */
 function T3Children(props: ChildrenPanelProps) {
-  return <Children {...props} calls={useT3ChildrenCalls()} />;
+  const calls = useT3ChildrenCalls();
+  const real = useT3ReportsTransport(EnvironmentId.make(props.environmentId));
+  const provided = useProvidedReportsTransport();
+  return <Children {...props} calls={calls} reportsTransport={provided ?? real} />;
 }
 
-function Children(props: ChildrenPanelProps & { readonly calls: ChildrenCalls }) {
+/** Calls supplied by a host or test: the report read is theirs too, else it says it is not connected. */
+function InjectedChildren(props: ChildrenPanelProps & { readonly calls: ChildrenCalls }) {
+  const provided = useProvidedReportsTransport();
+  return <Children {...props} reportsTransport={provided ?? UNAVAILABLE_REPORTS} />;
+}
+
+function Children(
+  props: ChildrenPanelProps & {
+    readonly calls: ChildrenCalls;
+    readonly reportsTransport: ReportsTransport;
+  },
+) {
   const rootThreadId = props.threadId;
   const children = useChildren({
     environmentId: EnvironmentId.make(props.environmentId),
     rootThreadId,
     calls: props.calls,
   });
-  const reports = useReports(rootThreadId, useReportsTransport());
+  const reports = useReports(rootThreadId, props.reportsTransport);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const headingId = useId();
   const { view, refreshing } = children.list;

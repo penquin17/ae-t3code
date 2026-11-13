@@ -17,6 +17,7 @@ import {
   type ProvidersMode,
   type ProvidersResearchSeams,
 } from "./providers.ts";
+import { createGroupsBackendRegistration, type GroupsService } from "./groups/groups.ts";
 import {
   createHumanControlBackendRegistration,
   type HumanControlService,
@@ -40,6 +41,7 @@ import { createResumeSignal } from "./identity/resume.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
 import { createSessionDirectory } from "./identity/sessionDirectory.ts";
 import { createSessionKind, type SessionKind } from "./identity/sessionKind.ts";
+import { adaptAvailability } from "./routeVocabulary.ts";
 import { createLifecycleTracker, type LifecycleTracker } from "./identity/lifecycle.ts";
 import {
   createIdentityResolver,
@@ -191,6 +193,11 @@ export interface AetheriaBackendService {
    * `cancelTree`); undefined before start and after drain, or while no service is configured. A caller that finds it undefined answers unavailable.
    */
   orchestration(): OrchestrationService | undefined;
+  /**
+   * The ONE session-group store (M10 step 7), shared by the client handlers `aetheria.groups.read` and `.apply`; undefined before start and after drain. A caller that finds it undefined
+   * answers unavailable. It is not an XC-6 operation: the Agent host never reaches it.
+   */
+  groups(): GroupsService | undefined;
 }
 
 export type CreateServiceResult =
@@ -373,7 +380,8 @@ export function createAetheriaBackendService(
                 },
               },
               resume: resumeBarrier,
-              availability: providersRegistration.availability,
+              // Routes are stored in T3's form; M09 is asked in Pi's (routeVocabulary.ts).
+              availability: adaptAvailability(providersRegistration.availability),
               sessionOfThread,
               threadOfSession,
               lineageSessionOf,
@@ -384,6 +392,11 @@ export function createAetheriaBackendService(
             }),
   });
   orchestrationNow = () => orchestrationRegistration.service();
+  // M10 step 7: the ONE session-group store under the state root's aetheria-ui folder; the client RPC handlers reach it through `groups()`.
+  const groupsRegistration = createGroupsBackendRegistration({
+    stateRoot: options.stateRoot,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
   // M06 step 13: T3 attaching a bound thread to a provider session after the replay is a resume; the interaction service ends the waits no segment
   // holds and retries undelivered late answers for that Pi session. The horizon is the one the board uses; the signal never fires before it is known.
   let replayHorizon: number | undefined;
@@ -414,6 +427,7 @@ export function createAetheriaBackendService(
       providersRegistration,
       humanControlRegistration,
       orchestrationRegistration,
+      groupsRegistration,
     ],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
@@ -542,6 +556,7 @@ export function createAetheriaBackendService(
     interactions: () => humanControlRegistration.interactions(),
     watchInteractions: (listener, onEnd) => humanControlRegistration.watch(listener, onEnd),
     orchestration: () => orchestrationRegistration.service(),
+    groups: () => groupsRegistration.groups(),
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

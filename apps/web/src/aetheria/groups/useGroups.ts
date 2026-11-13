@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { createGroupsStore, type GroupsState, type GroupsStore } from "./store";
-import { useGroupsTransport } from "./transport";
+import { useGroupsTransport } from "./commands";
 
 export interface GroupsHandle {
   readonly state: GroupsState;

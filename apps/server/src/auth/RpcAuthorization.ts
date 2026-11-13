@@ -230,6 +230,10 @@ export const RPC_REQUIRED_SCOPES = {
   [AETHERIA_WS_METHODS.childrenCancelTree]: AuthOrchestrationOperateScope,
   [AETHERIA_WS_METHODS.childrenInterrupt]: AuthOrchestrationOperateScope,
   [AETHERIA_WS_METHODS.childrenClose]: AuthOrchestrationOperateScope,
+  // AETHERIA-IP:IP-47 explicit scopes for the stored-report read (M10 step 10) and the session-group store (M10 step 7): both reads need orchestration:read, the five-operation apply needs orchestration:operate
+  [AETHERIA_WS_METHODS.childrenReport]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.groupsRead]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.groupsApply]: AuthOrchestrationOperateScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

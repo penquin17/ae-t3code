@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { BACKEND_COMPOSITION_ID, backendManifest } from "./composition.ts";
 import { prepareAetheriaBackend } from "./aetheriaBackend.ts";
 import { AGENT_AWARENESS_BACKEND_ID, agentAwarenessBackendModuleRow } from "./agentAwareness.ts";
+import { groupsBackendModuleRow } from "./groups/groupsRow.ts";
 import { humanControlBackendModuleRow } from "./humanControlRow.ts";
 import { orchestrationBackendModuleRow } from "./orchestrationRow.ts";
 import { providersBackendModuleRow } from "./providers.ts";
@@ -22,7 +23,7 @@ const digestOf = (manifest: Manifest, stamp?: string) => {
 };
 
 describe("the Backend composition", () => {
-  it("is a root composition of its own selecting only the Backend agent-awareness and providers modules", () => {
+  it("is a root composition of its own selecting only the Backend modules: awareness, providers, human control, orchestration and groups", () => {
     const manifest = backendManifest();
     expect(manifest.compositions).toEqual([
       expect.objectContaining({
@@ -32,6 +33,7 @@ describe("the Backend composition", () => {
           "providers-backend",
           "human-control-backend",
           "orchestration-backend",
+          "groups-backend",
         ],
       }),
     ]);
@@ -41,6 +43,7 @@ describe("the Backend composition", () => {
       providersBackendModuleRow(),
       humanControlBackendModuleRow(),
       orchestrationBackendModuleRow(),
+      groupsBackendModuleRow(),
     ]);
     expect(BACKEND_COMPOSITION_ID).toBe("aetheria-backend");
   });

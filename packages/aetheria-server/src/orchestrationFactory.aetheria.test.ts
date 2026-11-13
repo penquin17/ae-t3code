@@ -629,6 +629,41 @@ describe("the job lifecycle operations (step 16)", () => {
   });
   const identity = { pid: 4242, startTime: "Thu Nov 12 10:00:00 2026" };
 
+  it("F1: a closed child's reserve is NOT_AUTHORIZED and records no job; its open parent still reserves", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    let n = 0;
+    const { service } = await started(w, callerOk, {
+      hostProcess: host(),
+      newJobId: () => `job-${++n}`,
+    });
+    ok(await service.handle("children.spawn", who, { ...SPAWN, mode: "continuable" }));
+    w.lineage.threads = [
+      {
+        threadId: "thread-child-1",
+        parentThreadId: CALLER_THREAD,
+        rootThreadId: ROOT_THREAD,
+        relationshipToParent: "subagent",
+        sessionId: "pi-thread-child-1",
+        closed: false,
+      },
+    ];
+    const child = { sessionId: "pi-thread-child-1", rootSessionId: MAIN, kind: "child" };
+    const args = { runKey: RUN, label: "npm test", mode: "background" } as const;
+    ok(await service.handle("children.close", who, { target: "thread-child-1" }));
+    expect(await service.handle("jobs.reserve", child, args)).toMatchObject({
+      ok: false,
+      code: "NOT_AUTHORIZED",
+    });
+    expect(NodeFS.existsSync(NodePath.join(w.stateRoot, "jobs", "job-1", "record.json"))).toBe(
+      false,
+    );
+    expect(ok(await service.handle("jobs.reserve", who, args))).toEqual({
+      jobId: "job-1",
+      state: "starting",
+    });
+  });
+
   it("carries reserve, attach, adopted and exited for the carrier's caller, writes jobs/<id>/record.json, and records one completion entry", async () => {
     const w = world();
     let n = 0;

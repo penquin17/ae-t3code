@@ -14,6 +14,7 @@ import {
   type RolePort,
 } from "./identity/backendEntry.ts";
 import { createExplicitAuthorityPort, explicitAllowProblems } from "./library.ts";
+import { t3RouteOfPi } from "./routeVocabulary.ts";
 
 /** The generic delegation tool's name: the tool a spawn with an explicit allow-list is authorized as. */
 export const GENERIC_SPAWN_TOOL = "subagent";
@@ -42,11 +43,13 @@ function withRoleRoutes(
   const out: SpawnRoute[] = [...own];
   for (const route of role ?? []) {
     if (out.length >= MAX_CHILD_ROUTES) break;
-    if (out.some((r) => r.provider === route.provider && r.model === route.model)) continue;
+    // The role writes a Pi provider and a bare model; every stored route is in T3's form (the instance pi and a slug), like the caller's own, so T3 can create the thread from any of them.
+    const stored = t3RouteOfPi(route);
+    if (out.some((r) => r.provider === stored.provider && r.model === stored.model)) continue;
     out.push({
-      provider: route.provider,
-      model: route.model,
-      ...(route.effort === undefined ? {} : { effort: route.effort }),
+      provider: stored.provider,
+      model: stored.model,
+      ...(stored.effort === undefined ? {} : { effort: stored.effort }),
     });
   }
   return out;

@@ -291,6 +291,8 @@ export function createOrchestrationFactory(
         registry,
         host: options.hostProcess ?? nodeHostProcessPort({ stateRoot: deps.stateRoot }),
         now: deps.now,
+        // F1: a closed child starts no new work, and a reserved run is new work.
+        callerRefusal: (caller) => children.callerRefusal(caller.sessionId),
       });
       // Step 17: completion wakes are bounded and coalesced. The outbox is the service's (it holds the notices in the job, child and main records); the cap is the carried parameter, the
       // resume barrier is M06's, and a human message is read as a change of the newest user-created message on the owner's thread.

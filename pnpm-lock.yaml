@@ -1025,6 +1025,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@aetheria/awareness':
+        specifier: file:../../packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz
       '@base-ui/react':
         specifier: ^1.9.0
         version: 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -1082,6 +1085,9 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.6
         version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.2.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(shiki@4.2.0)
+      '@t3tools/aetheria-contracts':
+        specifier: workspace:*
+        version: link:../../packages/aetheria-contracts
       '@t3tools/aetheria-design':
         specifier: workspace:*
         version: link:../../packages/aetheria-design
@@ -2598,7 +2604,7 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/orchestration@file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz':
-    resolution: {integrity: sha512-ZnIUPLxBn+yJPqFzOCjk/ZhS3vC64zXfS1VH/aAcc8Xr4nGIgbnWCEanIXdHz7f/WzDHRojIx1UDl8q5WQryIw==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
+    resolution: {integrity: sha512-XQm5m4M/5ewg9eezqOQTk2fyzwRNA1UCCxuwOmdvlpSHDz6D5aRJrtw7zA6FkyqkMpLeigNGoMd0YAZ87Xr0Tg==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 

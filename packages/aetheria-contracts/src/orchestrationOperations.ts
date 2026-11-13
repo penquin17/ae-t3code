@@ -189,7 +189,7 @@ export const ChildrenSpawnArgs = Schema.Union([
 export type ChildrenSpawnArgs = typeof ChildrenSpawnArgs.Type;
 export const ChildrenSpawnResult = reply(
   Schema.Struct({ childId: Id, messageId: Id, route: PositiveInt, allRoutesOut: Schema.Boolean }),
-  ["CHILD_LIMIT", "CHILD_START_FAILED"],
+  ["CHILD_LIMIT", "NOT_AUTHORIZED", "CHILD_START_FAILED"],
 );
 export type ChildrenSpawnResult = typeof ChildrenSpawnResult.Type;
 
@@ -202,6 +202,7 @@ export const ChildrenForkArgs = Schema.Struct({
 export type ChildrenForkArgs = typeof ChildrenForkArgs.Type;
 export const ChildrenForkResult = reply(Schema.Struct({ childId: Id }), [
   "CHILD_LIMIT",
+  "NOT_AUTHORIZED",
   "FORK_FAILED",
   "FORK_PARTIAL",
 ]);
@@ -215,6 +216,7 @@ export const ChildrenMessageResult = reply(Schema.Struct({ messageId: Id }), [
   "CHILD_NOT_RESUMABLE",
   "CHILD_DELIVERY_UNAVAILABLE",
   "CHILD_PARENT_UNAVAILABLE",
+  "NOT_AUTHORIZED",
 ]);
 export type ChildrenMessageResult = typeof ChildrenMessageResult.Type;
 
@@ -367,7 +369,7 @@ export const JobsReserveArgs = Schema.Struct({
 export type JobsReserveArgs = typeof JobsReserveArgs.Type;
 export const JobsReserveResult = reply(
   Schema.Struct({ jobId: Id, state: Schema.Literal("starting") }),
-  ["JOB_CONFLICT"],
+  ["JOB_CONFLICT", "NOT_AUTHORIZED"],
 );
 export type JobsReserveResult = typeof JobsReserveResult.Type;
 

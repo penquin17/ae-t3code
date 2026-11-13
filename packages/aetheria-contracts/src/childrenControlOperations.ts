@@ -1,4 +1,4 @@
-// AETHERIA M10 step 3 (R1, R3) — `aetheria.children.{cancelTree,list,interrupt,close}`. A payload names threads only, never an actor, user flag or scope.
+// AETHERIA M10 steps 3 and 10 (R1, R3) — `aetheria.children.{cancelTree,list,interrupt,close,report}`. A payload names threads only, never an actor, user flag or scope.
 // A reply is `{ok:true,value}` or `{ok:false,code,detail?}`: CHILDREN_UNAVAILABLE means nothing was done; CHILDREN_OUTCOME_UNKNOWN and M05's
 // ORCHESTRATION_UNAVAILABLE mean it may have landed, so a client reads the projection and never resends. Imports nothing from `@t3tools/contracts` (see rpc.ts).
 import * as Schema from "effect/Schema";
@@ -128,3 +128,15 @@ export const ClientChildrenInterruptResult = reply(
 export type ClientChildrenInterruptResult = typeof ClientChildrenInterruptResult.Type;
 export const ClientChildrenCloseResult = reply(CloseValue);
 export type ClientChildrenCloseResult = typeof ClientChildrenCloseResult.Type;
+
+/** The stored report of one child under a root the connection may reach (a read; M10 step 10). */
+export const ClientChildrenReportPayload = Schema.Struct({ rootThreadId: Id, childThreadId: Id });
+export type ClientChildrenReportPayload = typeof ClientChildrenReportPayload.Type;
+/** M05's user report read, as it answers: a stored report, `pending` (the child has not settled) or `not-record-only` (the report travelled by T3's own delivery, so none is stored). */
+const ReportValue = Schema.Union([
+  Schema.Struct({ state: Schema.Literal("reported"), report: Report }),
+  Schema.Struct({ state: Schema.Literal("pending") }),
+  Schema.Struct({ state: Schema.Literal("not-record-only") }),
+]);
+export const ClientChildrenReportResult = reply(ReportValue);
+export type ClientChildrenReportResult = typeof ClientChildrenReportResult.Type;

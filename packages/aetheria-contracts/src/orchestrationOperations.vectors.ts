@@ -138,6 +138,7 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
         value: ok({ childId: "thr_c1", messageId: "msg_1", route: 1, allRoutesOut: true }),
       },
       { name: "limit reached", value: fail("CHILD_LIMIT") },
+      { name: "a closed caller may not start work", value: fail("NOT_AUTHORIZED") },
       {
         name: "start failed, rolled back",
         value: fail("CHILD_START_FAILED", { cause: "plan-mode-inherit-failed" }),
@@ -253,6 +254,7 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
         }),
       },
       { name: "limit reached", value: fail("CHILD_LIMIT") },
+      { name: "a closed caller may not start work", value: fail("NOT_AUTHORIZED") },
     ],
     refuse: [
       {
@@ -303,6 +305,7 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
         value: fail("CHILD_DELIVERY_UNAVAILABLE", { detail: "inbox closing" }),
       },
       { name: "parent unavailable", value: fail("CHILD_PARENT_UNAVAILABLE") },
+      { name: "a closed caller may not start work", value: fail("NOT_AUTHORIZED") },
     ],
     refuse: [
       { name: "a success without the id", value: ok({}) },
@@ -696,6 +699,7 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
     accept: [
       { name: "reserved", value: ok({ jobId: "job_1", state: "starting" }) },
       { name: "conflicting replay", value: fail("JOB_CONFLICT") },
+      { name: "a closed caller may not start a run", value: fail("NOT_AUTHORIZED") },
     ],
     refuse: [
       { name: "reserved in another state", value: ok({ jobId: "job_1", state: "running" }) },

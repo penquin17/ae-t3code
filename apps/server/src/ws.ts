@@ -13,6 +13,8 @@ import { backendDigestRefusal } from "./aetheria/connectionGate.ts";
 import * as AetheriaHumanControl from "./aetheria/humanControlRpc.ts";
 // AETHERIA-IP:IP-42 the user's children controls (Aetheria-owned); the actor comes from the connection
 import * as AetheriaChildrenControl from "./aetheria/childrenControlRpc.ts";
+// AETHERIA-IP:IP-49 the session-group store's client methods (Aetheria-owned); the actor comes from the connection
+import * as AetheriaGroups from "./aetheria/groupsRpc.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 
@@ -3448,6 +3450,13 @@ export const layerWsRpc = (
           AetheriaChildrenControl.childrenInterrupt(aetheriaBackend, aetheriaActor, input),
         [AETHERIA_WS_METHODS.childrenClose]: (input) =>
           AetheriaChildrenControl.childrenClose(aetheriaBackend, aetheriaActor, input),
+        // AETHERIA-IP:IP-49 the stored-report read (M10 step 10) and the session-group store (M10 step 7). T3 authorizes each scope before these run (IP-47); each handler re-reads the device session on every call
+        [AETHERIA_WS_METHODS.childrenReport]: (input) =>
+          AetheriaChildrenControl.childrenReport(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.groupsRead]: (input) =>
+          AetheriaGroups.groupsRead(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.groupsApply]: (input) =>
+          AetheriaGroups.groupsApply(aetheriaBackend, aetheriaActor, input),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =

@@ -23,11 +23,13 @@ import {
   ClientChildrenCloseResult,
   ClientChildrenInterruptResult,
   ClientChildrenListResult,
+  ClientChildrenReportResult,
   type ChildrenControlCode,
   type ClientChildrenCancelTreePayload,
   type ClientChildrenClosePayload,
   type ClientChildrenInterruptPayload,
   type ClientChildrenListPayload,
+  type ClientChildrenReportPayload,
 } from "@t3tools/aetheria-contracts";
 import type { AetheriaBackendService, ClientActor } from "@t3tools/aetheria-server";
 import * as Effect from "effect/Effect";
@@ -234,6 +236,32 @@ export const childrenList = (
       ),
     false,
   ) as Effect.Effect<ClientChildrenListResult>;
+
+/**
+ * A child's stored report (M10 step 10, IP-47 to IP-49), a read: the same gate as the list (device session, scope, a main root the connection may reach, a child is never a root), then M05's
+ * `readReport` with the user caller and the named root, once. M05 enforces that the child sits under that root (`CHILD_NOT_OWNED` passes through); it never waits, so `pending` and
+ * `not-record-only` are answers, not failures. A value that does not fit the contract is an unknown outcome, never an empty report.
+ */
+export const childrenReport = (
+  backend: Backend,
+  actor: ClientActor,
+  payload: ClientChildrenReportPayload,
+): Effect.Effect<ClientChildrenReportResult> =>
+  guarded(
+    backend,
+    actor,
+    READ_SCOPE,
+    payload.rootThreadId,
+    async (gate) =>
+      settle(
+        ClientChildrenReportResult,
+        await gate.direct.readReport({
+          caller: { user: true },
+          args: { target: payload.childThreadId, rootThreadId: payload.rootThreadId },
+        }),
+      ),
+    false,
+  ) as Effect.Effect<ClientChildrenReportResult>;
 
 /** Interrupt a continuable child: its turn ends, the child stays open. A one-shot child is closed instead (`childrenClose`), the client choosing by the listed mode. */
 export const childrenInterrupt = (

@@ -30,11 +30,13 @@ import {
   childrenClose,
   childrenInterrupt,
   childrenList,
+  childrenReport,
 } from "./childrenControlRpc.ts";
 import { connectionActor } from "./humanControlRpc.ts";
 
 const M = AETHERIA_WS_METHODS;
 const OPERATE = [M.childrenCancelTree, M.childrenInterrupt, M.childrenClose] as const;
+const READS = [M.childrenList, M.childrenReport] as const;
 const ROOT = "thread-root";
 const OTHER_ROOT = "thread-other";
 const CHILD = "thread-child";
@@ -47,12 +49,13 @@ const READ_ONLY = { sessionId: "device-1", scopes: [AuthOrchestrationReadScope] 
 const OPERATE_ONLY = { sessionId: "device-1", scopes: [AuthOrchestrationOperateScope] };
 
 describe("the children methods are in T3's group with one explicit scope each", () => {
-  it("joins WsRpcGroup and the scope map exhaustively: list reads, the other three operate", () => {
-    for (const tag of [...OPERATE, M.childrenList]) expect(WsRpcGroup.requests.has(tag)).toBe(true);
+  it("joins WsRpcGroup and the scope map exhaustively: list and report read, the other three operate", () => {
+    for (const tag of [...OPERATE, ...READS]) expect(WsRpcGroup.requests.has(tag)).toBe(true);
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
     for (const tag of OPERATE)
       expect(requiredScopeForRpcMethod(tag)).toBe(AuthOrchestrationOperateScope);
-    expect(requiredScopeForRpcMethod(M.childrenList)).toBe(AuthOrchestrationReadScope);
+    for (const tag of READS)
+      expect(requiredScopeForRpcMethod(tag)).toBe(AuthOrchestrationReadScope);
   });
 
   it.effect("refuses a token without the scope before any handler runs", () =>
@@ -70,6 +73,11 @@ describe("the children methods are in T3's group with one explicit scope each", 
           AuthOrchestrationOperateScope,
         ],
         [M.childrenList, { rootThreadId: ROOT }, AuthOrchestrationReadScope],
+        [
+          M.childrenReport,
+          { rootThreadId: ROOT, childThreadId: CHILD },
+          AuthOrchestrationReadScope,
+        ],
       ];
       for (const [tag, payload, required] of payloads) {
         const group = WsRpcGroup.omit(
@@ -129,6 +137,7 @@ interface Options {
   readonly list?: () => Promise<unknown>;
   readonly interruptTurn?: () => Promise<unknown>;
   readonly closeChild?: () => Promise<unknown>;
+  readonly readReport?: () => Promise<unknown>;
 }
 const CANCEL_VALUE = {
   rootThreadId: ROOT,
@@ -139,6 +148,7 @@ const CANCEL_VALUE = {
   rootStopped: true,
   complete: true,
 };
+const REPORT = { status: "completed", text: "the child's findings", route: 2 };
 const ROW = (childId: string, mode: "continuable" | "one-shot", state = "running") => ({
   childId,
   parentId: ROOT,
@@ -187,6 +197,11 @@ const fakeBackend = (options: Options = {}) => {
       "closeChild",
       options.closeChild ?? (async () => ({ ok: true, value: { closed: true, killedJobs: [] } })),
     ),
+    readReport: note(
+      "readReport",
+      options.readReport ??
+        (async () => ({ ok: true, value: { state: "reported", report: REPORT } })),
+    ),
   };
   const interactions = {
     canAccess: async (...args: unknown[]) => {
@@ -223,6 +238,7 @@ const fakeBackend = (options: Options = {}) => {
 };
 const mutating = (calls: ReadonlyArray<Call>) =>
   calls.filter((call) => ["cancelTree", "interruptTurn", "closeChild"].includes(call.method));
+const DIRECT = ["cancelTree", "listChildren", "interruptTurn", "closeChild", "readReport"];
 
 /** The device-session rows: what `auth_sessions` says for the connection's session id. */
 type Row = { revokedAt: unknown; expiresAt: DateTime.Utc };
@@ -394,6 +410,12 @@ describe("nothing reaches M05 unless the connection may make the call", () => {
           });
           expect(listed).toMatchObject({ ok: false, code: "CHILDREN_NOT_AUTHORIZED" });
           expect(fake.calls).toEqual([]);
+          const reported = yield* childrenReport(fake.backend, yield* actorOf(OPERATE_ONLY), {
+            rootThreadId: ROOT,
+            childThreadId: CHILD,
+          });
+          expect(reported).toMatchObject({ ok: false, code: "CHILDREN_NOT_AUTHORIZED" });
+          expect(fake.calls).toEqual([]);
         }),
       ),
   );
@@ -432,6 +454,10 @@ describe("nothing reaches M05 unless the connection may make the call", () => {
                 childThreadId: CHILD,
               }),
               yield* childrenList(fake.backend, actor, { rootThreadId: ROOT }),
+              yield* childrenReport(fake.backend, actor, {
+                rootThreadId: ROOT,
+                childThreadId: CHILD,
+              }),
             ];
             for (const reply of replies)
               expect(reply, label).toMatchObject({ ok: false, code: "CHILDREN_DEVICE_REVOKED" });
@@ -760,6 +786,179 @@ describe("per-child Stop: interrupt for a continuable child, close for a one-sho
           args: { scope: "descendants", rootThreadId: ROOT },
         });
         expect(mutating(fake.calls)).toEqual([]);
+      }),
+    ),
+  );
+});
+
+describe("a child's stored report is a read: one readReport call with the user caller and the named root", () => {
+  const ask = { rootThreadId: ROOT, childThreadId: CHILD };
+
+  it.effect(
+    "asks the host rule about the root, then calls readReport once; a forged payload supplies no caller",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const fake = fakeBackend();
+          const reply = yield* childrenReport(fake.backend, yield* actorOf(READ_ONLY), {
+            ...ask,
+            ...({
+              caller: { user: false },
+              user: true,
+              actor: { clientSessionId: "someone" },
+              args: { target: "thread-forged" },
+            } as object),
+          });
+          expect(reply).toEqual({ ok: true, value: { state: "reported", report: REPORT } });
+          expect(fake.calls.filter((call) => DIRECT.includes(call.method))).toEqual([
+            {
+              method: "readReport",
+              args: [{ caller: { user: true }, args: { target: CHILD, rootThreadId: ROOT } }],
+            },
+          ]);
+          const order = fake.calls.map((call) => call.method);
+          expect(order.indexOf("lookup")).toBeLessThan(order.indexOf("canAccess"));
+          expect(order.indexOf("canAccess")).toBeLessThan(order.indexOf("readReport"));
+          expect(JSON.stringify(fake.calls)).not.toContain("someone");
+          expect(JSON.stringify(fake.calls)).not.toContain("thread-forged");
+        }),
+      ),
+  );
+
+  it.effect("pending and not-record-only are answers, and an extra field never travels", () =>
+    withDevice(
+      Effect.gen(function* () {
+        const actor = yield* actorOf(READ_ONLY);
+        for (const value of [{ state: "pending" }, { state: "not-record-only" }]) {
+          const fake = fakeBackend({ readReport: async () => ({ ok: true, value }) });
+          expect(yield* childrenReport(fake.backend, actor, ask)).toEqual({ ok: true, value });
+        }
+        const extra = fakeBackend({
+          readReport: async () => ({
+            ok: true,
+            value: { state: "pending", secret: "internal" },
+          }),
+        });
+        const reply = yield* childrenReport(extra.backend, actor, ask);
+        expect(JSON.stringify(reply)).not.toContain("internal");
+      }),
+    ),
+  );
+
+  it.effect(
+    "a wrong root reaches readReport never: unknown thread, a child as root, a denied root",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const actor = yield* actorOf(READ_ONLY);
+          for (const [label, root, options] of [
+            ["unknown thread", "thread-nobody", {}],
+            ["child as root (subagent flag)", CHILD, {}],
+            [
+              "child as root (identity record, flag null)",
+              CHILD,
+              {
+                bindings: { [CHILD]: { sessionId: "pi-child", subagent: null } },
+              },
+            ],
+            ["denied by the host rule", OTHER_ROOT, { deniedRoots: ["pi-other"] }],
+          ] as const) {
+            const fake = fakeBackend(options);
+            expect(
+              yield* childrenReport(fake.backend, actor, {
+                rootThreadId: root,
+                childThreadId: CHILD,
+              }),
+              label,
+            ).toMatchObject({ ok: false, code: "CHILDREN_NOT_FOUND" });
+            expect(
+              fake.calls.filter((call) => DIRECT.includes(call.method)),
+              label,
+            ).toEqual([]);
+          }
+          const corrupt = fakeBackend({ corruptThreads: [ROOT] });
+          expect(yield* childrenReport(corrupt.backend, actor, ask)).toMatchObject({
+            ok: false,
+            code: "CHILDREN_UNAVAILABLE",
+          });
+          expect(corrupt.calls.filter((call) => DIRECT.includes(call.method))).toEqual([]);
+          const stopped = [
+            yield* childrenReport(Option.none(), actor, ask),
+            yield* childrenReport(fakeBackend({ noDirect: true }).backend, actor, ask),
+          ];
+          for (const reply of stopped)
+            expect(reply).toMatchObject({ ok: false, code: "CHILDREN_UNAVAILABLE" });
+        }),
+      ),
+  );
+
+  it.effect(
+    "CHILD_NOT_OWNED and the other M05 refusals pass through with their detail; an unknown code is unknown",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const actor = yield* actorOf(READ_ONLY);
+          const owned = fakeBackend({
+            readReport: async () => ({
+              ok: false,
+              code: "CHILD_NOT_OWNED",
+              detail: "the child is not under that root",
+            }),
+          });
+          expect(yield* childrenReport(owned.backend, actor, ask)).toEqual({
+            ok: false,
+            code: "CHILD_NOT_OWNED",
+            detail: "the child is not under that root",
+          });
+          expect(owned.calls.filter((call) => call.method === "readReport")).toHaveLength(1);
+          const odd = fakeBackend({
+            readReport: async () => ({ ok: false, code: "SOMETHING_NEW" }),
+          });
+          expect(yield* childrenReport(odd.backend, actor, ask)).toMatchObject({
+            ok: false,
+            code: "CHILDREN_OUTCOME_UNKNOWN",
+          });
+        }),
+      ),
+  );
+
+  it.effect("an outcome that does not fit the contract is unknown, never an empty report", () =>
+    withDevice(
+      Effect.gen(function* () {
+        const actor = yield* actorOf(READ_ONLY);
+        for (const outcome of [
+          "nonsense",
+          null,
+          { ok: true },
+          { ok: true, value: { state: "reported" } },
+          { ok: true, value: { state: "reported", report: { status: "completed", text: "x" } } },
+          { ok: true, value: { state: "weird" } },
+        ]) {
+          const fake = fakeBackend({ readReport: async () => outcome });
+          expect(
+            yield* childrenReport(fake.backend, actor, ask),
+            JSON.stringify(outcome),
+          ).toMatchObject({
+            ok: false,
+            code: "CHILDREN_OUTCOME_UNKNOWN",
+          });
+        }
+      }),
+    ),
+  );
+
+  it.effect("a call that throws is unavailable (a read changed nothing) and is not retried", () =>
+    withDevice(
+      Effect.gen(function* () {
+        const fake = fakeBackend({
+          readReport: async () => {
+            throw new Error("socket closed");
+          },
+        });
+        const reply = yield* childrenReport(fake.backend, yield* actorOf(READ_ONLY), ask);
+        expect(reply).toMatchObject({ ok: false, code: "CHILDREN_UNAVAILABLE" });
+        expect(fake.calls.filter((call) => call.method === "readReport")).toHaveLength(1);
+        expect(JSON.stringify(reply)).not.toContain("socket closed");
       }),
     ),
   );
