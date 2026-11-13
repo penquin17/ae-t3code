@@ -134,3 +134,77 @@ it("a store made before the primary environment is known reads with its id once 
   await flush();
   expect(mocks.readCommand).toHaveBeenCalledTimes(1);
 });
+
+// P4: every panel mounted at once shares one store (the sidebar and the sessions page both draw the session list).
+function twoPanels(backend: FakeBackend) {
+  const seen: Record<string, ReturnType<typeof useGroups>> = {};
+  function Panel({ name }: { readonly name: string }) {
+    const groups = useGroups();
+    useEffect(() => {
+      seen[name] = groups;
+    });
+    return null;
+  }
+  const tree = (names: readonly string[]) => (
+    <RegistryContext.Provider value={appAtomRegistry}>
+      <GroupsTransportProvider value={backend.transport}>
+        {names.map((name) => (
+          <Panel key={name} name={name} />
+        ))}
+      </GroupsTransportProvider>
+    </RegistryContext.Provider>
+  );
+  return { seen, tree };
+}
+
+it("two panels share one store: a change in one is the other's state, and a session is one read (P4)", async () => {
+  const backend = createFakeBackend(saved);
+  const state = setup({ primary: ENV, backend });
+  const { seen, tree } = twoPanels(backend);
+  await using _screen = await render(tree(["sidebar", "page"]), { router: false });
+  await vi.waitFor(() => expect(seen["page"]?.state.record.state).toBe("known"));
+  expect(seen["sidebar"]?.store).toBe(seen["page"]?.store);
+  // One read when they mounted, not one each.
+  expect(backend.events).toEqual(["read"]);
+
+  await act(async () => void (await seen["sidebar"]!.store.dismiss("a", "c")));
+  const record = seen["page"]!.state.record;
+  expect(record.state === "known" && record.value.dismissed).toHaveLength(1);
+  expect(backend.events).toEqual(["read", "apply:dismiss", "read"]);
+
+  // A new session is one read in total, however many panels are mounted.
+  await state.newSession(2);
+  await vi.waitFor(() => expect(backend.events).toHaveLength(4));
+  await flush();
+  expect(backend.events).toHaveLength(4);
+});
+
+it("the store lives while any panel does, and is dropped when the last one unmounts (P4)", async () => {
+  const backend = createFakeBackend(saved);
+  const state = setup({ primary: ENV, backend });
+  const { seen, tree } = twoPanels(backend);
+  const screen = await render(tree(["sidebar", "page"]), { router: false });
+  await using _screen = screen;
+  await vi.waitFor(() => expect(seen["page"]?.state.record.state).toBe("known"));
+  const first = seen["page"]!.store;
+
+  // One panel leaves: the other keeps the store and the one subscription to new sessions.
+  await screen.rerender(tree(["page"]));
+  await state.newSession(2);
+  await vi.waitFor(() => expect(backend.events).toHaveLength(2));
+  await flush();
+  expect(backend.events).toHaveLength(2);
+  expect(seen["page"]!.store).toBe(first);
+
+  // The last panel leaves: nothing listens, so a new session reads nothing.
+  await screen.rerender(tree([]));
+  await state.newSession(3);
+  await flush();
+  expect(backend.events).toHaveLength(2);
+
+  // A panel mounted after that gets a fresh store that reads for itself.
+  await screen.rerender(tree(["again"]));
+  await vi.waitFor(() => expect(seen["again"]?.state.record.state).toBe("known"));
+  expect(seen["again"]!.store).not.toBe(first);
+  expect(backend.events).toHaveLength(3);
+});

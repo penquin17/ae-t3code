@@ -38,14 +38,21 @@ const NOT_CONNECTED: GroupsReply = {
   detail: GROUPS_UNAVAILABLE_REASON,
 };
 
-/** The transport a view uses: the one a host or test provided, else the production one. Both hooks always run, so the order of hooks never changes. */
-export const useGroupsTransport = (): GroupsTransport => {
+/** Every view over the production transport shares one store: they all reach the same primary environment. */
+const PRODUCTION_SOURCE: object = {};
+
+/** The transport a view sends through, and the source its store is shared under: the one a host or test provided (the transport itself), else the production one (one source for every view). Both hooks always run, so the order of hooks never changes. */
+export const useGroupsSource = (): {
+  readonly source: object;
+  readonly transport: GroupsTransport;
+} => {
   const real = useT3GroupsTransport();
-  return useProvidedGroupsTransport() ?? real;
+  const provided = useProvidedGroupsTransport();
+  return { source: provided ?? PRODUCTION_SOURCE, transport: provided ?? real };
 };
 
 /**
- * The production transport over the primary environment's connection. A rejection means the reply never came. The store is built once and keeps this transport for the view's life, so each call
+ * The production transport over the primary environment's connection. A rejection means the reply never came. The shared store sends through the newest mounted view's transport, so each call
  * reads the primary environment id as it is when the call is made (not as it was at mount): a store made before the environment was known reads with its id once it is.
  */
 function useT3GroupsTransport(): GroupsTransport {
