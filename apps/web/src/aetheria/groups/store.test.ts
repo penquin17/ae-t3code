@@ -8,7 +8,12 @@ import { renameBody } from "./operations";
 import type { GroupRecord } from "./record";
 import { createGroupsStore, type GroupsStore } from "./store";
 import { createFakeBackend, emptyRecord, type FakeBackend } from "./testing";
-import { GROUPS_UNAVAILABLE_REASON, unavailableTransport } from "./transport";
+import {
+  GROUPS_UNAVAILABLE_REASON,
+  unavailableTransport,
+  type GroupsReply,
+  type GroupsTransport,
+} from "./transport";
 
 let counter = 0;
 const newRequestId = () => `req-${(counter += 1)}`;
@@ -101,6 +106,64 @@ describe("reading the Backend's record", () => {
     expect(recordOf(reloaded)).toEqual(backend.record());
     expect(recordOf(other)).toEqual(recordOf(first));
     expect(recordOf(reloaded)).toEqual(recordOf(other));
+  });
+});
+
+describe("a read that does not answer", () => {
+  const never: GroupsTransport = {
+    read: () => new Promise(() => {}),
+    apply: unavailableTransport.apply,
+  };
+  const overTimeout = (transport: GroupsTransport) =>
+    createGroupsStore({ transport, newRequestId, readTimeoutMs: 20 });
+
+  it("ends within the bound as not read, with the reason, and never waits forever", async () => {
+    const store = overTimeout(never);
+    await store.refresh();
+    const state = store.getState();
+    expect(state.record.state).toBe("unknown");
+    expect(state.record.state === "unknown" ? state.record.reason : "").toBe(
+      "The Backend did not answer the groups read in time.",
+    );
+    expect(state.problem?.code).toBe("GROUPS_READ_TIMEOUT");
+  });
+
+  it("does not hold a change's re-read open: the change still ends as one outcome", async () => {
+    const backend = createFakeBackend(seeded);
+    const store = overTimeout({ read: never.read, apply: backend.transport.apply });
+    const result = await store.group("c", "d");
+    expect(result.outcome).toMatchObject({ kind: "confirmed", refreshed: false });
+  });
+
+  it("takes a late answer when nothing newer has been read", async () => {
+    let answer: (reply: GroupsReply) => void = () => {};
+    const late = new Promise<GroupsReply>((resolve) => (answer = resolve));
+    const store = overTimeout({ read: () => late, apply: unavailableTransport.apply });
+    await store.refresh();
+    expect(store.getState().record.state).toBe("unknown");
+    answer({ ok: true, value: seeded });
+    await expect.poll(() => recordOf(store)).toEqual(seeded);
+    expect(store.getState().problem).toBeUndefined();
+  });
+
+  it("drops a late answer once a newer read has settled", async () => {
+    const backend = createFakeBackend(seeded);
+    let answer: (reply: GroupsReply) => void = () => {};
+    let calls = 0;
+    const store = overTimeout({
+      read: () =>
+        (calls += 1) === 1
+          ? new Promise<GroupsReply>((resolve) => (answer = resolve))
+          : backend.transport.read(),
+      apply: backend.transport.apply,
+    });
+    await store.refresh();
+    await store.refresh();
+    expect(recordOf(store)).toEqual(seeded);
+    answer({ ok: true, value: emptyRecord });
+    // Let the late answer's promise chain run to its end before looking.
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+    expect(recordOf(store)).toEqual(seeded);
   });
 });
 

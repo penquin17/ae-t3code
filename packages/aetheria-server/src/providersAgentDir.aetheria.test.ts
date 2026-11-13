@@ -19,6 +19,7 @@ import {
   createAgentAwarenessBackendRegistration,
 } from "./agentAwareness.ts";
 import { createHumanControlBackendRegistration } from "./humanControl.ts";
+import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import { createProvidersBackendRegistration, type ProvidersMode } from "./providers.ts";
@@ -71,6 +72,7 @@ function prepare(providers: ProvidersMode) {
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
       createGroupsBackendRegistration({}),
+      createDeliverablesBackendRegistration({}),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);

@@ -38,7 +38,21 @@ export interface GroupsStore {
 export interface GroupsStoreOptions {
   readonly transport: GroupsTransport;
   readonly newRequestId: () => string;
+  /** How long one read may take before it is shown as not read. A late answer is still taken if nothing newer has been read. */
+  readonly readTimeoutMs?: number;
 }
+
+const DEFAULT_READ_TIMEOUT_MS = 5000;
+const NOT_REACHED: ReadResult = {
+  tag: "failed",
+  code: "GROUPS_READ_FAILED",
+  reason: "The read did not reach the Backend.",
+};
+const TIMED_OUT: ReadResult = {
+  tag: "failed",
+  code: "GROUPS_READ_TIMEOUT",
+  reason: "The Backend did not answer the groups read in time.",
+};
 
 const KEY = "groups";
 
@@ -82,19 +96,33 @@ export function createGroupsStore(options: GroupsStoreOptions): GroupsStore {
     }
   };
 
+  // Each read is numbered; a read that outlives its bound is shown as failed, and its late answer is taken only
+  // if no newer read has started, so an old answer never replaces a newer one.
+  let latestRead = 0;
   const readNow = async (): Promise<ReadResult> => {
-    let result: ReadResult;
-    try {
-      result = readResult(await transport.read());
-    } catch {
-      result = {
-        tag: "failed",
-        code: "GROUPS_READ_FAILED",
-        reason: "The read did not reach the Backend.",
-      };
+    latestRead += 1;
+    const mine = latestRead;
+    const attempt: Promise<ReadResult> = Promise.resolve()
+      .then(() => transport.read())
+      .then(readResult, () => NOT_REACHED);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<"timed out">((resolve) => {
+      timer = setTimeout(
+        () => resolve("timed out"),
+        options.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS,
+      );
+    });
+    const first = await Promise.race([attempt, bound]);
+    clearTimeout(timer);
+    if (first === "timed out") {
+      absorb(TIMED_OUT);
+      void attempt.then((late) => {
+        if (mine === latestRead) absorb(late);
+      });
+      return TIMED_OUT;
     }
-    absorb(result);
-    return result;
+    absorb(first);
+    return first;
   };
 
   let tail: Promise<unknown> = Promise.resolve();

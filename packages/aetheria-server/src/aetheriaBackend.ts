@@ -3,6 +3,7 @@ import { prepareBackend, type BackendFacts, type PrepareResult } from "./adapter
 import { createAgentAwarenessBackendRegistration } from "./agentAwareness.ts";
 import type { BackendRegistration } from "./adapter.ts";
 import { BACKEND_COMPOSITION_ID, BACKEND_ENTRY_ALLOWLIST, backendManifest } from "./composition.ts";
+import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createHumanControlBackendRegistration } from "./humanControl.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
@@ -13,7 +14,7 @@ export interface AetheriaBackendOptions {
   readonly manifest?: unknown;
   /** The composition to prepare. Default: the production `aetheria-backend`. Another id is a scripted test composition built from the same rows. */
   readonly composition?: string;
-  /** Default: the agent-awareness registration with no operations, the providers registration in production mode and the unconfigured human-control, orchestration and groups registrations (digest only). */
+  /** Default: the agent-awareness registration with no operations, the providers registration in production mode and the unconfigured human-control, orchestration, groups and deliverables registrations (digest only). */
   readonly registrations?: readonly BackendRegistration[];
   readonly facts?: BackendFacts;
 }
@@ -30,6 +31,7 @@ export function prepareAetheriaBackend(options: AetheriaBackendOptions = {}): Pr
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
       createGroupsBackendRegistration({}),
+      createDeliverablesBackendRegistration({}),
     ],
     ...(options.facts === undefined ? {} : { facts: options.facts }),
   });

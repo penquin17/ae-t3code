@@ -540,14 +540,12 @@ describe("stored reports", () => {
     await expect.poll(() => text()).toContain("the read failed before an answer (socket closed)");
   });
 
-  it("without a transport the report is unavailable in the words of this build", async () => {
+  it("without a transport the report is unavailable, said plainly", async () => {
     await setup(1280, 800, "light");
     await using screen = await render(<Shell withReports={false} />, { router: false });
     await expect.poll(() => text()).toContain("Budget check");
     await screen.getByRole("button", { name: "Report of Researcher" }).click();
-    await expect
-      .poll(() => text())
-      .toContain("Unavailable: The report read is not connected in this build yet");
+    await expect.poll(() => text()).toContain("Unavailable: The report read is not connected");
   });
 
   it("a report still being read offers no second read, and its late reply is dropped once the root changed", async () => {

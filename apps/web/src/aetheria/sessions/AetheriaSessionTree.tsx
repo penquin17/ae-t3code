@@ -1,4 +1,12 @@
-import { ChevronRightIcon, EllipsisIcon, PencilIcon, PinIcon, PlusIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import {
+  ChevronRightIcon,
+  EllipsisIcon,
+  PencilIcon,
+  PinIcon,
+  PlusIcon,
+  ShieldCheckIcon,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { Button } from "../../components/ui/button";
@@ -6,6 +14,7 @@ import { Input } from "../../components/ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../../components/ui/menu";
 import { cn } from "../../lib/utils";
 import type { GroupsHandle } from "../groups/useGroups";
+import { controlRouteParams } from "./controlLink";
 import { foldKey, readFolds, resolveOpen, writeFolds, type Folds } from "./folds";
 import {
   GroupRenameDialog,
@@ -105,6 +114,7 @@ function SessionRow(props: {
   readonly groups: GroupsHandle;
 }) {
   const { row, actions } = props;
+  const control = controlRouteParams(row.id);
   const [draft, setDraft] = useState(row.title);
   const detail = [rowStatusText(row), ageText(row.updatedAt, props.now)];
   if (row.folderState === "unavailable") detail.push("folder unavailable");
@@ -126,93 +136,120 @@ function SessionRow(props: {
   };
 
   return (
-    <li className="group/row flex items-center gap-1 pr-1">
-      {editing !== null ? (
-        <Input
-          aria-label={
-            editing === "fork" ? `Title for the fork of ${row.title}` : `Rename ${row.title}`
-          }
-          autoFocus
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={editing === "fork" ? () => props.setEditing(null) : commit}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") commit();
-            if (event.key === "Escape") props.setEditing(null);
-          }}
-          className="mx-2 my-1"
-        />
-      ) : (
-        <button
-          type="button"
-          data-session-row=""
-          aria-current={row.current ? "page" : undefined}
-          onClick={() => actions.open(row.id)}
-          className={cn(
-            "flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-2 py-1 text-left hover:bg-sidebar-row-hover",
-            row.current && "bg-accent",
-          )}
-        >
-          <span className="flex items-center gap-1 text-sm text-sidebar-foreground">
-            {row.pinned ? <PinIcon className="size-3 shrink-0" aria-label="Pinned" /> : null}
-            <span className="truncate">{row.title}</span>
-          </span>
-          <span
+    <li className="group/row">
+      <div className="flex items-center gap-1 pr-1">
+        {editing !== null ? (
+          <Input
+            aria-label={
+              editing === "fork" ? `Title for the fork of ${row.title}` : `Rename ${row.title}`
+            }
+            autoFocus
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={editing === "fork" ? () => props.setEditing(null) : commit}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commit();
+              if (event.key === "Escape") props.setEditing(null);
+            }}
+            className="mx-2 my-1"
+          />
+        ) : (
+          <button
+            type="button"
+            data-session-row=""
+            aria-current={row.current ? "page" : undefined}
+            onClick={() => actions.open(row.id)}
             className={cn(
-              "truncate text-xs",
-              // Muted text on the open row's fill measures 3.9:1 in light mode (M10a contrast test).
-              row.current ? "text-sidebar-foreground" : "text-sidebar-muted-foreground",
+              "flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-md px-2 py-1 text-left hover:bg-sidebar-row-hover",
+              row.current && "bg-accent",
             )}
           >
-            {detail.join(" · ")}
-            {row.group === undefined ? "" : ` · in ${row.group.label}`}
-          </span>
-        </button>
-      )}
-      <Menu>
-        <MenuTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost-muted"
-              size="icon-xs"
-              aria-label={`Actions for ${row.title}`}
-            />
-          }
-        >
-          <EllipsisIcon className="size-3.5" />
-        </MenuTrigger>
-        <MenuPopup align="end">
-          <MenuItem
-            onClick={() =>
-              props.onResult(row.pinned ? "Unpin" : "Pin", actions.pin(row.id, !row.pinned))
+            <span className="flex items-center gap-1 text-sm text-sidebar-foreground">
+              {row.pinned ? <PinIcon className="size-3 shrink-0" aria-label="Pinned" /> : null}
+              <span className="truncate">{row.title}</span>
+            </span>
+            <span
+              className={cn(
+                "truncate text-xs",
+                // Muted text on the open row's fill measures 3.9:1 in light mode (M10a contrast test).
+                row.current ? "text-sidebar-foreground" : "text-sidebar-muted-foreground",
+              )}
+            >
+              {detail.join(" · ")}
+              {row.group === undefined ? "" : ` · in ${row.group.label}`}
+            </span>
+          </button>
+        )}
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label={`Actions for ${row.title}`}
+              />
             }
           >
-            {row.pinned ? "Unpin" : "Pin"}
-          </MenuItem>
-          <MenuItem onClick={() => startEditing("rename")}>Rename</MenuItem>
-          <MenuItem onClick={() => props.onResult("Fork", actions.fork(row.id))}>Fork</MenuItem>
-          <MenuItem onClick={() => startEditing("fork")}>Fork as…</MenuItem>
-          {props.partners.map((partner) => (
+            <EllipsisIcon className="size-3.5" />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            {control === null ? null : (
+              <MenuItem
+                render={
+                  <Link
+                    to="/aetheria/control/$environmentId/$threadId"
+                    params={control}
+                    aria-label={`Open human control for ${row.title}`}
+                  />
+                }
+              >
+                Open human control
+              </MenuItem>
+            )}
             <MenuItem
-              key={partner.id}
               onClick={() =>
-                props.onResult("Ungroup", props.groups.store.ungroup(row.id, partner.id))
+                props.onResult(row.pinned ? "Unpin" : "Pin", actions.pin(row.id, !row.pinned))
               }
             >
-              Ungroup from {partner.title}
+              {row.pinned ? "Unpin" : "Pin"}
             </MenuItem>
-          ))}
-          {row.grouped ? (
-            <MenuItem onClick={() => props.onResult("Detach", props.groups.store.detach(row.id))}>
-              Detach from group
+            <MenuItem onClick={() => startEditing("rename")}>Rename</MenuItem>
+            <MenuItem onClick={() => props.onResult("Fork", actions.fork(row.id))}>Fork</MenuItem>
+            <MenuItem onClick={() => startEditing("fork")}>Fork as…</MenuItem>
+            {props.partners.map((partner) => (
+              <MenuItem
+                key={partner.id}
+                onClick={() =>
+                  props.onResult("Ungroup", props.groups.store.ungroup(row.id, partner.id))
+                }
+              >
+                Ungroup from {partner.title}
+              </MenuItem>
+            ))}
+            {row.grouped ? (
+              <MenuItem onClick={() => props.onResult("Detach", props.groups.store.detach(row.id))}>
+                Detach from group
+              </MenuItem>
+            ) : null}
+            <MenuItem onClick={() => props.onResult("Archive", actions.archive(row.id))}>
+              Archive
             </MenuItem>
-          ) : null}
-          <MenuItem onClick={() => props.onResult("Archive", actions.archive(row.id))}>
-            Archive
-          </MenuItem>
-        </MenuPopup>
-      </Menu>
+          </MenuPopup>
+        </Menu>
+      </div>
+      {control !== null && row.state === "needs-you" ? (
+        // Prominent on a row that waits for the person: the human-control cards are where they answer.
+        <Link
+          to="/aetheria/control/$environmentId/$threadId"
+          params={control}
+          aria-label={`Open human control for ${row.title}`}
+          className="mx-2 mb-1 flex min-h-9 items-center gap-1.5 rounded-md bg-accent px-2 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-row-hover"
+        >
+          <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
+          <span className="truncate">Open human control</span>
+        </Link>
+      ) : null}
     </li>
   );
 }

@@ -17,6 +17,10 @@ import {
   type ProvidersMode,
   type ProvidersResearchSeams,
 } from "./providers.ts";
+import {
+  createDeliverablesBackendRegistration,
+  type DeliverablesService,
+} from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration, type GroupsService } from "./groups/groups.ts";
 import {
   createHumanControlBackendRegistration,
@@ -29,6 +33,7 @@ import {
   type OrchestrationService,
   type OrchestrationServiceFactory,
 } from "./orchestration.ts";
+import type { CallerContextPort } from "./orchestrationFactory.ts";
 import { createChildStatus } from "./orchestrationChildStatus.ts";
 import type { ChildLineageReader, ChildThreadPort } from "./orchestrationPorts.ts";
 import { createSpawnAuthorizer, type SpawnAuthorizerOptions } from "./spawnAuthorizer.ts";
@@ -138,6 +143,11 @@ export interface AetheriaBackendServiceOptions {
   readonly turnDispatch?: ThreadTurnDispatch;
   /** Builds the interaction service (M06). Absent: the module runs unconfigured and its operations answer unavailable. */
   readonly interactionFactory?: HumanControlServiceFactory;
+  /**
+   * The caller's thread, working folder and the ONE active run, from T3's projections and M04's index (the host that assembles the Backend builds it; apps/server `callerContext.ts`, the same port the
+   * children service uses). Without it `deliverables.declare` answers unavailable: the turn of a declaration is never guessed (M10 step 13).
+   */
+  readonly callerContext?: CallerContextPort;
 }
 
 export interface AetheriaBackendService {
@@ -198,6 +208,11 @@ export interface AetheriaBackendService {
    * answers unavailable. It is not an XC-6 operation: the Agent host never reaches it.
    */
   groups(): GroupsService | undefined;
+  /**
+   * The ONE deliverable declaration store (M10 step 13), served to the Agent host by the XC-6 operations `deliverables.declare` and `deliverables.attach-snapshot` and read in process by the client
+   * handlers and the download route; undefined before start and after drain. A caller that finds it undefined answers unavailable.
+   */
+  deliverables(): DeliverablesService | undefined;
 }
 
 export type CreateServiceResult =
@@ -397,6 +412,15 @@ export function createAetheriaBackendService(
     stateRoot: options.stateRoot,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
+  // M10 step 13: the ONE deliverable declaration store. Its snapshot check is the Backend's own snapshot store, in process (looked up at each call: not running is unavailable), and its turn is the
+  // caller context's one active run.
+  const deliverablesRegistration = createDeliverablesBackendRegistration({
+    stateRoot: options.stateRoot,
+    ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.callerContext === undefined ? {} : { callerContext: options.callerContext }),
+    openSnapshot: (sessionId, snapshotId) =>
+      providersRegistration.openSnapshot(sessionId, snapshotId),
+  });
   // M06 step 13: T3 attaching a bound thread to a provider session after the replay is a resume; the interaction service ends the waits no segment
   // holds and retries undelivered late answers for that Pi session. The horizon is the one the board uses; the signal never fires before it is known.
   let replayHorizon: number | undefined;
@@ -428,6 +452,7 @@ export function createAetheriaBackendService(
       humanControlRegistration,
       orchestrationRegistration,
       groupsRegistration,
+      deliverablesRegistration,
     ],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
@@ -557,6 +582,7 @@ export function createAetheriaBackendService(
     watchInteractions: (listener, onEnd) => humanControlRegistration.watch(listener, onEnd),
     orchestration: () => orchestrationRegistration.service(),
     groups: () => groupsRegistration.groups(),
+    deliverables: () => deliverablesRegistration.deliverables(),
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

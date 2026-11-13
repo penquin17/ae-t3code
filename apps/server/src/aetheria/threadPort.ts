@@ -71,6 +71,36 @@ export const terminalOutcomeOf = (status: unknown): ChildTurnOutcome | null =>
     ? (TERMINAL[status] as ChildTurnOutcome)
     : null;
 
+/** The most of a provider's error text M05 keeps (its fallback cuts again); the text goes only into the settle record and M09's classifier. */
+const ERROR_TEXT_MAX = 2000;
+/** How long a failed run's event waits once for its error item to be projected. */
+const ERROR_ITEM_RETRY_MS = 250;
+
+/**
+ * The provider's own text of a failed run: the message of the newest `error` turn item of THAT run. T3 records it only there; the run has no error field. A run with no readable item, or an empty
+ * message, has no text: `undefined`, never a guess.
+ */
+export const errorTextOf = (
+  projection: OrchestrationV2ThreadProjection | null | undefined,
+  runId: string,
+): string | undefined => {
+  const items = (projection?.turnItems ?? []) as ReadonlyArray<{
+    readonly type?: unknown;
+    readonly runId?: unknown;
+    readonly ordinal?: unknown;
+    readonly failure?: { readonly message?: unknown } | null;
+  }>;
+  let newest: { ordinal: number; message: string } | undefined;
+  for (const item of items) {
+    if (item.type !== "error" || String(item.runId) !== runId) continue;
+    const message = item.failure?.message;
+    if (typeof message !== "string" || message.length === 0) continue;
+    const ordinal = typeof item.ordinal === "number" ? item.ordinal : 0;
+    if (newest === undefined || ordinal >= newest.ordinal) newest = { ordinal, message };
+  }
+  return newest === undefined ? undefined : newest.message.slice(0, ERROR_TEXT_MAX);
+};
+
 /** Releases a fork thread's requested session id under both keys (the plain one and `fork:<id>`). */
 const withdrawForkKeys = (threadId: string): void => {
   withdrawPiSessionIdRequest(threadId);
@@ -447,6 +477,19 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
               const outcome = terminalOutcomeOf(run.status);
               if (outcome === null) return;
               if (!(yield* matches(String(run.threadId)))) return;
+              // A failed run's provider text lives only in the run's error item. It may land a moment after the run's own update, so one bounded retry; after that the event goes without text.
+              let errorText: string | undefined;
+              if (outcome === "failed") {
+                const read = projectionOf(String(run.threadId)).pipe(
+                  Effect.map((projection) => errorTextOf(projection, String(run.id))),
+                  Effect.catchCause(() => Effect.undefined),
+                );
+                errorText = yield* read;
+                if (errorText === undefined) {
+                  yield* Effect.sleep(ERROR_ITEM_RETRY_MS);
+                  errorText = yield* read;
+                }
+              }
               const completed: ChildTurnCompletedEvent = {
                 threadId: String(run.threadId),
                 turnId: String(run.id),
@@ -455,6 +498,7 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
                   run.completedAt === null
                     ? DateTime.formatIso(yield* DateTime.now)
                     : DateTime.formatIso(run.completedAt),
+                ...(errorText === undefined ? {} : { errorText }),
               };
               yield* Effect.sync(() => handler(completed)).pipe(Effect.ignore);
             }),
@@ -572,7 +616,8 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
                   outcome === null || last.completedAt === null
                     ? null
                     : DateTime.formatIso(last.completedAt),
-                errorText: null,
+                errorText:
+                  outcome === "failed" ? (errorTextOf(projection, String(last.id)) ?? null) : null,
               },
             };
           }),

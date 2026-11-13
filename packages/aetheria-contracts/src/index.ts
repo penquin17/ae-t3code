@@ -3,6 +3,7 @@ export * from "./awarenessOperations.ts";
 export * from "./boardOperations.ts";
 export * from "./childrenControlOperations.ts";
 export * from "./compositionStatus.ts";
+export * from "./deliverablesOperations.ts";
 export * from "./groupsOperations.ts";
 export * from "./interactionOperations.ts";
 export * from "./lifecycleSnapshot.ts";

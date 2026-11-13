@@ -412,7 +412,7 @@ describe("the rename dialog", () => {
 });
 
 describe("when the groups are not connected or not readable", () => {
-  it("with the default transport, fork groups show as today and a quiet line says why", async () => {
+  it("with the default transport and no primary environment, fork groups show as today and a quiet line says why", async () => {
     await setup(1280, 800, "light");
     const forked: ListFacts = facts([
       at("a", ago(3 * DAY), { title: "Parent session" }),
@@ -423,7 +423,7 @@ describe("when the groups are not connected or not readable", () => {
     await using _screen = await mount(undefined, { facts: forked });
     await expect
       .poll(() => text())
-      .toContain("Groups unavailable: The groups store is not connected in this build yet");
+      .toContain("Groups unavailable: The groups store is not connected");
     expect(text()).toContain("Parent session");
     expect(document.querySelector("[aria-label^='Rename group']")).toBeNull();
     expect(text()).not.toContain("Suggested:");

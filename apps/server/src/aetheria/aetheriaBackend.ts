@@ -145,16 +145,20 @@ export const makeLayer = (
         );
       // M05 step 9 (C10): the join to the archive's children service. The caller is the carrier's session; its thread and working folder come from M04's index and
       // its active run and node from T3's projection, never from an argument. Built only when T3's services exist, or the module stays unavailable.
+      // One caller-context port, shared by managed work and the deliverables module (M10 step 13: its turn is the caller's single active run).
+      const callerContext = Option.isSome(orchestrator)
+        ? yield* makeCallerContext(orchestrator.value, (sessionId) => {
+            const binding = sessionIndex()?.bindingOfSession(sessionId);
+            return binding === undefined
+              ? undefined
+              : { threadId: binding.threadId, workingFolder: binding.workingFolder };
+          })
+        : undefined;
       const orchestrationFactory =
         options.orchestrationFactory ??
-        (Option.isSome(orchestrator) && managedWork !== undefined
+        (callerContext !== undefined && managedWork !== undefined
           ? createOrchestrationFactory({
-              callerContext: yield* makeCallerContext(orchestrator.value, (sessionId) => {
-                const binding = sessionIndex()?.bindingOfSession(sessionId);
-                return binding === undefined
-                  ? undefined
-                  : { threadId: binding.threadId, workingFolder: binding.workingFolder };
-              }),
+              callerContext,
               onBoot: (report) => {
                 void runPromise(
                   (report.lineage === "unavailable" ? Effect.logWarning : Effect.logInfo)(
@@ -179,6 +183,7 @@ export const makeLayer = (
         turnDispatch,
         ...managedWork,
         ...(orchestrationFactory === undefined ? {} : { orchestrationFactory }),
+        ...(callerContext === undefined ? {} : { callerContext }),
         ...(options.checkout === undefined ? {} : { checkout: options.checkout }),
         ...(options.interactionFactory === undefined
           ? {}

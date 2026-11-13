@@ -24,6 +24,7 @@ import {
   HUMAN_CONTROL_BACKEND_ENTRY,
   createHumanControlBackendRegistration,
 } from "./humanControl.ts";
+import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import {
@@ -68,6 +69,7 @@ function prepare(
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
       createGroupsBackendRegistration({}),
+      createDeliverablesBackendRegistration({}),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);
@@ -124,6 +126,7 @@ describe("the providers module's descriptor", () => {
       HUMAN_CONTROL_BACKEND_ENTRY,
       "aetheria:orchestration-backend",
       "aetheria:groups-backend",
+      "aetheria:deliverables-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(PROVIDERS_BACKEND_ENTRY).toBe("aetheria:providers-backend");
@@ -154,6 +157,7 @@ describe("the providers module's descriptor", () => {
       "human-control-backend",
       "orchestration-backend",
       "groups-backend",
+      "deliverables-backend",
     ]);
     expect(m.compositions[0]?.modules).toEqual([
       "agent-awareness-backend",
@@ -161,6 +165,7 @@ describe("the providers module's descriptor", () => {
       "human-control-backend",
       "orchestration-backend",
       "groups-backend",
+      "deliverables-backend",
     ]);
     expect(m.compositions[0]?.id).toBe(BACKEND_COMPOSITION_ID);
   });
@@ -288,6 +293,7 @@ describe("production mode over the real archive", () => {
     const report = await backend.dispose("test");
     expect(report).toMatchObject({ ok: true, stillLive: [], failed: [], unobserved: [] });
     expect(report.order).toEqual([
+      "deliverables-backend",
       "groups-backend",
       "orchestration-backend",
       "human-control-backend",

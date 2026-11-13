@@ -122,6 +122,25 @@ export {
   type GroupsRecord,
   type GroupsService,
 } from "./groups/groups.ts";
+export {
+  DELIVERABLES_BACKEND_ENTRY,
+  DELIVERABLES_BACKEND_ID,
+  DELIVERABLES_FILE_RELATIVE,
+  DELIVERABLES_MAX_RECORDS,
+  createDeliverablesBackendRegistration,
+  createDeliverablesStore,
+  deliverableIdOf,
+  deliverableKindOf,
+  deliverablesBackendModuleRow,
+  type DeliverableEntry,
+  type DeliverableRecord,
+  type DeliverablesBackendRegistration,
+  type DeliverablesCaller,
+  type DeliverablesOutcome,
+  type DeliverablesRead,
+  type DeliverablesService,
+  type SnapshotOpener,
+} from "./deliverables/deliverables.ts";
 export { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 export { BACKEND_COMPOSITION_ID, BACKEND_ENTRY_ALLOWLIST, backendManifest } from "./composition.ts";
 export type { StoredEventLike } from "./identity/feed.ts";

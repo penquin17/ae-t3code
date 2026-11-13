@@ -1,6 +1,6 @@
-// The Aetheria sidebar in the real shell with the default groups transport: the list still shows and a quiet line says
-// the groups store is not connected. Checked at the widths where the sidebar changes from open to sheet.
-// Boundary: real router, shell and T3 state atoms over a fake socket; the groups store is the build's default (unavailable).
+// The Aetheria sidebar in the real shell with the production groups transport, whose read the fake socket never answers:
+// the list still shows and, within the read's bound, a quiet line says the groups were not read and why.
+// Boundary: real router, shell and T3 state atoms over a fake socket that answers no groups call; no real Backend.
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 import type * as Context from "effect/Context";
@@ -35,13 +35,13 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
 
 const MODES: readonly Mode[] = ["light", "dark"];
 const WIDTHS = [1023, 768, 767] as const;
-const UNAVAILABLE = "Groups unavailable: The groups store is not connected in this build yet";
+const NOT_READ = "Groups not read yet: The Backend did not answer the groups read in time.";
 const shot = (name: string) =>
   page.screenshot({ base64: true, path: `__screenshots__/groups-sidebar-${name}.png`, save: true });
 
-describe("the sidebar with the groups store not connected", () => {
+describe("the sidebar when the groups read gets no answer", () => {
   it.each(WIDTHS.flatMap((width) => MODES.map((mode) => [width, mode] as const)))(
-    "%i wide, %s: the list shows and says groups are unavailable",
+    "%i wide, %s: the list shows and says the groups were not read",
     async (width, mode) => {
       await prepare(width, 800, mode);
       const app = await mountRoute(THREAD_PATH);
@@ -57,8 +57,8 @@ describe("the sidebar with the groups store not connected", () => {
         scope = await awaitSheetSettled();
       }
       await expect
-        .poll(() => scope.querySelector("[data-groups-status]")?.textContent, { timeout: 10_000 })
-        .toBe(UNAVAILABLE);
+        .poll(() => scope.querySelector("[data-groups-status]")?.textContent, { timeout: 15_000 })
+        .toBe(NOT_READ);
       expect(scope.querySelector("[data-aetheria='sessions']")).not.toBeNull();
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
       await shot(`${width}-${mode}`);
