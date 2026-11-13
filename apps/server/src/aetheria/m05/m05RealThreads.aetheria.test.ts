@@ -96,9 +96,20 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => NodeFS.rmSync(plain, { recursive: true, force: true })),
   );
-  const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
+  // One event queue PER provider session (review fix 3). A single shared queue made every session's stream compete for every event, so a turn event could be taken by another session's
+  // stream and never reach the run it belongs to; each turn's events now go to the queue of the session that opened its thread.
+  const queues = new Map<string, Queue.Queue<ProviderAdapter.ProviderAdapterV2Event>>();
+  const queueOf = (sessionId: string) =>
+    Effect.gen(function* () {
+      const known = queues.get(sessionId);
+      if (known !== undefined) return known;
+      const made = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
+      queues.set(sessionId, made);
+      return made;
+    });
   const started: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
   const interrupted: string[] = [];
+  const interruptCalls: { thread: string; turn: string }[] = [];
   const sessionOf = new Map<string, string>();
   const turnEvent = (
     turn: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -106,6 +117,7 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
   ) =>
     Effect.gen(function* () {
       const at = yield* DateTime.now;
+      const events = yield* queueOf(String(turn.providerThread.providerSessionId));
       yield* Queue.offer(events, {
         type: "provider_turn.updated",
         driver,
@@ -130,6 +142,7 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
     openSession: (input) =>
       Effect.gen(function* () {
         const now = yield* DateTime.now;
+        const events = yield* queueOf(String(input.providerSessionId));
         return {
           instanceId,
           driver,
@@ -192,9 +205,14 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
             ),
           steerTurn: () => Effect.void,
           interruptTurn: (request) =>
-            Effect.sync(
-              () => void interrupted.push(String(request.providerThread.appThreadId)),
-            ).pipe(
+            Effect.sync(() => {
+              interrupted.push(String(request.providerThread.appThreadId));
+              // Per-call record (review fix 3): which thread and which provider turn each interrupt asked for, so a missing interrupt is told from a mis-attributed one.
+              interruptCalls.push({
+                thread: String(request.providerThread.appThreadId),
+                turn: String(request.providerTurnId),
+              });
+            }).pipe(
               Effect.andThen(
                 Effect.forEach(
                   started.filter(
@@ -221,7 +239,7 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
       if (turn === undefined) return yield* Effect.die(new Error(`no turn started on ${threadId}`));
       yield* turnEvent(turn, "completed");
     });
-  return { cwd, started, interrupted, sessionOf, adapter, finish };
+  return { cwd, started, interrupted, interruptCalls, sessionOf, adapter, finish };
 });
 
 type Script = Effect.Success<ReturnType<typeof scriptedProvider>>;
@@ -804,16 +822,33 @@ it.live(
         );
         assert.match(String(actions[running]), /interrupt/i);
         assert.match(String(actions[idle]), /interrupt/i);
+        // BOTH children reach T3's terminal `interrupted` state, and the first one's turn was interrupted at the provider (review fix 3: the test used to assert one child only).
+        // The SECOND child's provider interrupt is the todo below: with the harness isolated it is still not asked of the provider (see the todo).
         assert.include(w.script.interrupted, running);
-        // OPEN, not asserted: the second child's interrupt did not reach the scripted provider (`interrupted` held the root and one child). The rows say interrupt for both; whether
-        // that is the scripted provider's single shared event queue or cancelTree reporting an interrupt T3 did not perform is not established here (see the report).
         assert.equal((yield* w.runOf(running))?.status, "interrupted");
+        assert.equal((yield* w.runOf(idle))?.status, "interrupted");
+        assert.equal(
+          w.script.started.filter((t) => String(t.threadId) === idle).length,
+          1,
+          "the second child's turn was started once and never restarted",
+        );
         // The root's own run was stopped by the same real thread.stop.
         assert.equal((yield* w.runOf(parent.threadId))?.status, "interrupted");
         yield* Effect.promise(() => svc.stop());
       }),
     ),
   300_000,
+);
+
+// DIAGNOSED, NOT ASSERTED (review fix 3, finding 3): with the scripted provider's events routed per session and every interrupt recorded per call (`interruptCalls`: thread and provider turn), cancelTree over two
+// running continuable children still asks the provider to interrupt ONE of them (plus the root's thread.stop): `interrupted` = [first child, root]; the second child has a started turn, its row says
+// `interrupted`, its T3 run ends `interrupted`, yet `ProviderAdapterV2.interruptTurn` is never called for it. The harness is not the cause: all three threads share ONE provider session
+// (`provider-session:provider-instance:pi:shared`), so per-session queues are one queue, and the record is taken at the adapter's entry before any event is routed. The silent path is T3's
+// (orchestration-v2/ProviderTurnControlService.ts:153-176 and :191-203, "no live session ... treating as already stopped"), reached through M05's cancel.ts:113 -> control.ts:246 -> threads.interrupt,
+// which reports `interrupted` for any accepted interrupt (cancel.ts:113-114). Whether the second child's run was really stopped by T3 or only projected interrupted is not shown here. Todo until a
+// provider that settles per-thread turns (real Pi) or a T3/M05 decision shows it; do not read the first child's assertions above as covering the second provider interrupt.
+it.todo(
+  "case 1 (DIAGNOSED, todo): cancelTree's interrupt of the SECOND running continuable child reaches the provider's interruptTurn (today only the first child and the root do)",
 );
 
 // =========================================================================================================================================== case 2
