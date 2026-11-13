@@ -169,8 +169,8 @@ export interface AetheriaBackendService {
   ingest(stored: StoredEventLike): Promise<void>;
   /** The highest event sequence that existed before the feed was subscribed: liveness from older events is unknown for the board. */
   setReplayHorizon(sequence: number): void;
-  /** The board of each workspace and what restart reconciliation did to it; `settled` waits for the close-on-stop in flight. */
-  readonly board: Pick<BoardRuntime, "reconciled" | "settled">;
+  /** The board of each workspace and what restart reconciliation did to it; `settled` waits for the close-on-stop in flight; `editsOf` is the in-process read of one root's recorded edit paths (M10 step 14). */
+  readonly board: Pick<BoardRuntime, "reconciled" | "settled" | "editsOf">;
   /** The stream ended or failed: every holder becomes unknown until observed again. */
   noteFeed(reason: Extract<UnknownReason, "feed-ended" | "feed-failed">): void;
   readonly liveness: LivenessService;

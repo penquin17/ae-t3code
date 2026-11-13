@@ -19,6 +19,12 @@ import {
 } from "./childrenControlOperations.ts";
 import { AetheriaCompositionStatus } from "./compositionStatus.ts";
 import {
+  ClientDeliverablesListPayload,
+  ClientDeliverablesListResult,
+  ClientOfferedPathsPayload,
+  ClientOfferedPathsResult,
+} from "./deliverablesOperations.ts";
+import {
   GroupsApplyPayload,
   GroupsApplyResult,
   GroupsReadPayload,
@@ -68,6 +74,9 @@ export const AETHERIA_WS_METHODS = {
   // M10 step 7 (D3): the session-group store. `read` is a read; `apply` (the five-operation union) needs `orchestration:operate`.
   groupsRead: "aetheria.groups.read",
   groupsApply: "aetheria.groups.apply",
+  // M10 step 14 (D7, D11): a root's deliverable cards and its offered edit paths. Both are reads (`orchestration:read`); bytes come only from the download route, which needs `filesystem:read`.
+  deliverablesList: "aetheria.deliverables.list",
+  deliverablesOfferedPaths: "aetheria.deliverables.offeredPaths",
 } as const;
 
 /** The Backend is not attached or has not produced a status; the caller sees this instead of an invented value. */
@@ -194,7 +203,23 @@ const AetheriaGroupsApplyRpc = Rpc.make(AETHERIA_WS_METHODS.groupsApply, {
 
 export const AetheriaGroupsRpcGroup = RpcGroup.make(AetheriaGroupsReadRpc, AetheriaGroupsApplyRpc);
 
+// The deliverable cards and offered edit paths (M10 step 14). Payloads name a thread only; a failure is a coded value in the reply, never an empty success.
+const AetheriaDeliverablesListRpc = Rpc.make(AETHERIA_WS_METHODS.deliverablesList, {
+  payload: ClientDeliverablesListPayload,
+  success: ClientDeliverablesListResult,
+});
+const AetheriaDeliverablesOfferedPathsRpc = Rpc.make(AETHERIA_WS_METHODS.deliverablesOfferedPaths, {
+  payload: ClientOfferedPathsPayload,
+  success: ClientOfferedPathsResult,
+});
+
+const AetheriaDeliverablesRpcGroup = RpcGroup.make(
+  AetheriaDeliverablesListRpc,
+  AetheriaDeliverablesOfferedPathsRpc,
+);
+
 export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc)
   .merge(AetheriaInteractionRpcGroup)
   .merge(AetheriaChildrenRpcGroup)
-  .merge(AetheriaGroupsRpcGroup);
+  .merge(AetheriaGroupsRpcGroup)
+  .merge(AetheriaDeliverablesRpcGroup);

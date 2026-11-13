@@ -73,6 +73,8 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 // AETHERIA-IP:IP-6 private Agent-to-Backend (XC-6) request/reply route, sibling of /mcp; not an MCP tool
 import * as Xc6Route from "./aetheria/xc6Route.ts";
+// AETHERIA-IP:IP-50 the authenticated deliverable download route (M10 step 14), registered below beside the XC-6 route
+import * as DeliverablesRoute from "./aetheria/deliverablesRoute.ts";
 // AETHERIA-IP:IP-1 the Aetheria Backend layers registered below
 import * as AetheriaBackendLive from "./aetheria/aetheriaBackend.ts";
 // AETHERIA-IP:IP-23 T3's command receipt store, provided to the Backend layer below
@@ -788,6 +790,8 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
   // AETHERIA-IP:IP-6 private Agent-to-Backend (XC-6) request/reply route, sibling of /mcp; not an MCP tool
   Xc6Route.layer,
+  // AETHERIA-IP:IP-50 authenticated download of delivered files by id (Bearer, filesystem:read, snapshot bytes through openSnapshot); present only with the Backend
+  DeliverablesRoute.layer,
   // Follows delegated tasks running in linked environments, including after a restart.
   Layer.effectDiscard(
     RemoteDelegation.RemoteDelegation.pipe(Effect.flatMap((remote) => remote.start())),

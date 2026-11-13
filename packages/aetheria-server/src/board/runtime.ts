@@ -83,9 +83,26 @@ export interface BoardRuntimeOptions {
   readonly questionEvidence?: QuestionEvidenceProvider | undefined;
 }
 
+/**
+ * What the board holds about one root's edits (M10 step 14, GAP-3). `known` is a record of the root session in the board of the root's workspace: its recorded paths, deduplicated, in the
+ * board's own sorted form, an empty list being a known empty. `unknown` says nothing about the root's edits (no binding or workspace, or the board has no record of the root): never an empty list. `unavailable` is a
+ * board that cannot be read, or a runtime that has drained. The paths are what the board recorded; each is judged again at the moment bytes are served.
+ */
+export type EditsRead =
+  | {
+      readonly status: "known";
+      readonly paths: readonly string[];
+      /** The workspace whose board holds the record: the containment root of its paths. */
+      readonly workspace: string;
+    }
+  | { readonly status: "unknown"; readonly reason: "no-workspace" | "no-record" }
+  | { readonly status: "unavailable"; readonly detail: string };
+
 export interface BoardRuntime {
   /** The XC-6 operations: check-write, record-edit, record-shell, the awareness actions and the summary. */
   operations(): Readonly<Record<string, Xc6Operation>>;
+  /** The edit paths recorded for one root session, read in process and never written (M10 step 14). Never throws. */
+  editsOf(rootSessionId: string): Promise<EditsRead>;
   /** The highest event sequence that existed before this Backend subscribed; only newer liveness events count as evidence. */
   setReplayHorizon(sequence: number): void;
   /** Reconcile the board of every workspace a bound session works in. Never throws; the results are kept. */
@@ -390,6 +407,25 @@ export function createBoardRuntime(options: BoardRuntimeOptions): BoardRuntime {
       [AWARENESS_ACTION_OPERATION]: tracked(actionOp),
       [AWARENESS_SUMMARY_OPERATION]: tracked(summaryOp),
     }),
+    async editsOf(rootSessionId) {
+      if (stopping) return { status: "unavailable", detail: "the board runtime has stopped" };
+      try {
+        const binding = index.bindingOfSession(rootSessionId);
+        const workspace =
+          binding === undefined ? undefined : await workspaceOf(binding.workingFolder);
+        if (workspace === undefined) return { status: "unknown", reason: "no-workspace" };
+        const read = await (await boardFor(workspace)).service.read();
+        if (!read.ok) return { status: "unavailable", detail: read.detail };
+        const session = read.board.sessions[rootSessionId];
+        if (session === undefined) return { status: "unknown", reason: "no-record" };
+        return { status: "known", paths: [...session.edits], workspace };
+      } catch (error) {
+        return {
+          status: "unavailable",
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
     setReplayHorizon: (sequence) => {
       horizon = sequence;
     },

@@ -204,6 +204,18 @@ export const DeliverableCard = Schema.Struct({
 });
 export type DeliverableCard = typeof DeliverableCard.Type;
 
+/** A refusal or failure of either client read: a coded value, never an empty success. */
+const ClientDeliverablesFailure = Schema.Struct({
+  ok: Schema.Literal(false),
+  code: Schema.Literals(
+    Object.keys(DELIVERABLES_CLIENT_CODE_CLASSES) as [
+      DeliverablesClientCode,
+      ...DeliverablesClientCode[],
+    ],
+  ),
+  detail: Schema.optionalKey(Schema.String),
+});
+
 export const ClientDeliverablesListResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
@@ -213,15 +225,67 @@ export const ClientDeliverablesListResult = Schema.Union([
       deliverables: Schema.Array(DeliverableCard),
     }),
   }),
-  Schema.Struct({
-    ok: Schema.Literal(false),
-    code: Schema.Literals(
-      Object.keys(DELIVERABLES_CLIENT_CODE_CLASSES) as [
-        DeliverablesClientCode,
-        ...DeliverablesClientCode[],
-      ],
-    ),
-    detail: Schema.optionalKey(Schema.String),
-  }),
+  ClientDeliverablesFailure,
 ]);
 export type ClientDeliverablesListResult = typeof ClientDeliverablesListResult.Type;
+
+// M10 step 14 (D11, D12): the closed offered set. A browser never names a path: it names an id the Backend assigned, and the Backend resolves it again, authorized, on every lookup.
+const OfferedId = Schema.String.check(Schema.isPattern(/^off_[0-9a-f]{32}$/));
+
+/** The root's recorded edit paths are read by the root's thread id alone. */
+export const ClientOfferedPathsPayload = Schema.Struct({ rootThreadId: ThreadId });
+export type ClientOfferedPathsPayload = typeof ClientOfferedPathsPayload.Type;
+
+/** One recorded path, offered under a stable id (a function of the root session and the canonical path). `canonicalPath` is a Backend path, a label only. */
+export const OfferedPath = Schema.Struct({ id: OfferedId, canonicalPath: Text });
+export type OfferedPath = typeof OfferedPath.Type;
+
+/**
+ * What the board holds about the root's edits, with the three answers kept apart: `known` (an empty list is a known empty), `unknown` (the board says nothing about this root) and
+ * `unavailable` (it could not be read). Paths are changes made during the session, not per turn (R8): outside Git a session's changed files are labelled per session.
+ */
+export const OfferedEdits = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("known"), paths: Schema.Array(OfferedPath) }),
+  Schema.Struct({ status: Schema.Literal("unknown") }),
+  Schema.Struct({ status: Schema.Literal("unavailable") }),
+]);
+export type OfferedEdits = typeof OfferedEdits.Type;
+
+export const ClientOfferedPathsResult = Schema.Union([
+  Schema.Struct({
+    ok: Schema.Literal(true),
+    value: Schema.Struct({ rootThreadId: ThreadId, edits: OfferedEdits }),
+  }),
+  ClientDeliverablesFailure,
+]);
+export type ClientOfferedPathsResult = typeof ClientOfferedPathsResult.Type;
+
+// The download route (M10 step 14, D7). `GET <path>/<id>` with an `Authorization: Bearer` header and no credential anywhere in the URL: `dlv_…` is a declaration, `off_…` an offered edit path
+// (which also names its root by `?root=<rootThreadId>`, a thread id and not a credential). `?semantics=current|as-delivered` (declarations only; current is the default).
+export const DELIVERABLE_DOWNLOAD_PATH = "/api/aetheria/deliverables";
+export const DELIVERABLE_DOWNLOAD_SEMANTICS = ["current", "as-delivered"] as const;
+export type DeliverableDownloadSemantics = (typeof DELIVERABLE_DOWNLOAD_SEMANTICS)[number];
+/** The largest file the route serves, current or snapshot; a larger one is refused with `DOWNLOAD_TOO_LARGE` before any byte is sent. */
+export const DELIVERABLE_DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024;
+
+/** Each refusal code of the route and its one HTTP status. A refusal is a JSON body `{ok:false, code, detail}`; no refusal carries file bytes, a path or a credential. */
+export const DELIVERABLE_DOWNLOAD_REFUSAL_STATUS = {
+  DOWNLOAD_BEARER_REQUIRED: 401,
+  DOWNLOAD_UNAUTHENTICATED: 401,
+  DOWNLOAD_NOT_AUTHORIZED: 403,
+  DOWNLOAD_BAD_REQUEST: 400,
+  DOWNLOAD_NOT_FOUND: 404,
+  DOWNLOAD_OFFERED_UNKNOWN: 409,
+  DOWNLOAD_SNAPSHOT_PENDING: 409,
+  DOWNLOAD_SNAPSHOT_UNAVAILABLE: 409,
+  DOWNLOAD_SNAPSHOT_MISSING: 404,
+  DOWNLOAD_SNAPSHOT_MISMATCH: 409,
+  DOWNLOAD_FILE_MISSING: 404,
+  DOWNLOAD_FILE_NOT_REGULAR: 409,
+  DOWNLOAD_FILE_OUTSIDE_ROOT: 409,
+  DOWNLOAD_FILE_UNREADABLE: 409,
+  DOWNLOAD_FILE_CHANGED: 409,
+  DOWNLOAD_TOO_LARGE: 413,
+  DOWNLOAD_UNAVAILABLE: 503,
+} as const;
+export type DeliverableDownloadRefusalCode = keyof typeof DELIVERABLE_DOWNLOAD_REFUSAL_STATUS;

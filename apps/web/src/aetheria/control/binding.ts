@@ -1,7 +1,5 @@
-// Which Pi session a T3 thread is (UNVERIFIED mapping, M10 phase 2a). The Backend's `rootSessionId` / `sessionId` are Pi session ids; the control route's params are T3 ids. Nothing guesses an
-// equivalence: the Pi session id is read from the thread's active provider thread, and only from a STRONG native reference of the Pi driver (orchestrationV2.ts `OrchestrationV2ProviderRef`,
-// `OrchestrationV2ProviderThread.nativeThreadRef`). Anything else is `unknown`, and the page says so. That "nativeId equals the Backend's Pi session id" is assumed here and unproved until the
-// native run. Plain TypeScript over a structural subset of the projection; no T3 import.
+// Which Pi session a T3 thread is: read only from the active provider thread's STRONG Pi native reference, whose id is Pi's session FILE (provider-pi `sessionFile`).
+// The Backend's session id is the UUID in that file's name, by the same rule as the server's thread port (threadPort.ts PI_FILE). Anything else is `unknown`.
 import { unknown, known, type Known } from "../core/known";
 
 /** The part of a T3 thread projection this reads (`thread.activeProviderThreadId`, `providerThreads[]`). */
@@ -37,5 +35,10 @@ export function piSessionIdOf(input: ThreadBindingInput | null): Known<string> {
   if (ref.nativeId === null || ref.nativeId === "") {
     return unknown("the native reference carries no id");
   }
-  return known(ref.nativeId);
+  const fileName = ref.nativeId.split(/[\\/]/).at(-1) ?? "";
+  const match = PI_SESSION_FILE.exec(fileName);
+  if (match === null) return unknown("the native reference is not a Pi session file");
+  return known(match[1]!);
 }
+
+const PI_SESSION_FILE = /^[^_]+_([A-Za-z0-9][A-Za-z0-9-]{0,127})\.jsonl$/;

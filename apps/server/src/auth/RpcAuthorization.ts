@@ -234,6 +234,9 @@ export const RPC_REQUIRED_SCOPES = {
   [AETHERIA_WS_METHODS.childrenReport]: AuthOrchestrationReadScope,
   [AETHERIA_WS_METHODS.groupsRead]: AuthOrchestrationReadScope,
   [AETHERIA_WS_METHODS.groupsApply]: AuthOrchestrationOperateScope,
+  // AETHERIA-IP:IP-51 explicit scopes for the deliverable cards and the offered edit paths (M10 step 14): both are reads and need orchestration:read; bytes come only from the download route, which checks filesystem:read itself
+  [AETHERIA_WS_METHODS.deliverablesList]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.deliverablesOfferedPaths]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

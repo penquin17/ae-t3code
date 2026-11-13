@@ -141,6 +141,7 @@ export {
   type DeliverablesService,
   type SnapshotOpener,
 } from "./deliverables/deliverables.ts";
+export type { EditsRead } from "./board/runtime.ts";
 export { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 export { BACKEND_COMPOSITION_ID, BACKEND_ENTRY_ALLOWLIST, backendManifest } from "./composition.ts";
 export type { StoredEventLike } from "./identity/feed.ts";
