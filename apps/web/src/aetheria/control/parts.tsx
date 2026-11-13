@@ -67,7 +67,9 @@ export function ReportView({
           }
           role="status"
         >
-          <AlertDescription>{notice.text}</AlertDescription>
+          <AlertDescription>
+            <span className="text-foreground">{notice.text}</span>
+          </AlertDescription>
         </Alert>
       )}
       {outcome.kind === "refused" ? (

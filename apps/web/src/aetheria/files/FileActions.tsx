@@ -38,9 +38,12 @@ function ProblemNotice({ problem }: { readonly problem: Problem }) {
       >
         <AlertTitle>{line ?? `The Backend refused the download (${problem.status}).`}</AlertTitle>
         <AlertDescription>
-          <span className="block break-words text-xs">Code: {problem.code}</span>
+          <span className="block break-words text-xs text-foreground">Code: {problem.code}</span>
           {problem.detail !== undefined && problem.detail !== "" ? (
-            <span data-verbatim="backend" className="block whitespace-pre-wrap break-words">
+            <span
+              data-verbatim="backend"
+              className="block whitespace-pre-wrap break-words text-foreground"
+            >
               {problem.detail}
             </span>
           ) : null}

@@ -41,20 +41,24 @@ export function RefusalNotice({
       <AlertTitle>{shown.text}</AlertTitle>
       <AlertDescription>
         {backendMessage !== undefined && backendMessage !== "" && !repeatsText ? (
-          <span data-verbatim="backend" className="block whitespace-pre-wrap break-words" lang="en">
+          <span
+            data-verbatim="backend"
+            className="block whitespace-pre-wrap break-words text-foreground"
+            lang="en"
+          >
             {backendMessage}
           </span>
         ) : null}
         {coverage !== undefined && coverage !== "" ? (
           <span
             data-verbatim="coverage"
-            className="block whitespace-pre-wrap break-words"
+            className="block whitespace-pre-wrap break-words text-foreground"
             lang="en"
           >
             {coverage}
           </span>
         ) : null}
-        <code className="block break-all text-xs opacity-80">{code}</code>
+        <code className="block break-all text-xs text-foreground opacity-80">{code}</code>
       </AlertDescription>
     </Alert>
   );

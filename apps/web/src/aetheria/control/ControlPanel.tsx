@@ -57,22 +57,30 @@ export function ControlPanel({ environmentId, rootSessionId, drafts }: ControlPa
       ) : null}
       {view.status === "unavailable" ? (
         <Alert variant="error" role="alert">
-          <AlertDescription>The Backend's requests are unavailable: {view.reason}</AlertDescription>
+          <AlertDescription>
+            <span className="text-foreground">
+              The Backend's requests are unavailable: {view.reason}
+            </span>
+          </AlertDescription>
         </Alert>
       ) : null}
       {view.status === "stale" ? (
         <Alert variant="warning" role="status">
           <AlertDescription>
-            This may be out of date: {view.reason}. It shows what was last read (version{" "}
-            {view.version}) and is being read again.
+            <span className="text-foreground">
+              This may be out of date: {view.reason}. It shows what was last read (version{" "}
+              {view.version}) and is being read again.
+            </span>
           </AlertDescription>
         </Alert>
       ) : null}
       {vanished.length > 0 ? (
         <Alert variant="warning" role="status" data-vanished>
           <AlertDescription>
-            No longer in the Backend's list: {vanished.join(", ")}. That does not mean it was
-            answered or completed; the list is the Backend's, and it no longer includes it.
+            <span className="text-foreground">
+              No longer in the Backend's list: {vanished.join(", ")}. That does not mean it was
+              answered or completed; the list is the Backend's, and it no longer includes it.
+            </span>
           </AlertDescription>
         </Alert>
       ) : null}

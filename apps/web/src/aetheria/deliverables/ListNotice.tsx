@@ -47,10 +47,13 @@ export function ListNotice({
       </AlertTitle>
       <AlertDescription>
         {code === undefined ? null : (
-          <span className="block break-words text-xs">Code: {code}</span>
+          <span className="block break-words text-xs text-foreground">Code: {code}</span>
         )}
         {detail !== undefined && detail !== "" ? (
-          <span data-verbatim="backend" className="block whitespace-pre-wrap break-words">
+          <span
+            data-verbatim="backend"
+            className="block whitespace-pre-wrap break-words text-foreground"
+          >
             {detail}
           </span>
         ) : null}
