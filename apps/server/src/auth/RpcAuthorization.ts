@@ -243,6 +243,9 @@ export const RPC_REQUIRED_SCOPES = {
   [AETHERIA_WS_METHODS.jobsOutboxList]: AuthOrchestrationReadScope,
   [AETHERIA_WS_METHODS.jobsKill]: AuthOrchestrationOperateScope,
   [AETHERIA_WS_METHODS.usageRead]: AuthOrchestrationReadScope,
+  // AETHERIA-IP:IP-58 explicit scopes for the declared region registry (M10 step 23): both methods change only the caller's own client record, so orchestration:read suffices
+  [AETHERIA_WS_METHODS.regionsReport]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.regionsRead]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

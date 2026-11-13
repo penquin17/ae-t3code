@@ -1,6 +1,7 @@
 import { SidebarChromeFooter, SidebarChromeHeader } from "../../components/sidebar/SidebarChrome";
 import { SidebarContent } from "../../components/ui/sidebar";
 import { isElectron } from "../../env";
+import { ConnectionStatus } from "../connection/ConnectionStatus";
 import { SessionsPanel } from "./SessionsPanel";
 
 /**
@@ -13,6 +14,7 @@ export function AetheriaSidebar() {
     <>
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent>
+        <ConnectionStatus className="mx-2 mb-2 w-auto" />
         <SessionsPanel />
       </SidebarContent>
       <SidebarChromeFooter />

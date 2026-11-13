@@ -469,6 +469,9 @@ export const routeLayer = (backend: Backend, options: DownloadRouteOptions = {})
           "x-aetheria-digest": served.digest,
           "x-aetheria-size": String(served.bytes.length),
           "x-aetheria-semantics": served.semantics,
+          // T3's CORS exposes no response headers, so a cross-origin page (Bearer) reads the digest, size and semantics only if the success names them.
+          "access-control-expose-headers":
+            "x-aetheria-digest, x-aetheria-size, x-aetheria-semantics",
         },
       });
     }),

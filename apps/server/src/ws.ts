@@ -20,6 +20,8 @@ import * as AetheriaDeliverables from "./aetheria/deliverablesRpc.ts";
 // AETHERIA-IP:IP-56 the jobs view and the usage read's client methods (Aetheria-owned); the actor comes from the connection
 import * as AetheriaJobs from "./aetheria/jobsRpc.ts";
 import * as AetheriaUsage from "./aetheria/usageRpc.ts";
+// AETHERIA-IP:IP-60 the declared region registry's client methods and the subscribeThread observer (Aetheria-owned); the principal comes from the connection
+import * as AetheriaRegions from "./aetheria/regionsRpc.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 
@@ -1487,6 +1489,11 @@ export const layerWsRpc = (
       const aetheriaBackend = yield* Effect.serviceOption(AetheriaBackend);
       // AETHERIA-IP:IP-22 the connection's actor (session id, granted scopes, authentication time); never read from a payload
       const aetheriaActor = yield* AetheriaHumanControl.connectionActor(currentSession);
+      // AETHERIA-IP:IP-60 the connection's handle on the region registry, bound to the authenticated principal; its finalizer drops the connection's client on disconnect
+      const aetheriaRegionConnection = yield* AetheriaRegions.openRegionConnection(
+        aetheriaActor,
+        currentSession.subject,
+      );
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -2284,9 +2291,14 @@ export const layerWsRpc = (
         [ORCHESTRATION_V2_WS_METHODS.subscribeShell]: (input) =>
           Stream.unwrap(subscribeOrchestrationV2Shell(input)),
         [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input) =>
-          Stream.unwrap(
-            Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
-              Effect.andThen(subscribeOrchestrationV2Thread(input)),
+          // AETHERIA-IP:IP-60 the Backend observes which thread this connection views from this authenticated subscription (XC-19); the wrap adds no element and ends with the stream
+          AetheriaRegions.observeViewing(
+            aetheriaRegionConnection,
+            input.threadId,
+            Stream.unwrap(
+              Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+                Effect.andThen(subscribeOrchestrationV2Thread(input)),
+              ),
             ),
           ),
         [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: (input) =>
@@ -3478,6 +3490,11 @@ export const layerWsRpc = (
           AetheriaJobs.jobsKill(aetheriaBackend, aetheriaActor, input),
         [AETHERIA_WS_METHODS.usageRead]: (input) =>
           AetheriaUsage.usageRead(aetheriaBackend, aetheriaActor, input),
+        // AETHERIA-IP:IP-60 the declared region registry (M10 step 23). T3 authorizes the read scope before these run (IP-58); each handler re-reads the device session on every call and the state binds the client to this connection's principal
+        [AETHERIA_WS_METHODS.regionsReport]: (input) =>
+          AetheriaRegions.regionsReport(aetheriaRegionConnection, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.regionsRead]: (input) =>
+          AetheriaRegions.regionsRead(aetheriaRegionConnection, aetheriaActor, input),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =

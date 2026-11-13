@@ -22,27 +22,30 @@ export function PlanModeCard({ sessionId, view, actions, onRefresh }: PlanModeCa
   const [report, setReport] = useState<ActionReport<unknown> | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const setMode = async (mode: PlanMode) => {
+    const result = await actions.planModeSet({
+      sessionId,
+      active: !mode.active,
+      expectedModeRevision: mode.modeRevision,
+    });
+    // A conflict or an unknown reply leaves the shown mode unproven: re-read it (a confirmed set was already read back).
+    if (
+      result.sent &&
+      result.reply.reread &&
+      !(result.outcome.kind === "confirmed" && result.outcome.refreshed)
+    ) {
+      await onRefresh();
+    }
+    if (result.sent && result.current) setReport(result);
+  };
+
   const toggle = async (mode: PlanMode) => {
     setBusy(true);
-    try {
-      const result = await actions.planModeSet({
-        sessionId,
-        active: !mode.active,
-        expectedModeRevision: mode.modeRevision,
-      });
-      // A conflict or an unknown reply leaves the shown mode unproven: re-read it (a confirmed set was already read back).
-      if (
-        result.sent &&
-        result.reply.reread &&
-        !(result.outcome.kind === "confirmed" && result.outcome.refreshed)
-      ) {
-        await onRefresh();
-      }
-      if (result.sent && result.current) setReport(result);
-    } finally {
+    // `.finally` rather than try/finally: React Compiler cannot compile a `try` without a `catch`.
+    await setMode(mode).finally(() => {
       setBusy(false);
       sectionRef.current?.focus();
-    }
+    });
   };
 
   return (

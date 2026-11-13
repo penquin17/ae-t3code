@@ -76,19 +76,21 @@ export function InteractionCard({ record, actions, drafts }: InteractionCardProp
     markAttempted: () => setAttempted(true),
     run: async (label, send, onConfirmed) => {
       setBusy(true);
-      try {
-        const result = await send(actions);
-        // A reply to an older action never replaces what a newer one said.
-        if (result.sent && result.current) {
-          setReport(result);
-          setReportLabel(label);
-        }
-        if (result.sent && result.outcome.kind === "confirmed") onConfirmed?.();
-      } finally {
-        setBusy(false);
-        // The button that was pressed is disabled while the action runs; focus returns to the card, where the result is said.
-        sectionRef.current?.focus();
-      }
+      // `.finally` rather than try/finally: React Compiler cannot compile a `try` without a `catch`.
+      await send(actions)
+        .then((result) => {
+          // A reply to an older action never replaces what a newer one said.
+          if (result.sent && result.current) {
+            setReport(result);
+            setReportLabel(label);
+          }
+          if (result.sent && result.outcome.kind === "confirmed") onConfirmed?.();
+        })
+        .finally(() => {
+          setBusy(false);
+          // The button that was pressed is disabled while the action runs; focus returns to the card, where the result is said.
+          sectionRef.current?.focus();
+        });
     },
   };
 

@@ -63,34 +63,41 @@ export function useJobs(input: {
     if (inFlight.current.has(key)) return;
     inFlight.current.add(key);
     setKilling(new Set(inFlight.current));
-    try {
-      const run = await runner.run<KillValue>(key, {
-        label: "Kill",
-        send: async (): Promise<SendResult<KillValue>> => {
-          try {
-            return killSendFromReply(
-              await transport.kill({ environmentId, rootThreadId: forRoot, jobId: row.jobId }),
-            );
-          } catch {
-            // A call that threw never told us what the Backend did: it is a lost reply, not a refusal.
-            return { tag: "lost" };
-          }
-        },
-        confirm: async (accepted) => killConfirm(await list.refresh(), accepted.jobId),
-      });
-      if (run.outcome.kind === "unknown") void list.refresh();
-      // The page may have moved to another root while the Kill was away: its notice belongs to the root it was sent for.
-      if (root.current !== forRoot || !run.current) return;
-      setNotice({
-        rootThreadId: forRoot,
-        jobId: row.jobId,
-        label: row.label,
-        outcome: run.outcome,
-      });
-    } finally {
+    // `.finally` rather than try/finally: React Compiler cannot compile a `try` without a `catch`.
+    await runKill(forRoot, key, row).finally(() => {
       inFlight.current.delete(key);
       setKilling(new Set(inFlight.current));
-    }
+    });
+  }
+
+  async function runKill(
+    forRoot: string,
+    key: string,
+    row: { readonly jobId: string; readonly label: string },
+  ): Promise<void> {
+    const run = await runner.run<KillValue>(key, {
+      label: "Kill",
+      send: async (): Promise<SendResult<KillValue>> => {
+        try {
+          return killSendFromReply(
+            await transport.kill({ environmentId, rootThreadId: forRoot, jobId: row.jobId }),
+          );
+        } catch {
+          // A call that threw never told us what the Backend did: it is a lost reply, not a refusal.
+          return { tag: "lost" };
+        }
+      },
+      confirm: async (accepted) => killConfirm(await list.refresh(), accepted.jobId),
+    });
+    if (run.outcome.kind === "unknown") void list.refresh();
+    // The page may have moved to another root while the Kill was away: its notice belongs to the root it was sent for.
+    if (root.current !== forRoot || !run.current) return;
+    setNotice({
+      rootThreadId: forRoot,
+      jobId: row.jobId,
+      label: row.label,
+      outcome: run.outcome,
+    });
   }
 
   const visibleNotice = notice !== null && notice.rootThreadId === rootThreadId ? notice : null;

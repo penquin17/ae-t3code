@@ -97,34 +97,37 @@ export function useChildren(input: {
     if (row.state === "closed" || inFlight.current.has(key)) return;
     inFlight.current.add(key);
     setStopping(new Set(inFlight.current));
-    try {
-      const target = { environmentId, rootThreadId: forRoot, childThreadId: row.childId };
-      const run = await runner.run(key, {
-        label: "Stop",
-        send: () =>
-          childStopSend(
-            {
-              list: () => settled(() => calls.list({ environmentId, rootThreadId: forRoot })),
-              interrupt: () => settled(() => calls.interrupt(target)),
-              close: () => settled(() => calls.close(target)),
-            },
-            { rootThreadId: forRoot, childThreadId: row.childId },
-          ),
-      });
-      // The page may have moved to another root while the Stop was away: its re-read and notice belong to the root it was sent for.
-      if (root.current !== forRoot) return;
-      const readBack = await read(forRoot);
-      if (!run.current || root.current !== forRoot) return;
-      setNotice({
-        rootThreadId: forRoot,
-        childId: row.childId,
-        name: row.name,
-        outcome: stopWithReadBack(run.outcome, row.childId, row.mode, readBack),
-      });
-    } finally {
+    // `.finally` rather than try/finally: React Compiler cannot compile a `try` without a `catch`.
+    await runStop(forRoot, key, row).finally(() => {
       inFlight.current.delete(key);
       setStopping(new Set(inFlight.current));
-    }
+    });
+  }
+
+  async function runStop(forRoot: string, key: string, row: ChildRowView): Promise<void> {
+    const target = { environmentId, rootThreadId: forRoot, childThreadId: row.childId };
+    const run = await runner.run(key, {
+      label: "Stop",
+      send: () =>
+        childStopSend(
+          {
+            list: () => settled(() => calls.list({ environmentId, rootThreadId: forRoot })),
+            interrupt: () => settled(() => calls.interrupt(target)),
+            close: () => settled(() => calls.close(target)),
+          },
+          { rootThreadId: forRoot, childThreadId: row.childId },
+        ),
+    });
+    // The page may have moved to another root while the Stop was away: its re-read and notice belong to the root it was sent for.
+    if (root.current !== forRoot) return;
+    const readBack = await read(forRoot);
+    if (!run.current || root.current !== forRoot) return;
+    setNotice({
+      rootThreadId: forRoot,
+      childId: row.childId,
+      name: row.name,
+      outcome: stopWithReadBack(run.outcome, row.childId, row.mode, readBack),
+    });
   }
 
   const visible: ListState =

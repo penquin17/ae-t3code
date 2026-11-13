@@ -82,28 +82,31 @@ export function useAetheriaStop() {
     },
   });
 
+  const runStop = async (target: StopTarget, key: string): Promise<StopResult> => {
+    const run = target.isSubagent
+      ? await runner.run(key, childStep(target))
+      : await runner.run(key, treeStep(target));
+    const outcome = target.isSubagent
+      ? run.outcome
+      : stopOutcomeFromAccepted(run.outcome as ActionOutcome<CancelTreeValue>);
+    const notice = stopNotice(outcome);
+    if (notice.tone !== "ok") {
+      toastManager.add({
+        type: notice.tone === "warning" ? "warning" : "error",
+        title: notice.text,
+      });
+    }
+    return { sent: true, outcome, notice };
+  };
+
   const stop = async (target: StopTarget): Promise<StopResult> => {
     const key = `${target.environmentId}:${target.threadId}`;
     if (inFlight.current.has(key)) return { sent: false };
     inFlight.current.add(key);
-    try {
-      const run = target.isSubagent
-        ? await runner.run(key, childStep(target))
-        : await runner.run(key, treeStep(target));
-      const outcome = target.isSubagent
-        ? run.outcome
-        : stopOutcomeFromAccepted(run.outcome as ActionOutcome<CancelTreeValue>);
-      const notice = stopNotice(outcome);
-      if (notice.tone !== "ok") {
-        toastManager.add({
-          type: notice.tone === "warning" ? "warning" : "error",
-          title: notice.text,
-        });
-      }
-      return { sent: true, outcome, notice };
-    } finally {
+    // `.finally` rather than try/finally: React Compiler cannot compile a `try` without a `catch`.
+    return runStop(target, key).finally(() => {
       inFlight.current.delete(key);
-    }
+    });
   };
 
   return { stop };

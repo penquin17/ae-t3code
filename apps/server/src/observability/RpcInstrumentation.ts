@@ -255,6 +255,9 @@ const RPC_AGGREGATES = {
   [AETHERIA_WS_METHODS.jobsOutboxList]: "aetheria",
   [AETHERIA_WS_METHODS.jobsKill]: "aetheria",
   [AETHERIA_WS_METHODS.usageRead]: "aetheria",
+  // AETHERIA-IP:IP-59 span-aggregate labels for the declared region registry (M10 step 23); same exhaustive map
+  [AETHERIA_WS_METHODS.regionsReport]: "aetheria",
+  [AETHERIA_WS_METHODS.regionsRead]: "aetheria",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

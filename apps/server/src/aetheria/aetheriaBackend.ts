@@ -43,6 +43,7 @@ import { makeCallerContext } from "./callerContext.ts";
 import { makeThreadTurnDispatch } from "./humanControlDelivery.ts";
 import { makeLaunchFacts } from "./launchFacts.ts";
 import { makeLineageReader } from "./lineageReader.ts";
+import { drainSharedRegionRegistry } from "./regionsState.ts";
 import { makeChildThreadPort } from "./threadPort.ts";
 
 const STATE_ROOT_ENV = "AETHERIA_STATE_ROOT";
@@ -253,6 +254,12 @@ export const makeLayer = (
       yield* Effect.acquireRelease(
         Effect.sync(() => installPiSelectionSeam(service.piSelectionSeam)),
         (release) => Effect.sync(release),
+      );
+      // M10 step 23 (XC-7): the region registry drains with the Backend.
+      yield* Effect.addFinalizer(() =>
+        Effect.suspend(() =>
+          Effect.logInfo("Aetheria region registry drained", drainSharedRegionRegistry()),
+        ),
       );
       // Events up to the log's head now are history to this Backend: the board treats liveness from them as unknown. If the head cannot be
       // read the horizon stays unset and every holder is unknown (open and visible, never a stale "active" or "free").

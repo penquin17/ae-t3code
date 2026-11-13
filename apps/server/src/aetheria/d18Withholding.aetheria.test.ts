@@ -233,16 +233,14 @@ const runOnce = async (config: { aetheria: boolean; callName: string }): Promise
     await new Promise((r) => child.once("close", r));
     await stub.close();
   }
-  const requests = provider
-    .requests()
-    .map((entry: { n: number }) =>
-      (
-        (provider.bodyOf(entry.n)?.tools ?? []) as Array<{
-          function?: { name?: string };
-          name?: string;
-        }>
-      ).map((tool) => String(tool.function?.name ?? tool.name ?? "")),
-    );
+  const requests = provider.requests().map((entry: { n: number }) =>
+    (
+      (provider.bodyOf(entry.n)?.tools ?? []) as Array<{
+        function?: { name?: string };
+        name?: string;
+      }>
+    ).map((tool) => String(tool.function?.name ?? tool.name ?? "")),
+  );
   await provider.close?.();
   return { requests, stubCalls: { ...stub.calls }, toolResults };
 };

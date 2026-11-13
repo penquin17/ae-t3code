@@ -60,6 +60,12 @@ import {
   ClientJobsOutputPayload,
   ClientJobsOutputResult,
 } from "./jobsOperations.ts";
+import {
+  RegionsReadPayload,
+  RegionsReadResult,
+  RegionsReportPayload,
+  RegionsReportResult,
+} from "./regionsOperations.ts";
 import { ClientUsageReadPayload, ClientUsageReadResult } from "./usageOperations.ts";
 
 export const AETHERIA_WS_METHODS = {
@@ -95,6 +101,9 @@ export const AETHERIA_WS_METHODS = {
   jobsKill: "aetheria.jobs.kill",
   // M10 step 18 (D14, XC-11): the providers' usage and the route availability of a root's children (a read, `orchestration:read`).
   usageRead: "aetheria.usage.read",
+  // M10 step 23 (D17, XC-19): the declared region registry. `report` replaces this client's mounted-region set; `read` returns this connection's own stored client. Both are `orchestration:read`: they change only the caller's own record.
+  regionsReport: "aetheria.regions.report",
+  regionsRead: "aetheria.regions.read",
 } as const;
 
 /** The Backend is not attached or has not produced a status; the caller sees this instead of an invented value. */
@@ -266,10 +275,25 @@ const AetheriaJobsRpcGroup = RpcGroup.make(
 );
 const AetheriaUsageRpcGroup = RpcGroup.make(AetheriaUsageReadRpc);
 
+// The declared region registry (M10 step 23). Payloads carry a client id, a sequence and the declared regions only; the principal comes from the connection and the viewed thread from T3's own subscription. A failure is a coded value in the reply.
+const AetheriaRegionsReportRpc = Rpc.make(AETHERIA_WS_METHODS.regionsReport, {
+  payload: RegionsReportPayload,
+  success: RegionsReportResult,
+});
+const AetheriaRegionsReadRpc = Rpc.make(AETHERIA_WS_METHODS.regionsRead, {
+  payload: RegionsReadPayload,
+  success: RegionsReadResult,
+});
+export const AetheriaRegionsRpcGroup = RpcGroup.make(
+  AetheriaRegionsReportRpc,
+  AetheriaRegionsReadRpc,
+);
+
 export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc)
   .merge(AetheriaInteractionRpcGroup)
   .merge(AetheriaChildrenRpcGroup)
   .merge(AetheriaGroupsRpcGroup)
   .merge(AetheriaDeliverablesRpcGroup)
   .merge(AetheriaJobsRpcGroup)
-  .merge(AetheriaUsageRpcGroup);
+  .merge(AetheriaUsageRpcGroup)
+  .merge(AetheriaRegionsRpcGroup);

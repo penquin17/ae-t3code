@@ -10,6 +10,7 @@ export * from "./jobsOperations.ts";
 export * from "./lifecycleSnapshot.ts";
 export * from "./orchestrationOperations.ts";
 export * from "./providersOperations.ts";
+export * from "./regionsOperations.ts";
 export * from "./researchOperations.ts";
 export * from "./rpc.ts";
 export * from "./usageOperations.ts";

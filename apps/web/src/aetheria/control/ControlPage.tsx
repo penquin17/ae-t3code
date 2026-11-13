@@ -4,6 +4,7 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { SidebarInset } from "../../components/ui/sidebar";
 import { useThreadProjection } from "../../state/entities";
 import { ChildrenPanel } from "../children/ChildrenPanel";
+import { ConnectionStatus } from "../connection/ConnectionStatus";
 import { IDENTITY_UNKNOWN_TEXT, piSessionIdOf } from "./binding";
 import { ControlPanel } from "./ControlPanel";
 import { GoalsCard } from "./goals/GoalsCard";
@@ -33,6 +34,7 @@ export function ControlPage({
         style={{ paddingBottom: "max(2rem, env(safe-area-inset-bottom))" }}
       >
         <h1 className="text-lg font-medium text-foreground">Human control</h1>
+        <ConnectionStatus />
         {binding.state === "known" ? (
           <ControlPanel
             key={`${environmentId}:${binding.value}`}

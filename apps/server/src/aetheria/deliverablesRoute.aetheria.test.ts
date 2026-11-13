@@ -876,6 +876,31 @@ describe("response headers", () => {
       );
     },
   );
+
+  it.live(
+    "a success exposes the digest, size and semantics headers to a cross-origin page, and a refusal exposes none",
+    () => {
+      const w = world();
+      return withRoute(w, undefined, ({ get, issue, bearer }) =>
+        Effect.gen(function* () {
+          const { token } = yield* issue([FS_READ]);
+          const { id } = yield* Effect.promise(() => w.declare(ROOT_A, "page.md", "hello"));
+          const reply = yield* get(url(id), bearer(token));
+          expect(reply.status).toBe(200);
+          const exposed = (reply.headers["access-control-expose-headers"] ?? "")
+            .split(",")
+            .map((name) => name.trim().toLowerCase())
+            .toSorted();
+          expect(exposed).toEqual(["x-aetheria-digest", "x-aetheria-semantics", "x-aetheria-size"]);
+          // Each exposed header is actually sent, so the page can read the digest it was promised.
+          for (const name of exposed) expect(reply.headers[name]).toBeDefined();
+          const denied = yield* get(url(id), {});
+          expect(denied.status).not.toBe(200);
+          expect(denied.headers["access-control-expose-headers"]).toBeUndefined();
+        }),
+      );
+    },
+  );
 });
 
 describe("no credential in any URL, response or log", () => {
