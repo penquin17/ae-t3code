@@ -207,6 +207,19 @@ function SessionRow(props: {
                 Open human control
               </MenuItem>
             )}
+            {control === null ? null : (
+              <MenuItem
+                render={
+                  <Link
+                    to="/aetheria/deliverables/$environmentId/$threadId"
+                    params={control}
+                    aria-label={`Deliverables for ${row.title}`}
+                  />
+                }
+              >
+                Deliverables
+              </MenuItem>
+            )}
             <MenuItem
               onClick={() =>
                 props.onResult(row.pinned ? "Unpin" : "Pin", actions.pin(row.id, !row.pinned))

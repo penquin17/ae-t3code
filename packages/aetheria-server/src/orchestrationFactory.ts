@@ -21,6 +21,7 @@ import type {
   OrchestrationOperation,
   OrchestrationOutcome,
   OrchestrationService,
+  OrchestrationDirectApi,
   OrchestrationServiceDeps,
   OrchestrationServiceFactory,
 } from "./orchestration.ts";
@@ -33,7 +34,9 @@ import {
   createJobOutput,
   createJobRegistry,
   createJobRetention,
+  createJobUserReads,
   createJobWakes,
+  createOutboxUserRead,
   jobLostKey,
   lostNoticeOwed,
   nodeHostProcessPort,
@@ -164,6 +167,8 @@ interface Running {
   readonly wakes: JobWakes;
   readonly identity: ManagedIdentityWriter;
   readonly children: ChildService;
+  /** The direct Backend API: the children service's own calls plus the user's job and outbox reads. */
+  readonly direct: OrchestrationDirectApi;
   readonly watchers: Map<string, { unsubscribe(): void }>;
   readonly notifyLost: (jobId: string, boot: boolean) => Promise<void>;
   /** Step 19a: the terminal-output retention sweeps, started once boot has succeeded and stopped first at drain. */
@@ -418,6 +423,20 @@ export function createOrchestrationFactory(
         waitDefaultMs: () => orchestrationParameter("waitDefaultMs"),
         waitCapMs: () => orchestrationParameter("waitCapMs"),
       });
+      // The user's own job and outbox reads (M10 step 18): the caller is the device-checked user and the root names the owner; none is an XC-6 operation.
+      const userJobs = createJobUserReads({
+        registry,
+        port: nodeJobOutputPort({ stateRoot: deps.stateRoot }),
+        lifecycle,
+        sessionOfThread: deps.sessionOfThread,
+        onLost: (jobId) => notifyLost(jobId, false),
+      });
+      const userOutbox = createOutboxUserRead({
+        registry,
+        store,
+        outbox,
+        sessionOfThread: deps.sessionOfThread,
+      });
       state = {
         store,
         jobs,
@@ -426,6 +445,7 @@ export function createOrchestrationFactory(
         wakes,
         identity,
         children,
+        direct: Object.freeze({ ...children, ...userJobs, ...userOutbox }),
         watchers,
         notifyLost,
         sweeps: {},
@@ -787,7 +807,7 @@ export function createOrchestrationFactory(
     };
 
     // The direct API for trusted Backend modules (step 14): the running archive service, nothing wrapped, nothing registered as an XC-6 operation.
-    const direct: OrchestrationService["direct"] = () => (draining ? undefined : running?.children);
+    const direct: OrchestrationService["direct"] = () => (draining ? undefined : running?.direct);
 
     return { start, handle, drain, direct };
   };

@@ -3,7 +3,7 @@
 // expiry) and a real loopback HTTP server, with the REAL declaration store, real files in temporary folders, and a FAKE snapshot store, thread index, access rule and board read.
 //
 // It shows: authentication on EVERY request, before anything about an id is answered (a missing, forged, revoked or expired credential is 401, a revoked one only after it had worked); the
-// credential is read from the Bearer header alone (a token in the query or a cookie is no credential); `filesystem:read` is checked by the route itself (orchestration scopes do not admit it);
+// credential is the Bearer header or T3's own session cookie from the app's own origin (a token in the query is no credential, and T3 refuses a cookie from another origin); `filesystem:read` is checked by the route itself (orchestration scopes do not admit it);
 // a declaration or offered path of another root, an unknown id and a thread the connection may not reach all answer the same 404; bytes come from the attached snapshot for `as-delivered` (pending,
 // unavailable, missing and mismatching snapshots are refusals that say so, and the stream is always closed) and from the file for `current` (symlink, directory, deleted, replaced parent, outside
 // the root, replaced or changed during the read, and over the cap are refusals); offered edit paths are served only when the board still offers them; headers are attachment-only with a sanitised
@@ -260,9 +260,11 @@ const withRoute = <A, E>(
     issue: (
       scopes: ReadonlyArray<string>,
       ttl?: Duration.Duration,
+      method?: "bearer-access-token" | "browser-session-cookie",
     ) => Effect.Effect<{ token: string; sessionId: string }, any, any>;
     revoke: (sessionId: string) => Effect.Effect<void, any, any>;
     bearer: (token: string) => Record<string, string>;
+    cookie: (token: string, origin?: string) => Record<string, string>;
     seen: string[];
     logs: string[];
   }) => Effect.Effect<A, E, any>,
@@ -300,18 +302,29 @@ const withRoute = <A, E>(
           seen.push(JSON.stringify(reply.headers), reply.json === undefined ? "" : text);
           return reply;
         });
-      const issue = (scopes: ReadonlyArray<string>, ttl?: Duration.Duration) =>
+      const issue = (
+        scopes: ReadonlyArray<string>,
+        ttl?: Duration.Duration,
+        method: "bearer-access-token" | "browser-session-cookie" = "bearer-access-token",
+      ) =>
         sessions
           .issue({
             scopes: scopes as never,
-            method: "bearer-access-token",
+            method,
             subject: "device",
             ...(ttl === undefined ? {} : { ttl }),
           })
           .pipe(Effect.map((issued) => ({ token: issued.token, sessionId: issued.sessionId })));
       const revoke = (sessionId: string) => sessions.revoke(sessionId as never);
       const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
-      return yield* body({ get, issue, revoke, bearer, seen, logs });
+      /** T3's own browser session as a same-origin page sends it: the session cookie, and the origin the app was served from. */
+      const cookie = (token: string, origin?: string) => ({
+        cookie: `${sessions.cookieName}=${token}`,
+        ...(origin === undefined
+          ? {}
+          : { origin, "sec-fetch-site": origin === SAME_ORIGIN ? "same-origin" : "cross-site" }),
+      });
+      return yield* body({ get, issue, revoke, bearer, cookie, seen, logs });
     }),
   ).pipe(
     Effect.provide(
@@ -332,6 +345,8 @@ const refused = (reply: Reply, code: keyof typeof DELIVERABLE_DOWNLOAD_REFUSAL_S
 };
 const url = (id: string, query = "") => `${DELIVERABLE_DOWNLOAD_PATH}/${id}${query}`;
 const unknownId = `dlv_${"0".repeat(32)}`;
+/** The origin the test server is served from, as a page there would name it (the loopback server's host). */
+const SAME_ORIGIN = "http://127.0.0.1:13774";
 
 describe("authentication on every request", () => {
   it.live("answers 401 before anything about the id is looked at, with no Backend call", () => {
@@ -343,19 +358,69 @@ describe("authentication on every request", () => {
         const forged = yield* get(url(unknownId), bearer("not-a-session-token"));
         refused(forged, "DOWNLOAD_UNAUTHENTICATED");
         const { token } = yield* issue([FS_READ]);
-        // A credential anywhere but the Bearer header is no credential: a query parameter, a cookie.
+        // A credential in the query is no credential, whatever the names it goes by.
         refused(
           yield* get(url(unknownId, `?access_token=${token}&token=${token}`)),
-          "DOWNLOAD_BEARER_REQUIRED",
-        );
-        refused(
-          yield* get(url(unknownId), { cookie: `t3_session=${token}` }),
           "DOWNLOAD_BEARER_REQUIRED",
         );
         expect(w.calls).toEqual([]);
       }),
     );
   });
+
+  it.live(
+    "accepts T3's own signed-in session from the app's own origin, with filesystem:read, and refuses it otherwise",
+    () => {
+      const w = world();
+      return withRoute(w, undefined, ({ get, issue, revoke, bearer, cookie }) =>
+        Effect.gen(function* () {
+          const { id } = yield* Effect.promise(() => w.declare(ROOT_A, "a.txt", "alpha"));
+          const session = yield* issue([FS_READ], undefined, "browser-session-cookie");
+          // Same origin: with no Origin header (a plain navigation or fetch) and with the app's own origin.
+          ok(yield* get(url(id), cookie(session.token)), "alpha");
+          ok(yield* get(url(id), cookie(session.token, SAME_ORIGIN)), "alpha");
+          // A cookie is not enough when the scope is missing: the route's own check still runs.
+          const narrow = yield* issue([ORCH_READ], undefined, "browser-session-cookie");
+          refused(
+            yield* get(url(id), cookie(narrow.token, SAME_ORIGIN)),
+            "DOWNLOAD_NOT_AUTHORIZED",
+          );
+          // T3 refuses a cookie from another origin: the route inherits that, so a page elsewhere cannot download with the user's session.
+          w.calls.length = 0;
+          refused(
+            yield* get(url(id), cookie(session.token, "https://evil.example")),
+            "DOWNLOAD_UNAUTHENTICATED",
+          );
+          expect(w.calls).toEqual([]);
+          // The session is re-read on every request: a revoked cookie session is refused on the next one.
+          yield* revoke(session.sessionId);
+          refused(
+            yield* get(url(id), cookie(session.token, SAME_ORIGIN)),
+            "DOWNLOAD_UNAUTHENTICATED",
+          );
+          // Bearer is unchanged: it still works with no cookie and no origin.
+          const device = yield* issue([FS_READ]);
+          ok(yield* get(url(id), bearer(device.token)), "alpha");
+        }),
+      );
+    },
+  );
+
+  it.live(
+    "a query credential is refused even beside a session that has no credential of its own",
+    () => {
+      const w = world();
+      return withRoute(w, undefined, ({ get, issue }) =>
+        Effect.gen(function* () {
+          const { id } = yield* Effect.promise(() => w.declare(ROOT_A, "a.txt", "alpha"));
+          const { token } = yield* issue([FS_READ], undefined, "browser-session-cookie");
+          refused(yield* get(url(id, `?access_token=${token}`)), "DOWNLOAD_BEARER_REQUIRED");
+          refused(yield* get(url(id, `?token=${token}`)), "DOWNLOAD_BEARER_REQUIRED");
+          expect(w.calls).toEqual([]);
+        }),
+      );
+    },
+  );
 
   it.live("a credential that worked is refused once revoked, on the very next request", () => {
     const w = world();

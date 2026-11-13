@@ -94,9 +94,9 @@ export type ProvidersBackendRegistration = BackendRegistration & {
   readonly routeCapabilities: (route: Route) => RouteCapabilities;
   /**
    * M05 steps 21 and 22: M09's route states and failure report, in-process, for the children service's fallback. Each throws while the service is not running; the reader turns a throw into
-   * `unknown` / `other`, never into `out` or a switch (the module's fallback/consult.ts).
+   * `unknown` / `other`, never into `out` or a switch (the module's fallback/consult.ts). M10 step 18 adds `usage` for the client usage read; it throws the same way.
    */
-  readonly availability: Pick<RouteAvailability, "routeStates" | "reportFailure">;
+  readonly availability: Pick<RouteAvailability, "routeStates" | "reportFailure" | "usage">;
   /** Open a snapshot for its owning session (M10's download route); unavailable while snapshots are not running. */
   readonly openSnapshot: ProductionSnapshots["openSnapshot"];
   /** Remove a Pi session's snapshots; unavailable while snapshots are not running. */
@@ -252,6 +252,7 @@ export function createProvidersBackendRegistration(
     availability: {
       routeStates: (routes, purpose) => proxy.routeStates(routes, purpose),
       reportFailure: (route, failure) => proxy.reportFailure(route, failure),
+      usage: (provider) => proxy.usage(provider),
     },
     openSnapshot: (sessionId, snapshotId) =>
       snapshots === undefined

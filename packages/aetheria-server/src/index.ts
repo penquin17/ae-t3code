@@ -94,6 +94,8 @@ export {
   createProjectRootCache,
   type ProjectRootCache,
 } from "./projectRoot.ts";
+/** A stored T3-form route (instance `pi`, slug) as Pi and M09 name it; the client usage read (M10 step 18) shows and asks about routes in this form. */
+export { piRouteOfT3 } from "./routeVocabulary.ts";
 export {
   PI_SELECTION_SEAM_SLOT,
   createPiSelectionSeam,

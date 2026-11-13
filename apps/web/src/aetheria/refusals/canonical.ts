@@ -1,12 +1,15 @@
 // The canonical refusal codes the display table must cover (D14, A3), READ from the real tables, never transcribed: M04's and M03's rows and the T3 decline from the packed awareness archive's
 // `./permissions` subpath (the same archive bytes the Backend consumes, IP-28), and M06's fourteen interaction codes, M10's children and group codes and M05's passed-through codes from
-// `@t3tools/aetheria-contracts`. A code added to any of those tables is canonical here at once, so the drift test fails until it has an English and a Chinese line.
+// `@t3tools/aetheria-contracts` (the jobs and usage codes among them). A code added to any of those tables is canonical here at once, so the drift test fails until it has an English and a Chinese line.
 import { NON_CODE_REFUSALS, REFUSAL_TABLE } from "@aetheria/awareness/permissions";
 import {
   CHILDREN_CONTROL_CODE_CLASSES,
   CHILDREN_PASSTHROUGH_CODES,
   GROUPS_CODE_CLASSES,
   INTERACTION_CODE_CLASSES,
+  JOBS_CONTROL_CODE_CLASSES,
+  JOBS_PASSTHROUGH_CODES,
+  USAGE_CODE_CLASSES,
 } from "@t3tools/aetheria-contracts";
 
 /**
@@ -54,12 +57,19 @@ export const CANONICAL_CODES: readonly CanonicalCode[] = [
   // M10: the children controls' own codes, then the group store's
   ...classed(CHILDREN_CONTROL_CODE_CLASSES, "M10"),
   ...classed(GROUPS_CODE_CLASSES, "M10"),
+  // M10: the jobs controls' own codes, then the usage read's
+  ...classed(JOBS_CONTROL_CODE_CLASSES, "M10"),
+  ...classed(USAGE_CODE_CLASSES, "M10"),
   // M05: passed through the children handler unchanged
   ...CHILDREN_PASSTHROUGH_CODES.map((code): CanonicalCode => ({
     code,
     class: "passthrough",
     owner: "M05",
   })),
+  // M05: the codes the jobs handler passes through that the children handler does not (the shared ones are listed once, above)
+  ...JOBS_PASSTHROUGH_CODES.filter(
+    (code) => !(CHILDREN_PASSTHROUGH_CODES as readonly string[]).includes(code),
+  ).map((code): CanonicalCode => ({ code, class: "passthrough", owner: "M05" })),
 ];
 
 /** Ids for refusals that carry no code, so the table can still name them. */

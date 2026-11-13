@@ -50,6 +50,17 @@ import {
   TasksGetPayload,
   TasksGetResult,
 } from "./interactionOperations.ts";
+import {
+  ClientJobsKillPayload,
+  ClientJobsKillResult,
+  ClientJobsListPayload,
+  ClientJobsListResult,
+  ClientJobsOutboxListPayload,
+  ClientJobsOutboxListResult,
+  ClientJobsOutputPayload,
+  ClientJobsOutputResult,
+} from "./jobsOperations.ts";
+import { ClientUsageReadPayload, ClientUsageReadResult } from "./usageOperations.ts";
 
 export const AETHERIA_WS_METHODS = {
   compositionStatus: "aetheria.composition.status",
@@ -77,6 +88,13 @@ export const AETHERIA_WS_METHODS = {
   // M10 step 14 (D7, D11): a root's deliverable cards and its offered edit paths. Both are reads (`orchestration:read`); bytes come only from the download route, which needs `filesystem:read`.
   deliverablesList: "aetheria.deliverables.list",
   deliverablesOfferedPaths: "aetheria.deliverables.offeredPaths",
+  // M10 step 18 (D14, XC-15/16): a root's jobs, one job's output at explicit offsets, its completion-outbox rows (reads, `orchestration:read`) and the user's kill (`orchestration:operate`).
+  jobsList: "aetheria.jobs.list",
+  jobsOutput: "aetheria.jobs.output",
+  jobsOutboxList: "aetheria.jobs.outbox.list",
+  jobsKill: "aetheria.jobs.kill",
+  // M10 step 18 (D14, XC-11): the providers' usage and the route availability of a root's children (a read, `orchestration:read`).
+  usageRead: "aetheria.usage.read",
 } as const;
 
 /** The Backend is not attached or has not produced a status; the caller sees this instead of an invented value. */
@@ -218,8 +236,40 @@ const AetheriaDeliverablesRpcGroup = RpcGroup.make(
   AetheriaDeliverablesOfferedPathsRpc,
 );
 
+// The jobs controls and the usage read (M10 step 18). Payloads name a root thread (and a job, and offsets) only; a failure is a coded value in the reply, never an empty success.
+const AetheriaJobsListRpc = Rpc.make(AETHERIA_WS_METHODS.jobsList, {
+  payload: ClientJobsListPayload,
+  success: ClientJobsListResult,
+});
+const AetheriaJobsOutputRpc = Rpc.make(AETHERIA_WS_METHODS.jobsOutput, {
+  payload: ClientJobsOutputPayload,
+  success: ClientJobsOutputResult,
+});
+const AetheriaJobsOutboxListRpc = Rpc.make(AETHERIA_WS_METHODS.jobsOutboxList, {
+  payload: ClientJobsOutboxListPayload,
+  success: ClientJobsOutboxListResult,
+});
+const AetheriaJobsKillRpc = Rpc.make(AETHERIA_WS_METHODS.jobsKill, {
+  payload: ClientJobsKillPayload,
+  success: ClientJobsKillResult,
+});
+const AetheriaUsageReadRpc = Rpc.make(AETHERIA_WS_METHODS.usageRead, {
+  payload: ClientUsageReadPayload,
+  success: ClientUsageReadResult,
+});
+
+const AetheriaJobsRpcGroup = RpcGroup.make(
+  AetheriaJobsListRpc,
+  AetheriaJobsOutputRpc,
+  AetheriaJobsOutboxListRpc,
+  AetheriaJobsKillRpc,
+);
+const AetheriaUsageRpcGroup = RpcGroup.make(AetheriaUsageReadRpc);
+
 export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc)
   .merge(AetheriaInteractionRpcGroup)
   .merge(AetheriaChildrenRpcGroup)
   .merge(AetheriaGroupsRpcGroup)
-  .merge(AetheriaDeliverablesRpcGroup);
+  .merge(AetheriaDeliverablesRpcGroup)
+  .merge(AetheriaJobsRpcGroup)
+  .merge(AetheriaUsageRpcGroup);

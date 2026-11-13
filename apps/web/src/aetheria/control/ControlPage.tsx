@@ -6,7 +6,10 @@ import { useThreadProjection } from "../../state/entities";
 import { ChildrenPanel } from "../children/ChildrenPanel";
 import { IDENTITY_UNKNOWN_TEXT, piSessionIdOf } from "./binding";
 import { ControlPanel } from "./ControlPanel";
+import { GoalsCard } from "./goals/GoalsCard";
+import { JobsPanel } from "./jobs/JobsPanel";
 import { cardClass, mutedClass } from "./parts";
+import { UsagePanel } from "./usage/UsagePanel";
 
 /**
  * The human-control page at /aetheria/control/:environmentId/:threadId. The cards need the Backend's Pi session id, which is read from the thread's strong Pi native reference; when
@@ -45,6 +48,9 @@ export function ControlPage({
           </div>
         )}
         <ChildrenPanel environmentId={environmentId} threadId={threadId} />
+        <JobsPanel environmentId={environmentId} threadId={threadId} />
+        <UsagePanel environmentId={environmentId} threadId={threadId} />
+        <GoalsCard />
       </main>
     </SidebarInset>
   );

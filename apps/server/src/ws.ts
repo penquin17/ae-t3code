@@ -17,6 +17,9 @@ import * as AetheriaChildrenControl from "./aetheria/childrenControlRpc.ts";
 import * as AetheriaGroups from "./aetheria/groupsRpc.ts";
 // AETHERIA-IP:IP-53 the deliverable cards and offered edit paths' client methods (Aetheria-owned); the actor comes from the connection
 import * as AetheriaDeliverables from "./aetheria/deliverablesRpc.ts";
+// AETHERIA-IP:IP-56 the jobs view and the usage read's client methods (Aetheria-owned); the actor comes from the connection
+import * as AetheriaJobs from "./aetheria/jobsRpc.ts";
+import * as AetheriaUsage from "./aetheria/usageRpc.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 
@@ -3464,6 +3467,17 @@ export const layerWsRpc = (
           AetheriaDeliverables.deliverablesList(aetheriaBackend, aetheriaActor, input),
         [AETHERIA_WS_METHODS.deliverablesOfferedPaths]: (input) =>
           AetheriaDeliverables.offeredPathsRead(aetheriaBackend, aetheriaActor, input),
+        // AETHERIA-IP:IP-56 the jobs view (M10 step 18) and the usage read. T3 authorizes each scope before these run (IP-54); each handler re-reads the device session on every call and reaches M05's direct user calls or M09's usage once
+        [AETHERIA_WS_METHODS.jobsList]: (input) =>
+          AetheriaJobs.jobsList(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.jobsOutput]: (input) =>
+          AetheriaJobs.jobsOutput(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.jobsOutboxList]: (input) =>
+          AetheriaJobs.jobsOutboxList(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.jobsKill]: (input) =>
+          AetheriaJobs.jobsKill(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.usageRead]: (input) =>
+          AetheriaUsage.usageRead(aetheriaBackend, aetheriaActor, input),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =

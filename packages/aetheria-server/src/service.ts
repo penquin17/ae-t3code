@@ -55,7 +55,7 @@ import {
   type IdentityResolution,
 } from "./identity/resolver.ts";
 import { createThreadIndex, type ThreadIndex } from "./identity/threadIndex.ts";
-import type { DisposalReport, Fault, StartResult } from "./library.ts";
+import type { DisposalReport, Fault, RouteAvailability, StartResult } from "./library.ts";
 import {
   createLivenessService,
   type LivenessService,
@@ -186,6 +186,12 @@ export interface AetheriaBackendService {
    * session or an unknown id is ATTACHMENT_MISSING; unavailable while snapshots are not running. The caller closes the stream.
    */
   readonly openSnapshot: ProvidersBackendRegistration["openSnapshot"];
+  /**
+   * M09's usage readings and route states, in process, for the client usage read (M10 step 18, XC-11): exactly these two calls, never the whole availability object and never an XC-6 bridge.
+   * Routes are in Pi's vocabulary (provider and bare model; `piRouteOfT3` converts a stored T3-form route). Each call throws while the providers service is not running; the caller answers
+   * unavailable, never an empty or zero reading.
+   */
+  readonly routeAvailability: Pick<RouteAvailability, "routeStates" | "usage">;
   /**
    * The ONE interaction service (M06), shared by the XC-6 operations, the client RPC handlers and direct consumers; undefined before start and
    * after drain. A caller that finds it undefined answers unavailable, never an invented state.
@@ -578,6 +584,11 @@ export function createAetheriaBackendService(
     }),
     openSnapshot: (sessionId, snapshotId) =>
       providersRegistration.openSnapshot(sessionId, snapshotId),
+    routeAvailability: {
+      routeStates: (routes, purpose) =>
+        providersRegistration.availability.routeStates(routes, purpose),
+      usage: (provider) => providersRegistration.availability.usage(provider),
+    },
     interactions: () => humanControlRegistration.interactions(),
     watchInteractions: (listener, onEnd) => humanControlRegistration.watch(listener, onEnd),
     orchestration: () => orchestrationRegistration.service(),

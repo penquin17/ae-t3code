@@ -249,6 +249,12 @@ const RPC_AGGREGATES = {
   // AETHERIA-IP:IP-52 span-aggregate labels for the deliverable cards and the offered edit paths (M10 step 14); same exhaustive map
   [AETHERIA_WS_METHODS.deliverablesList]: "aetheria",
   [AETHERIA_WS_METHODS.deliverablesOfferedPaths]: "aetheria",
+  // AETHERIA-IP:IP-55 span-aggregate labels for the jobs view and the usage read (M10 step 18); same exhaustive map
+  [AETHERIA_WS_METHODS.jobsList]: "aetheria",
+  [AETHERIA_WS_METHODS.jobsOutput]: "aetheria",
+  [AETHERIA_WS_METHODS.jobsOutboxList]: "aetheria",
+  [AETHERIA_WS_METHODS.jobsKill]: "aetheria",
+  [AETHERIA_WS_METHODS.usageRead]: "aetheria",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

@@ -3,10 +3,10 @@
 // It replaces T3's asset URLs for delivered files (disabled by step 15: a credential in the path, no authentication, absolute media escapes).
 //
 // Authority, in the order the checks run — each before anything about the id is answered, so an unauthenticated caller learns nothing about which ids exist.
-//   1. A `Authorization: Bearer` header is required. The credential is read from that header alone: a token in the query or a cookie is no credential (T3's own request authentication would
-//      otherwise prefer a cookie). No credential is ever in a URL, a redirect, a response or a log line.
-//   2. `EnvironmentAuth.authenticateHttpRequest` runs on EVERY request. It re-reads the persisted session row by its key, with no cache, so a revoked or expired device session is refused on the very
-//      next request. (T3's raw-route helper admits orchestration scopes only, so this route cannot use it.)
+//   1+2. `EnvironmentAuth.authenticateHttpRequest` runs on EVERY request and decides the credential by T3's own rule: an `Authorization: Bearer` header, or T3's session cookie, which T3 accepts only
+//      from the app's own origin (the user's decision for the browser download: no second credential, and no cross-origin cookie). A token in the query is no credential. It re-reads the
+//      persisted session row by its key, with no cache, so a revoked or expired device session is refused on the very next request. No credential is ever in a URL, a redirect, a response or a log
+//      line. (T3's raw-route helper admits orchestration scopes only, so this route cannot use it.)
 //   3. The route checks `filesystem:read` itself.
 //   4. The id is closed: `dlv_…` names a declaration, `off_…` a recorded edit path the board still offers (and names its root by `?root=`, a thread id, not a credential). A client never names a path.
 //   5. Reachability: the declaration's root must be a main root that M03's identity record does not show to be a child, and the host's access rule (`interactions().canAccess`) must let the connection reach
@@ -394,15 +394,17 @@ export const routeLayer = (backend: Backend, options: DownloadRouteOptions = {})
     Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-      // 1. The credential is the Bearer header and nothing else.
-      if (EnvironmentAuth.parseBearerToken(request) === null)
-        return respondRefusal(
-          "DOWNLOAD_BEARER_REQUIRED",
-          "send the device credential as an Authorization Bearer header",
-        );
-      // 2. Authentication on every request: the persisted session is read again, so a revoked or expired one is refused now.
+      // 1+2. Authentication on every request, by T3's own rule: an `Authorization: Bearer` header, or T3's session cookie, which T3 accepts only from the app's own origin (a page elsewhere
+      // cannot download with the user's session). The persisted session is read again each time, so a revoked or expired one is refused now. A request that names no credential (a token in the
+      // query is none) is told so before anything about the id is looked at.
       const authenticated = yield* serverAuth.authenticateHttpRequest(request).pipe(
         Effect.map((session) => ({ kind: "session" as const, session })),
+        Effect.catchIf(
+          (error): error is EnvironmentAuth.ServerAuthMissingCredentialError =>
+            EnvironmentAuth.isServerAuthCredentialError(error) &&
+            error._tag === "ServerAuthMissingCredentialError",
+          () => Effect.succeed({ kind: "missing" as const }),
+        ),
         Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, () =>
           Effect.succeed({ kind: "invalid" as const }),
         ),
@@ -410,6 +412,11 @@ export const routeLayer = (backend: Backend, options: DownloadRouteOptions = {})
           Effect.succeed({ kind: "internal" as const }),
         ),
       );
+      if (authenticated.kind === "missing")
+        return respondRefusal(
+          "DOWNLOAD_BEARER_REQUIRED",
+          "send the device credential as an Authorization Bearer header, or open the page signed in at this server",
+        );
       if (authenticated.kind === "invalid")
         return respondRefusal(
           "DOWNLOAD_UNAUTHENTICATED",

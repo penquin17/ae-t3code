@@ -31,7 +31,7 @@ import {
 } from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "./adapter.ts";
-import type { ChildService } from "./library.ts";
+import type { ChildService, JobUserReads, OutboxUserRead } from "./library.ts";
 import type {
   ChildLineageReader,
   ChildThreadPort,
@@ -107,7 +107,9 @@ export type OrchestrationDirectApi = Pick<
   | "listChildren"
   | "readReport"
   | "currentRoute"
->;
+> &
+  JobUserReads &
+  OutboxUserRead;
 
 /** What a service factory is given: the Backend's own seams, nothing else. The identity store, job registry and outbox are the service's, under `stateRoot`. */
 export interface OrchestrationServiceDeps {

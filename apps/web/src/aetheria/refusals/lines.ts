@@ -279,6 +279,57 @@ export const LINES: DisplayLines = {
     en: "It is not known whether the group change took effect. It was not sent again; check the groups as they are now.",
     zh: "不清楚这项分组更改是否已生效。它没有被重新发送，请查看分组的当前状态。",
   },
+  // M10, the user's jobs controls (zh lines are unreviewed, as the others)
+  JOBS_NOT_AUTHORIZED: {
+    en: "This device is not allowed to do that to jobs: reading jobs needs read access, and a Kill needs operate access.",
+    zh: "此设备无权对作业执行该操作：查看作业需要读取权限，终止作业需要操作权限。",
+  },
+  JOBS_DEVICE_REVOKED: {
+    en: "This device's access was revoked or has expired, so the Backend refused the request. Pair or sign in again to continue.",
+    zh: "此设备的访问权限已被撤销或已过期，后端拒绝了这项请求。请重新配对或登录后继续。",
+  },
+  JOBS_NOT_FOUND: {
+    en: "That job, or the session it belongs to, is not available to this device.",
+    zh: "此设备无法获取该作业，或它所属的会话。",
+  },
+  JOBS_UNAVAILABLE: {
+    en: "The Backend could not read or act on jobs just now. A read shows nothing it did not read; for a Kill, the Backend's own words say what was not done.",
+    zh: "后端目前无法读取或操作作业。读取不会显示未读到的内容；对于终止，请以后端自己的说明为准。",
+  },
+  JOBS_OUTCOME_UNKNOWN: {
+    en: "It is not known whether the Kill took effect: the job may already be ended. It was not sent again; read the job list for the job's state.",
+    zh: "不清楚终止是否已生效：该作业可能已经结束。它没有被重新发送，请查看作业列表中该作业的状态。",
+  },
+  // M10, the usage read's own codes
+  USAGE_NOT_AUTHORIZED: {
+    en: "This device is not allowed to read route availability and usage: its access does not include reading.",
+    zh: "此设备无权读取线路可用性和用量：它的访问权限不包含读取。",
+  },
+  USAGE_DEVICE_REVOKED: {
+    en: "This device's access was revoked or has expired, so the Backend refused the request. Pair or sign in again to continue.",
+    zh: "此设备的访问权限已被撤销或已过期，后端拒绝了这项请求。请重新配对或登录后继续。",
+  },
+  USAGE_NOT_FOUND: {
+    en: "That session is not available to this device, so no route availability or usage was read for it.",
+    zh: "此设备无法获取该会话，所以没有为它读取线路可用性和用量。",
+  },
+  USAGE_UNAVAILABLE: {
+    en: "The Backend could not read route availability and usage just now. Nothing shown is a guess: what was not read is not shown as 0.",
+    zh: "后端目前无法读取线路可用性和用量。显示的内容都不是猜测：未读到的部分不会显示为 0。",
+  },
+  // M05, passed through the jobs handler
+  JOB_NOT_FOUND: {
+    en: "No such job under this session: it may never have existed, or it belongs to another session.",
+    zh: "本会话下没有这个作业：它可能从未存在，或属于另一个会话。",
+  },
+  JOB_CONFLICT: {
+    en: "The job's recorded state does not allow that now, so the Backend did not carry it out. Read the job list for the job's state.",
+    zh: "作业当前记录的状态不允许此操作，后端没有执行。请查看作业列表中该作业的状态。",
+  },
+  JOB_IDENTITY_MISMATCH: {
+    en: "The process now running under the job's recorded id is not the one that was started, so the Backend did not signal it. Read the job list for the job's state.",
+    zh: "目前占用该作业记录编号的进程不是当初启动的那个，所以后端没有向它发送信号。请查看作业列表中该作业的状态。",
+  },
   // M05, passed through the children handler
   NOT_AUTHORIZED: {
     en: "This session is not allowed to do that to its children.",

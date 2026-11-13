@@ -353,6 +353,34 @@ describe("the providers module in the assembly", () => {
     await w.service.dispose("done");
   });
 
+  // M10 step 18 (XC-11): the client usage read goes through a narrow in-process accessor, never an XC-6 bridge and never the whole availability object.
+  it("serves M09's usage and display route states in process, only while the service runs, and exposes nothing else", async () => {
+    const w = make();
+    expect(Object.keys(w.service.routeAvailability).sort()).toEqual(["routeStates", "usage"]);
+    const attempt = async <A>(work: () => Promise<A>) => {
+      try {
+        return { value: await work() };
+      } catch {
+        return { threw: true as const };
+      }
+    };
+    // Before start the service does not exist: the accessor refuses rather than inventing an answer.
+    expect(await attempt(() => w.service.routeAvailability.usage())).toEqual({ threw: true });
+    expect(
+      await attempt(() => w.service.routeAvailability.routeStates([ROUTE], "display")),
+    ).toEqual({ threw: true });
+    expect((await w.service.start()).outcome).toBe("started");
+    const usage = await w.service.routeAvailability.usage();
+    expect(Array.isArray(usage)).toBe(true);
+    // No credential and no usage reader were supplied: nothing may claim a reading.
+    for (const reading of usage) expect(reading.status).not.toBe("ok");
+    const states = await w.service.routeAvailability.routeStates([ROUTE], "display");
+    expect(states).toHaveLength(1);
+    expect(states[0]).toMatchObject({ state: "unknown", reasonClass: "service-unavailable" });
+    await w.service.dispose("done");
+    expect(await attempt(() => w.service.routeAvailability.usage())).toEqual({ threw: true });
+  });
+
   it("refuses a fixture in the production composition before any start, naming the fault, and builds no service", () => {
     const made = build({ providers: { mode: "fixture" } });
     expect(made).toMatchObject({

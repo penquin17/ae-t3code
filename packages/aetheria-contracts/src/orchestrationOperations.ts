@@ -314,26 +314,26 @@ const OutputChunk = Schema.Struct({
     (chunk) => chunk.to >= chunk.from || "a chunk's end is not before its start",
   ),
 );
-export const JobsOutputResult = reply(
-  Schema.Struct({
-    jobId: Id,
-    state: JobState,
-    streams: Schema.Array(OutputChunk).check(
-      uniqueBy((chunk: typeof OutputChunk.Type) => chunk.stream, "one chunk per stream"),
-    ),
-    exit: Schema.optionalKey(Exit),
-    waitElapsed: Schema.Boolean,
-    ...jobFlags,
-  }),
-  ["JOB_NOT_FOUND", "ABORTED"],
-);
+/** M10 step 18 reuses this value for the user's offset read (`aetheria.jobs.output`), so the chunk, truncation and state vocabulary has one definition. */
+export const JobsOutputValue = Schema.Struct({
+  jobId: Id,
+  state: JobState,
+  streams: Schema.Array(OutputChunk).check(
+    uniqueBy((chunk: typeof OutputChunk.Type) => chunk.stream, "one chunk per stream"),
+  ),
+  exit: Schema.optionalKey(Exit),
+  waitElapsed: Schema.Boolean,
+  ...jobFlags,
+});
+export const JobsOutputResult = reply(JobsOutputValue, ["JOB_NOT_FOUND", "ABORTED"]);
 export type JobsOutputResult = typeof JobsOutputResult.Type;
 
 export const JobsListArgs = Schema.Struct({
   scope: Schema.optionalKey(Schema.Literals(["own", "descendants"])),
 });
 export type JobsListArgs = typeof JobsListArgs.Type;
-const JobRow = Schema.Struct({
+/** Exported for M10 step 18: the user's job list shows M05's row unchanged. */
+export const JobRow = Schema.Struct({
   jobId: Id,
   ownerSessionId: Id,
   label: Text,
@@ -349,10 +349,14 @@ export type JobsListResult = typeof JobsListResult.Type;
 
 export const JobsKillArgs = Schema.Struct({ jobId: Id });
 export type JobsKillArgs = typeof JobsKillArgs.Type;
-export const JobsKillResult = reply(
-  Schema.Struct({ jobId: Id, state: FinalJobState, exit: Schema.optionalKey(Exit), ...jobFlags }),
-  ["JOB_NOT_FOUND"],
-);
+/** Exported for M10 step 18: the user's kill shows M05's final state unchanged. */
+export const JobsKillValue = Schema.Struct({
+  jobId: Id,
+  state: FinalJobState,
+  exit: Schema.optionalKey(Exit),
+  ...jobFlags,
+});
+export const JobsKillResult = reply(JobsKillValue, ["JOB_NOT_FOUND"]);
 export type JobsKillResult = typeof JobsKillResult.Type;
 
 export const JobsCancelArgs = Schema.Struct({ requestId: Id });

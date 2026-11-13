@@ -51,6 +51,7 @@ import { Route as ChatSettingsAccessRouteImport } from './routes/_chat.settings.
 import { Route as ChatSettingsAboutRouteImport } from './routes/_chat.settings.about'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as AetheriaDeliverablesEnvironmentIdThreadIdRouteImport } from './routes/aetheria/deliverables.$environmentId.$threadId'
 import { Route as AetheriaControlEnvironmentIdThreadIdRouteImport } from './routes/aetheria/control.$environmentId.$threadId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
@@ -268,6 +269,12 @@ const ChatEnvironmentIdThreadIdRoute =
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
   } as any)
+const AetheriaDeliverablesEnvironmentIdThreadIdRoute =
+  AetheriaDeliverablesEnvironmentIdThreadIdRouteImport.update({
+    id: '/aetheria/deliverables/$environmentId/$threadId',
+    path: '/aetheria/deliverables/$environmentId/$threadId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AetheriaControlEnvironmentIdThreadIdRoute =
   AetheriaControlEnvironmentIdThreadIdRouteImport.update({
     id: '/aetheria/control/$environmentId/$threadId',
@@ -318,6 +325,7 @@ export interface FileRoutesByFullPath {
   '/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
   '/aetheria/control/$environmentId/$threadId': typeof AetheriaControlEnvironmentIdThreadIdRoute
+  '/aetheria/deliverables/$environmentId/$threadId': typeof AetheriaDeliverablesEnvironmentIdThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
@@ -362,6 +370,7 @@ export interface FileRoutesByTo {
   '/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
   '/aetheria/control/$environmentId/$threadId': typeof AetheriaControlEnvironmentIdThreadIdRoute
+  '/aetheria/deliverables/$environmentId/$threadId': typeof AetheriaDeliverablesEnvironmentIdThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -408,6 +417,7 @@ export interface FileRoutesById {
   '/_chat/settings/worktrees': typeof ChatSettingsWorktreesRoute
   '/threads/$environmentId/$threadId': typeof ThreadsEnvironmentIdThreadIdRoute
   '/aetheria/control/$environmentId/$threadId': typeof AetheriaControlEnvironmentIdThreadIdRoute
+  '/aetheria/deliverables/$environmentId/$threadId': typeof AetheriaDeliverablesEnvironmentIdThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -454,6 +464,7 @@ export interface FileRouteTypes {
     | '/settings/worktrees'
     | '/threads/$environmentId/$threadId'
     | '/aetheria/control/$environmentId/$threadId'
+    | '/aetheria/deliverables/$environmentId/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
@@ -498,6 +509,7 @@ export interface FileRouteTypes {
     | '/settings/worktrees'
     | '/threads/$environmentId/$threadId'
     | '/aetheria/control/$environmentId/$threadId'
+    | '/aetheria/deliverables/$environmentId/$threadId'
   id:
     | '__root__'
     | '/_chat'
@@ -543,6 +555,7 @@ export interface FileRouteTypes {
     | '/_chat/settings/worktrees'
     | '/threads/$environmentId/$threadId'
     | '/aetheria/control/$environmentId/$threadId'
+    | '/aetheria/deliverables/$environmentId/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -556,6 +569,7 @@ export interface RootRouteChildren {
   ProjectsProjectKeyRoute: typeof ProjectsProjectKeyRoute
   ThreadsEnvironmentIdThreadIdRoute: typeof ThreadsEnvironmentIdThreadIdRoute
   AetheriaControlEnvironmentIdThreadIdRoute: typeof AetheriaControlEnvironmentIdThreadIdRoute
+  AetheriaDeliverablesEnvironmentIdThreadIdRoute: typeof AetheriaDeliverablesEnvironmentIdThreadIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -854,6 +868,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/aetheria/deliverables/$environmentId/$threadId': {
+      id: '/aetheria/deliverables/$environmentId/$threadId'
+      path: '/aetheria/deliverables/$environmentId/$threadId'
+      fullPath: '/aetheria/deliverables/$environmentId/$threadId'
+      preLoaderRoute: typeof AetheriaDeliverablesEnvironmentIdThreadIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/aetheria/control/$environmentId/$threadId': {
       id: '/aetheria/control/$environmentId/$threadId'
       path: '/aetheria/control/$environmentId/$threadId'
@@ -960,6 +981,8 @@ const rootRouteChildren: RootRouteChildren = {
   ThreadsEnvironmentIdThreadIdRoute: ThreadsEnvironmentIdThreadIdRoute,
   AetheriaControlEnvironmentIdThreadIdRoute:
     AetheriaControlEnvironmentIdThreadIdRoute,
+  AetheriaDeliverablesEnvironmentIdThreadIdRoute:
+    AetheriaDeliverablesEnvironmentIdThreadIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

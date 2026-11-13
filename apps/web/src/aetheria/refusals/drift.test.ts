@@ -5,6 +5,9 @@ import {
   CHILDREN_PASSTHROUGH_CODES,
   GROUPS_CODE_CLASSES,
   INTERACTION_CODE_CLASSES,
+  JOBS_CONTROL_CODE_CLASSES,
+  JOBS_PASSTHROUGH_CODES,
+  USAGE_CODE_CLASSES,
 } from "@t3tools/aetheria-contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -25,9 +28,9 @@ describe("the shipped table covers exactly the canonical codes", () => {
     );
   });
 
-  it("holds the fourteen M06 interaction codes and the thirteen M10 codes (five children, eight group)", () => {
+  it("holds the fourteen M06 interaction codes and the twenty-two M10 codes (five children, eight group, five jobs, four usage)", () => {
     expect(CANONICAL_CODES.filter((c) => c.owner === "M06")).toHaveLength(14);
-    expect(CANONICAL_CODES.filter((c) => c.owner === "M10")).toHaveLength(13);
+    expect(CANONICAL_CODES.filter((c) => c.owner === "M10")).toHaveLength(22);
   });
 });
 
@@ -41,14 +44,20 @@ describe("the canonical list is the real tables, code for code", () => {
     for (const row of NON_CODE_REFUSALS) expect(codes, row.id).toContain(row.id);
   });
 
-  it("holds every interaction, children and group code of the contracts with its own class, and M05's passed-through codes", () => {
+  it("holds every interaction, children, group, jobs and usage code of the contracts with its own class, and M05's passed-through codes", () => {
     for (const table of [
       INTERACTION_CODE_CLASSES,
       CHILDREN_CONTROL_CODE_CLASSES,
       GROUPS_CODE_CLASSES,
+      JOBS_CONTROL_CODE_CLASSES,
+      USAGE_CODE_CLASSES,
     ] as Array<Readonly<Record<string, string>>>)
       for (const [code, cls] of Object.entries(table)) expect(classOf(code), code).toBe(cls);
-    for (const code of CHILDREN_PASSTHROUGH_CODES) expect(classOf(code), code).toBe("passthrough");
+    for (const code of [...CHILDREN_PASSTHROUGH_CODES, ...JOBS_PASSTHROUGH_CODES])
+      expect(classOf(code), code).toBe("passthrough");
+    // The jobs handler's kill can answer these three; each has a line of its own.
+    for (const code of ["JOB_NOT_FOUND", "JOB_CONFLICT", "JOB_IDENTITY_MISMATCH"])
+      expect(classOf(code), code).toBe("passthrough");
   });
 
   it("lists no code twice and holds nothing the tables do not", () => {
@@ -59,7 +68,10 @@ describe("the canonical list is the real tables, code for code", () => {
       ...Object.keys(INTERACTION_CODE_CLASSES),
       ...Object.keys(CHILDREN_CONTROL_CODE_CLASSES),
       ...Object.keys(GROUPS_CODE_CLASSES),
+      ...Object.keys(JOBS_CONTROL_CODE_CLASSES),
+      ...Object.keys(USAGE_CODE_CLASSES),
       ...CHILDREN_PASSTHROUGH_CODES,
+      ...JOBS_PASSTHROUGH_CODES,
     ]);
     expect(new Set(codes)).toEqual(real);
   });

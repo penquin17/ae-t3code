@@ -55,6 +55,7 @@ describe("the public entry", () => {
       "humanControlBackendModuleRow",
       "installPiSelectionSeam",
       "orchestrationBackendModuleRow",
+      "piRouteOfT3",
       "prepareAetheriaBackend",
       "prepareBackend",
       "prepareGroupOperation",
