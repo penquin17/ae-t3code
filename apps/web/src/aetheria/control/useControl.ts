@@ -1,11 +1,12 @@
 // The hooks that wire the pure control logic to T3: the transport over T3's RPC commands, the interactions view (subscribe FIRST, read second), single-value reads, and the seven actions.
 // A view keeps no second copy of backend state beyond the last read, marked stale when the connection ends; every change comes from a re-read.
 // The hooks are made for a mounted (environment, root): the page keys the panel on both, so they are fixed for a hook's life.
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomMount, useAtomSubscribe, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { useEffect, useRef, useState } from "react";
 
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { environmentCatalog } from "~/connection/catalog";
 import { randomUUID } from "~/lib/utils";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { createControlActions, type ControlActions } from "./actions";
@@ -81,6 +82,19 @@ export function useControlTransport(): ControlTransport {
   return transport;
 }
 
+/**
+ * Calls `onNewSession` each time the environment's connection establishes a new session. A read sent before the session is ready, or whose reply a dropped connection lost, never comes back on its
+ * own and the change stream emits nothing when it re-subscribes, so this is what tells a view to read again (the same signal T3's directory reads follow). It fires on a change, not on mount, and
+ * once per new session: a failed read does not call it, so there is no loop.
+ */
+function useNewSession(environmentId: string, onNewSession: () => void): void {
+  const generation = environmentCatalog.sessionGenerationAtom(environmentIdOf(environmentId));
+  // A listener alone does not compute the atom, so nothing would follow the connection.
+  useAtomMount(generation);
+  const notify = useStableCallback(onNewSession);
+  useAtomSubscribe(generation, notify);
+}
+
 export interface InteractionsHandle {
   readonly view: InteractionsView;
   /** One sequenced re-read: it updates the view and reports what it found. */
@@ -154,6 +168,9 @@ export function useInteractions(
     apply(reconnected(stateRef.current).state);
     void readSnapshot();
   });
+  // The baseline above waits for the stream's first element and `onReconnect` for the window to come back; neither follows a session that comes up later, so a read that was sent too early or
+  // lost stays "unavailable" or "being read again" until this one re-baselines it.
+  useNewSession(environmentId, () => void readSnapshot());
 
   const started = AsyncResult.isSuccess(signal) || AsyncResult.isFailure(signal);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a timer: the baseline read runs one macrotask after the stream's first element, so it follows the subscribe call the stream makes next
@@ -184,21 +201,29 @@ export function useInteractions(
   return { view: viewOf(state), readSnapshot };
 }
 
-/** A single-value read (plan mode, tasks): read on mount and whenever `trigger` changes, kept as the last value marked stale after a failure. */
+/**
+ * A single-value read (plan mode, tasks): read on mount, whenever `trigger` changes and whenever a new session comes up, kept as the last value marked stale after a failure. Only the newest read
+ * lands, so a slow reply from an earlier session cannot overwrite a newer one.
+ */
 function useReadModel<T>(
+  environmentId: string,
   read: () => Promise<ReadResult<T>>,
   trigger: unknown,
 ): { readonly view: ReadView<T>; readonly refresh: () => Promise<void> } {
   const [state, setState] = useState<ReadState<T>>({ status: "waiting" });
-  const load = useStableCallback(async (_trigger: unknown) => {
+  const [sessions, setSessions] = useState(0);
+  const newest = useRef(0);
+  const load = useStableCallback(async (_trigger: unknown, _sessions: number) => {
+    const mine = ++newest.current;
     const result = await read();
-    setState((previous) => afterRead(previous, result));
+    if (mine === newest.current) setState((previous) => afterRead(previous, result));
   });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the Backend's value when mounted and after each interactions version change: the Backend is outside React
+  useNewSession(environmentId, () => setSessions((count) => count + 1));
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the Backend's value when mounted, after each interactions version change and when a new session comes up: the Backend is outside React
   useEffect(() => {
-    void load(trigger);
-  }, [load, trigger]);
-  return { view: readView(state), refresh: () => load(trigger) };
+    void load(trigger, sessions);
+  }, [load, trigger, sessions]);
+  return { view: readView(state), refresh: () => load(trigger, sessions) };
 }
 
 export function usePlanMode(
@@ -208,6 +233,7 @@ export function usePlanMode(
   trigger: unknown,
 ) {
   return useReadModel<PlanMode>(
+    environmentId,
     async () => classifyRead<PlanMode>(await transport.planModeGet(environmentId, sessionId)),
     trigger,
   );
@@ -220,6 +246,7 @@ export function useTasks(
   trigger: unknown,
 ) {
   return useReadModel<TaskView | null>(
+    environmentId,
     async () => classifyRead<TaskView | null>(await transport.tasksGet(environmentId, sessionId)),
     trigger,
   );

@@ -96,7 +96,8 @@ vi.mock(
                             ownerNodeId: null,
                             nativeThreadRef: {
                               driver: "pi",
-                              nativeId: `pi-for-${item.projection.thread.id}`,
+                              // Pi's native id is its session file; the session id is the name's tail (binding.ts).
+                              nativeId: `/home/u/.pi/agent/sessions/--work--/2026-11-13T00-00-00-000Z_pi-for-${item.projection.thread.id}.jsonl`,
                               strength: "strong",
                             },
                             nativeConversationHeadRef: null,

@@ -1,8 +1,11 @@
 // The children view's behaviour (M10 Plan step 10, R1, D4): one owner for the last list read of a root, a per-child Stop that sends exactly one interrupt-or-close, and reads of stored reports.
 // Nothing is edited optimistically, a lost reply is `unknown` and is not resent, a stale reply lands nowhere, and leaving the page cancels nothing.
+import { useAtomMount, useAtomSubscribe } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useRef, useState } from "react";
 
+import { environmentCatalog } from "~/connection/catalog";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { randomUUID } from "~/lib/utils";
 import { createActionRunner, type ActionOutcome, type SendResult } from "../core/outcome";
 import { childStopSend } from "../run/childStop";
@@ -76,6 +79,16 @@ export function useChildren(input: {
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `read` is rebuilt every render and closes over these two values; the read starts only when they change
     void read(rootThreadId);
   }, [environmentId, rootThreadId]);
+
+  // A list read sent before the session is ready, or whose reply a dropped connection lost, is not retried by anything else: read it again once a new session is up (the signal T3's directory reads
+  // follow). It fires on a change, once per new session, so a read that fails again does not loop.
+  const sessionGeneration = environmentCatalog.sessionGenerationAtom(environmentId);
+  // A listener alone does not compute the atom, so nothing would follow the connection.
+  useAtomMount(sessionGeneration);
+  useAtomSubscribe(
+    sessionGeneration,
+    useStableCallback(() => void read(root.current)),
+  );
 
   /** One Stop: the existing per-child decision (`run/childStop.ts`) sends a single interrupt or close; the list is then re-read, which is a read and never a resend. */
   async function stop(row: ChildRowView): Promise<void> {
