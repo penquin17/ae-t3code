@@ -4,6 +4,8 @@
 import { useId } from "react";
 
 import { Button } from "../../../components/ui/button";
+import { REGION } from "../../regions/declarations";
+import { useRegion } from "../../regions/useRegion";
 import { RefusalNotice } from "../../refusals/RefusalNotice";
 import type { ReadView } from "../jobs/reply";
 import { useSuppliedRead } from "../jobs/useSuppliedRead";
@@ -36,6 +38,10 @@ export function UsagePanel(props: UsagePanelProps) {
   });
   const headingId = useId();
   const { view, refreshing } = usage;
+  useRegion(REGION.controlUsage, () => ({
+    props: { threadId: rootThreadId },
+    state: { list: view.tag, refreshing },
+  }));
   return (
     <section
       aria-labelledby={headingId}

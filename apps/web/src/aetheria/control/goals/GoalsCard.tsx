@@ -2,8 +2,12 @@
 // goal, a workflow, a progress state or a Re-arm of its own: nothing here is a UI-local flag. When M07's contracts land, this card is replaced, not extended.
 import { useId } from "react";
 
+import { REGION } from "../../regions/declarations";
+import { useRegion } from "../../regions/useRegion";
+
 export function GoalsCard() {
   const headingId = useId();
+  useRegion(REGION.controlGoals, () => ({}));
   return (
     <section
       aria-labelledby={headingId}

@@ -3,6 +3,8 @@
 import { useState } from "react";
 
 import { Alert, AlertDescription } from "../../components/ui/alert";
+import { REGION } from "../regions/declarations";
+import { useRegion } from "../regions/useRegion";
 import { browserDraftStorage, createDraftStore, type DraftStore } from "./drafts";
 import { InteractionCard } from "./InteractionCard";
 import { PlanModeCard } from "./PlanModeCard";
@@ -41,6 +43,10 @@ export function ControlPanel({ environmentId, rootSessionId, drafts }: ControlPa
   const vanished = view.status === "live" ? view.vanished : [];
   const open = interactions.filter(isOpen);
   const settled = interactions.filter((record) => !isOpen(record));
+  useRegion(REGION.controlInteractions, () => ({
+    props: { rootSessionId },
+    state: { view: view.status, open: open.length, settled: settled.length },
+  }));
 
   return (
     <div data-control-panel data-view={view.status} className="flex min-w-0 flex-col gap-4">

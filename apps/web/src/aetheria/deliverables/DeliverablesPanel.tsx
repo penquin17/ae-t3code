@@ -5,6 +5,8 @@ import { useId } from "react";
 
 import { Button } from "../../components/ui/button";
 import type { Fetches } from "../files/useFetches";
+import { REGION } from "../regions/declarations";
+import { useRegion } from "../regions/useRegion";
 import type { DeliverablesCalls } from "./calls";
 import { DeliverableCardView } from "./DeliverableCardView";
 import { ListNotice } from "./ListNotice";
@@ -36,6 +38,14 @@ export function DeliverablesPanel({
     },
   });
   const { view, refreshing } = state;
+  useRegion(REGION.deliverablesCards, () => ({
+    props: { rootThreadId },
+    state: {
+      list: view.tag,
+      cardCount: view.tag === "known" ? view.cards.length : undefined,
+      refreshing,
+    },
+  }));
   return (
     <section
       aria-labelledby={headingId}

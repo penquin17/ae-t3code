@@ -1,7 +1,10 @@
 // The terminal statement of the deliverables page (M10 Plan step 16, D13): presentational, props in nothing, words out.
+import { REGION } from "../regions/declarations";
+import { useRegion } from "../regions/useRegion";
 import { TERMINAL_AUTHORITY, TERMINAL_NOT_MOUNTED } from "./notice";
 
 export function TerminalNotice() {
+  useRegion(REGION.deliverablesTerminal, () => ({}));
   return (
     <section
       aria-label="Terminal"

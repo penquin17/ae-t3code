@@ -4,6 +4,8 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { use, useId, useState } from "react";
 
 import { Button } from "../../components/ui/button";
+import { REGION } from "../regions/declarations";
+import { useRegion } from "../regions/useRegion";
 import { RefusalNotice } from "../refusals/RefusalNotice";
 import { ChildrenCallsContext, useT3ChildrenCalls, type ChildrenCalls } from "./calls";
 import { childStopNotice, rowViews, unattachedDiagnostics, type ChildRowView } from "./model";
@@ -68,6 +70,10 @@ function Children(
   const { view, refreshing } = children.list;
   const notice = children.notice;
   const noticeText = notice === null ? null : childStopNotice(notice.name, notice.outcome);
+  useRegion(REGION.controlChildren, () => ({
+    props: { threadId: rootThreadId },
+    state: { list: view.tag, refreshing },
+  }));
 
   const toggle = (childId: string) => {
     const key = `${rootThreadId}\u0000${childId}`;

@@ -24,8 +24,9 @@ export interface UseRegionOptions {
   readonly visible?: boolean | undefined;
 }
 
+/** `descriptor` is null for a view that was given no region to report (a shared component mounted where nothing declares it): the hook then registers nothing. */
 export function useRegion(
-  descriptor: RegionDescriptor,
+  descriptor: RegionDescriptor | null,
   reporter: Reporter,
   options: UseRegionOptions = {},
 ): void {
@@ -33,6 +34,7 @@ export function useRegion(
   const visible = options.visible ?? true;
   const latest = useRef<Reporter>(reporter);
   const wanted = useRef(visible);
+  const regionId = descriptor?.id;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the registry reads the latest reporter and visibility at a query, without registering again
   useEffect(() => {
     latest.current = reporter;
@@ -40,11 +42,14 @@ export function useRegion(
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the region while this view is mounted and removes it on unmount
   useEffect(
-    () => registry.register(descriptor, () => latest.current(), { visible: wanted.current }),
+    () =>
+      descriptor === null
+        ? undefined
+        : registry.register(descriptor, () => latest.current(), { visible: wanted.current }),
     [registry, descriptor],
   );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reports the view's visibility to the registry
   useEffect(() => {
-    registry.setVisible(descriptor.id, visible);
-  }, [registry, descriptor.id, visible]);
+    if (regionId !== undefined) registry.setVisible(regionId, visible);
+  }, [registry, regionId, visible]);
 }

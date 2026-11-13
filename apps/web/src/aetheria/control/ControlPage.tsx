@@ -5,6 +5,8 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { useThreadProjection } from "../../state/entities";
 import { ChildrenPanel } from "../children/ChildrenPanel";
 import { ConnectionStatus } from "../connection/ConnectionStatus";
+import { REGION } from "../regions/declarations";
+import { useRegion } from "../regions/useRegion";
 import { IDENTITY_UNKNOWN_TEXT, piSessionIdOf } from "./binding";
 import { ControlPanel } from "./ControlPanel";
 import { GoalsCard } from "./goals/GoalsCard";
@@ -26,6 +28,10 @@ export function ControlPage({
   const ref = scopeThreadRef(EnvironmentId.make(environmentId), ThreadId.make(threadId));
   const projection = useThreadProjection(ref)?.projection ?? null;
   const binding = piSessionIdOf(projection);
+  useRegion(REGION.control, () => ({
+    props: { environmentId, threadId },
+    state: { identity: binding.state },
+  }));
   return (
     <SidebarInset className="h-dvh overflow-y-auto scrollbar-gutter-both">
       <main
@@ -34,7 +40,7 @@ export function ControlPage({
         style={{ paddingBottom: "max(2rem, env(safe-area-inset-bottom))" }}
       >
         <h1 className="text-lg font-medium text-foreground">Human control</h1>
-        <ConnectionStatus />
+        <ConnectionStatus region={REGION.controlConnection} />
         {binding.state === "known" ? (
           <ControlPanel
             key={`${environmentId}:${binding.value}`}

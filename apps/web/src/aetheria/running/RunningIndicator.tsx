@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type CSSProperties } from "react";
 
 import { tickTextContent } from "~/lib/tickTextContent";
+import { REGION } from "../regions/declarations";
+import { useRegion } from "../regions/useRegion";
 import "./running.css";
 import { elapsedText, wordsOf, type Phase, type RunningShape } from "./status";
 import { GRAIN_COUNT, SPARK, WREATH } from "./y4";
@@ -146,6 +148,10 @@ export function RunningIndicator({ shape, createdAt, holdMs }: RunningIndicatorP
   const shown: RunningShape = phase === null ? shape : { kind: "phase", phase };
   const words = wordsOf(shown);
   const hasTime = createdAt !== null && !Number.isNaN(Date.parse(createdAt));
+  // What is shown, as words from a closed list: the kind of the shown shape and, for a phase, which one.
+  useRegion(REGION.conversationRunning, () => ({
+    state: { shape: shown.kind, phase: shown.kind === "phase" ? shown.phase : undefined },
+  }));
   return (
     <div data-aetheria="running" className="inline-flex min-w-0 items-center gap-2">
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">

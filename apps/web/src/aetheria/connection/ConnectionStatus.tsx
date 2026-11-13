@@ -1,5 +1,7 @@
 // The connection banner as mounted in the Aetheria shell (M10 step 20): the truthful state when the client is not connected, nothing when it is. Connected is the ordinary state and gets no banner;
 // every other state (connecting, reconnecting, disconnected, unauthorized, access ended, version mismatch, unknown) is shown with its offer.
+import type { RegionDescriptor } from "../regions/descriptor";
+import { useRegion } from "../regions/useRegion";
 import { ConnectionBanner } from "./ConnectionBanner";
 import type { ConnectionView, Locale } from "./state";
 import { useConnectionView } from "./useConnectionView";
@@ -33,8 +35,19 @@ export function ConnectionStatusView({
   );
 }
 
-/** The mounted status: reads the primary environment's connection and draws it. */
-export function ConnectionStatus(props: { readonly className?: string; readonly locale?: Locale }) {
+/**
+ * The mounted status: reads the primary environment's connection and draws it. A host that declares a region for this mount passes it; the region is registered while the status is mounted and is
+ * visible only when a banner is shown, and it reports the one status word and nothing the banner says.
+ */
+export function ConnectionStatus(props: {
+  readonly className?: string;
+  readonly locale?: Locale;
+  readonly region?: RegionDescriptor;
+}) {
+  const { region, ...shown } = props;
   const { view } = useConnectionView(props.locale);
-  return <ConnectionStatusView view={view} {...props} />;
+  useRegion(region ?? null, () => ({ state: { status: view.kind } }), {
+    visible: view.kind !== "connected",
+  });
+  return <ConnectionStatusView view={view} {...shown} />;
 }

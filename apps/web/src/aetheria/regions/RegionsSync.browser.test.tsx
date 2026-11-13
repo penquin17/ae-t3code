@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { act, fakeTimers, render } from "../../../test/render";
 import {
-  INITIAL_REGION_IDS,
+  DECLARED_REGION_IDS,
   RegionRegistryProvider,
   RegionsSync,
   declareRegion,
@@ -93,9 +93,9 @@ describe("the page's registry and the manifest", () => {
       regions: Array<{ id: string }>;
     };
     expect(manifest.regions.map((r) => r.id).toSorted()).toEqual(
-      [...INITIAL_REGION_IDS].toSorted(),
+      [...DECLARED_REGION_IDS].toSorted(),
     );
-    expect(buildManifest(REGION_DECLARATIONS).regions).toHaveLength(INITIAL_REGION_IDS.length);
+    expect(buildManifest(REGION_DECLARATIONS).regions).toHaveLength(DECLARED_REGION_IDS.length);
   });
 
   it("offers the hook and the registry accessor a view uses, and the declaration check a module can ask", async () => {

@@ -29,7 +29,38 @@ function Running({ title, visible }: { readonly title: string; readonly visible?
   return <p>{title}</p>;
 }
 
+function Optional({ region }: { readonly region: typeof running | null }) {
+  useRegion(region, () => ({ props: { title: "x" }, state: { phase: "p" } }));
+  return <p>optional</p>;
+}
+
 describe("useRegion", () => {
+  it("registers nothing for a view that was given no region, and registers once one is given", async () => {
+    const registry = makeRegistry();
+    const screen = await render(
+      <RegionRegistryProvider registry={registry}>
+        <Optional region={null} />
+      </RegionRegistryProvider>,
+      { router: false },
+    );
+    expect(registry.snapshot().regions).toEqual([]);
+    await screen.rerender(
+      <RegionRegistryProvider registry={registry}>
+        <Optional region={running} />
+      </RegionRegistryProvider>,
+    );
+    expect(registry.snapshot().regions.map((r) => r.descriptor.id)).toEqual([
+      "conversation.running",
+    ]);
+    await screen.rerender(
+      <RegionRegistryProvider registry={registry}>
+        <Optional region={null} />
+      </RegionRegistryProvider>,
+    );
+    expect(registry.snapshot().regions).toEqual([]);
+    await screen[Symbol.asyncDispose]();
+  });
+
   it("registers on mount and removes the region on unmount", async () => {
     const registry = makeRegistry();
     const screen = await render(

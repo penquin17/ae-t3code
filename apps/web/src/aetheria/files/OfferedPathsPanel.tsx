@@ -7,6 +7,8 @@ import { useId } from "react";
 import { Button } from "../../components/ui/button";
 import type { DeliverablesCalls } from "../deliverables/calls";
 import { ListNotice } from "../deliverables/ListNotice";
+import { REGION } from "../regions/declarations";
+import { useRegion } from "../regions/useRegion";
 import { useRootRead } from "../deliverables/useRootRead";
 import { FileActions } from "./FileActions";
 import { OFFERED_LABEL, offeredViewFromSend, TURN_DIFF_NOTE, type OfferedView } from "./offered";
@@ -41,6 +43,14 @@ export function OfferedPathsPanel({
     },
   });
   const { view, refreshing } = state;
+  useRegion(REGION.deliverablesFiles, () => ({
+    props: { rootThreadId },
+    state: {
+      list: view.tag,
+      editedCount: view.tag === "known" ? view.paths.length : undefined,
+      refreshing,
+    },
+  }));
   return (
     <section
       aria-labelledby={headingId}

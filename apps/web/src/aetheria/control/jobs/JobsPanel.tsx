@@ -4,6 +4,8 @@
 import { useEffect, useId, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
+import { REGION } from "../../regions/declarations";
+import { useRegion } from "../../regions/useRegion";
 import { RefusalNotice } from "../../refusals/RefusalNotice";
 import {
   incompleteText,
@@ -40,6 +42,10 @@ export function JobsPanel(props: JobsPanelProps) {
   const { view, refreshing } = jobs.list;
   const notice = jobs.notice;
   const noticeText = notice === null ? null : killNotice(notice.label, notice.outcome);
+  useRegion(REGION.controlJobs, () => ({
+    props: { threadId: rootThreadId },
+    state: { list: view.tag, refreshing },
+  }));
 
   const toggle = (jobId: string) => {
     const key = `${rootThreadId}\u0000${jobId}`;
