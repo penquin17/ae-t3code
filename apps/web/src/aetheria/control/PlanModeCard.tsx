@@ -53,6 +53,7 @@ export function PlanModeCard({ sessionId, view, actions, onRefresh }: PlanModeCa
       ref={sectionRef}
       tabIndex={-1}
       aria-labelledby={headingId}
+      data-aetheria="plan-mode-card"
       data-card="plan-mode"
       aria-busy={busy}
       className={`${cardClass} outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}

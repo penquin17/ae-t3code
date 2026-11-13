@@ -289,6 +289,22 @@ describe("the wire decode refuses what the contract says a strict decode refuses
       ).toBe("error");
   });
 
+  // Review 2 finding F5: an empty `Schema.Struct({})` passes any key through whole, so the option alone refused nothing on the read.
+  const wireRead = wire(AETHERIA_WS_METHODS.regionsRead, RegionsReadPayload);
+
+  it("decodes an empty read, and refuses a read carrying any key, with the options the Rpc carries", () => {
+    expect(wireRead({})).toEqual({});
+    for (const extra of [
+      { principal: { subject: "bob" } },
+      { clientId: "client-bob-0000000001" },
+      { viewing: ["thread-1"] },
+      { value: "leak" },
+      { unknown: 1 },
+    ])
+      expect(() => wireRead(extra)).toThrow();
+    for (const notAnObject of [null, "x", 1]) expect(() => wireRead(notAnObject)).toThrow();
+  });
+
   it("decodes a valid report as before", () => {
     expect(wireReport(report)).toEqual(report);
     expect(wireReport({ clientId: report.clientId, sequence: 2, regions: [] })).toEqual({

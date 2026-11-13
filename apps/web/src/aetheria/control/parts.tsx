@@ -6,10 +6,11 @@ import { RefusalNotice } from "../refusals/RefusalNotice";
 import type { ActionReport } from "./actions";
 import type { DraftKey, DraftStore } from "./drafts";
 import { recordFacts, reportNotice } from "./recordText";
+import { touchWithin } from "./touchTarget";
 import type { InteractionRecord } from "./types";
 
-export const cardClass =
-  "flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground";
+/** A card, with the phone touch floor for the controls inside it. A card that holds controls also carries `data-aetheria`, which marks them Aetheria's own for the quality matrix. */
+export const cardClass = `flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground ${touchWithin}`;
 export const mutedClass = "text-xs text-muted-foreground";
 
 /** Markdown the Backend stored raw is shown as text, wrapped, and never parsed or executed (D7). */

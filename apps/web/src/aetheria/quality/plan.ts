@@ -97,6 +97,13 @@ export interface KnownDefect {
   readonly fix: string;
 }
 
+/** How the matrix treats a control's size at phone widths; the index states it so a reader knows which advisories are left and why. */
+const TOUCH_RULE: readonly string[] = [
+  "At 767 px and below an Aetheria-owned control (inside an element marked `data-aetheria`) smaller than `--ae-size-touch-min` (44 px) either way is a finding; the matrix fails on it.",
+  "At 767 px and below a T3-owned control smaller than 44 px is an advisory, listed in the advisories column; Aetheria does not change T3's components.",
+  "At 768 px and above no control is held to 44 px; every control must still be named and at least 24 px each way.",
+];
+
 /** Empty now: the step-26 finding (the "Code:" line's contrast in the warning alerts) is fixed. A new entry goes here only for a defect found and not yet fixed. */
 export const KNOWN_DEFECTS: readonly KnownDefect[] = [];
 
@@ -132,7 +139,7 @@ export interface IndexEntry extends Combo {
   readonly file: string | null;
   /** Failures of a rule; empty when every check passed. */
   readonly findings: readonly string[];
-  /** Things worth a person's eye that the rule does not fail (for example a phone control under 44 px). */
+  /** Things worth a person's eye that the rule does not fail (for example a T3-owned phone control under 44 px). */
   readonly advisories: readonly string[];
   /** Ids of known defects (KNOWN_DEFECTS) this combination hit; they are not in `findings`. */
   readonly known: readonly string[];
@@ -209,6 +216,10 @@ export function indexMarkdown(entries: readonly IndexEntry[]): string {
     "# Quality matrix index (M10 Plan step 26)",
     "",
     `${entries.length} combinations checked, ${images} images kept, ${failing} combinations with a finding, ${knownHits} combinations that hit a known defect.`,
+    "",
+    "## What fails, and what is only noted",
+    "",
+    ...TOUCH_RULE.map((line) => `- ${line}`),
     "",
     "## Known defects (reported; no product file was changed)",
     "",

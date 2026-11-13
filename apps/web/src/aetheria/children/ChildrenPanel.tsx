@@ -4,6 +4,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { use, useId, useState } from "react";
 
 import { Button } from "../../components/ui/button";
+import { touchWithin } from "../control/touchTarget";
 import { REGION } from "../regions/declarations";
 import { useRegion } from "../regions/useRegion";
 import { RefusalNotice } from "../refusals/RefusalNotice";
@@ -92,7 +93,7 @@ function Children(
       aria-labelledby={headingId}
       data-aetheria="children"
       data-root={rootThreadId}
-      className="flex min-w-0 flex-col gap-3"
+      className={`flex min-w-0 flex-col gap-3 ${touchWithin}`}
     >
       <header className="flex items-center justify-between gap-2">
         <h2 id={headingId} className="text-base font-semibold">

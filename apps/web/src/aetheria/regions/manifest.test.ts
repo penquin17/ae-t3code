@@ -1,5 +1,6 @@
 // AETHERIA M10 step 23 (D17, XC-19): the manifest is generated from the declarations, never inferred from the page. It lists every declared region in one order, so a generator run is
 // deterministic and a full-page test (step 24) can compare the mounted set with it exactly.
+import { REGIONS_MAX_REGIONS } from "@t3tools/aetheria-contracts";
 import { tokenNames } from "@t3tools/aetheria-design";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -48,7 +49,7 @@ describe("the manifest of declared regions", () => {
   });
 });
 
-/** The regions an Aetheria component mounts, by the page that mounts them (step 24). T3's own surfaces (shell, drawer, rail, transcript, composer, diff, settings, terminal) are not here: no Aetheria component owns them. */
+/** Every declared region with its kind and parent (step 24). The first group is mounted by Aetheria components; the second is T3's own surfaces, registered by the one Aetheria component `T3SurfaceRegions` that reads T3's UI state and edits no T3 component (review 2, F2). */
 const EXPECTED_REGIONS = {
   sidebar: ["panel", null],
   "sidebar.connection": ["region", "sidebar"],
@@ -68,7 +69,29 @@ const EXPECTED_REGIONS = {
   "deliverables.files": ["panel", "deliverables"],
   "deliverables.terminal": ["panel", "deliverables"],
   "conversation.running": ["region", null],
+  shell: ["screen", null],
+  "shell.rail": ["region", "shell"],
+  "shell.drawer": ["panel", "shell"],
+  "conversation.transcript": ["panel", null],
+  "conversation.composer": ["control-group", null],
+  "panel.files": ["panel", null],
+  "panel.terminal": ["panel", null],
+  "panel.diff": ["panel", null],
+  settings: ["screen", null],
 } as const;
+
+/** The module that owns each T3 surface's declaration: T3 owns the surface, Aetheria only reports its shape. */
+const T3_SURFACES = [
+  "shell",
+  "shell.rail",
+  "shell.drawer",
+  "conversation.transcript",
+  "conversation.composer",
+  "panel.files",
+  "panel.terminal",
+  "panel.diff",
+  "settings",
+] as const;
 
 /** The only fields a query answers with a value; every other declared field reports its shape. Each is a closed word, a count or a flag, never content a person wrote. */
 const VALUE_FIELDS: Record<string, readonly string[]> = {
@@ -94,7 +117,7 @@ const fieldsOf = (descriptor: RegionDescriptor, mode: "value" | "shape") =>
   );
 
 describe("the declared M10 regions", () => {
-  it("are the regions an Aetheria component mounts, each declared once with its kind and parent", () => {
+  it("are every Aetheria view and every T3 surface, each declared once with its kind and parent", () => {
     expect([...DECLARED_REGION_IDS].toSorted()).toEqual(Object.keys(EXPECTED_REGIONS).toSorted());
     expect(REGION_DECLARATIONS.map((d) => d.id).toSorted()).toEqual(
       [...DECLARED_REGION_IDS].toSorted(),
@@ -108,13 +131,39 @@ describe("the declared M10 regions", () => {
   it("build into a manifest of module-owned regions whose parents are all declared", () => {
     const manifest = buildManifest(REGION_DECLARATIONS);
     expect(manifest.regions).toHaveLength(DECLARED_REGION_IDS.length);
-    expect(manifest.regions.every((r) => r.owner === "aetheria-ui")).toBe(true);
+    expect(
+      manifest.regions
+        .filter((r) => r.owner === "t3")
+        .map((r) => r.id)
+        .toSorted(),
+    ).toEqual([...T3_SURFACES].toSorted());
+    expect(
+      manifest.regions.filter((r) => r.owner !== "t3").every((r) => r.owner === "aetheria-ui"),
+    ).toBe(true);
     expect(
       manifest.regions
         .filter((r) => r.parent === null)
         .map((r) => r.id)
         .toSorted(),
-    ).toEqual(["control", "conversation.running", "deliverables", "sessions", "sidebar"]);
+    ).toEqual([
+      "control",
+      "conversation.composer",
+      "conversation.running",
+      "conversation.transcript",
+      "deliverables",
+      "panel.diff",
+      "panel.files",
+      "panel.terminal",
+      "sessions",
+      "settings",
+      "shell",
+      "sidebar",
+    ]);
+  });
+
+  it("leave room under the Backend's region limit for the regions a page can add", () => {
+    // A client reports every declared region at once at most; a page may mount a region twice only where two ids exist.
+    expect(DECLARED_REGION_IDS.length).toBeLessThanOrEqual(REGIONS_MAX_REGIONS - 32);
   });
 
   it("report a value only for the listed status fields and the shape for everything else", () => {
@@ -149,6 +198,9 @@ describe("the declared M10 regions", () => {
       deliverables: ["props.environmentId", "props.threadId"],
       "deliverables.cards": ["props.rootThreadId"],
       "deliverables.files": ["props.rootThreadId"],
+      shell: ["state.mobile"],
+      "conversation.transcript": ["state.draft"],
+      settings: ["state.section"],
     });
   });
 
@@ -175,19 +227,17 @@ describe("the declared M10 regions", () => {
     ]);
   });
 
-  it("leave out T3's own surfaces, which no Aetheria component owns", () => {
-    for (const gone of [
-      "shell",
-      "sidebar.rail",
-      "drawer",
-      "conversation.transcript",
-      "composer",
-      "panel.files",
-      "panel.terminal",
-      "panel.diff",
-      "interactions",
-      "settings",
-    ])
+  it("declare T3's surfaces with state by shape alone, no props and no tokens of their own", () => {
+    for (const d of REGION_DECLARATIONS.filter((r) => r.owner === "t3")) {
+      expect(d.tokens, d.id).toEqual([]);
+      expect(d.props, d.id).toEqual([]);
+      expect(
+        d.state.every((f) => f.report === "shape"),
+        d.id,
+      ).toBe(true);
+    }
+    // The old names the plan used are not declared: the ids above are the one set.
+    for (const gone of ["sidebar.rail", "drawer", "composer", "interactions"])
       expect(DECLARED_REGION_IDS).not.toContain(gone);
   });
 });

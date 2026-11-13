@@ -18,6 +18,7 @@ import {
   type UsageReadingView,
   type UsageValue,
 } from "./model";
+import { touchWithin } from "../touchTarget";
 import { useUsageTransport } from "./transport";
 
 export interface UsagePanelProps {
@@ -47,7 +48,7 @@ export function UsagePanel(props: UsagePanelProps) {
       aria-labelledby={headingId}
       data-aetheria="usage"
       data-root={rootThreadId}
-      className="flex min-w-0 flex-col gap-3"
+      className={`flex min-w-0 flex-col gap-3 ${touchWithin}`}
     >
       <header className="flex items-center justify-between gap-2">
         <h2 id={headingId} className="text-base font-semibold">

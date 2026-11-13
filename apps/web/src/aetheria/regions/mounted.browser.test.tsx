@@ -3,9 +3,13 @@
 // client is wrapped to record each call and answer `aetheria.*` (the region report is answered as accepted); no Backend runs, so what the Backend stores for a report is step 23's own test. What this
 // proves: the union of regions registered across the routes equals the manifest (a missing and an extra region both fail), only declared value fields are queryable, nothing a person wrote reaches a
 // query, every region is removed when its page unmounts, and answering a query sends nothing. The reporter is mounted by the shell layout beside the sidebar, so it also runs at phone width with the drawer closed.
+// T3's own surfaces (shell, rail, drawer, transcript, composer, files, terminal, diff, settings) are registered by one Aetheria component that reads T3's route, sidebar and panel state (review 2, F2): each is
+// always registered, and `visible` follows what T3 shows — checked here at 1280 and 390, with the drawer closed and open, over the real router and T3's own stores.
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId } from "@t3tools/contracts";
 import type * as Context from "effect/Context";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
 import "@t3tools/aetheria-design/aetheria.css";
@@ -23,6 +27,8 @@ import { act } from "../../../test/render";
 import { currentConnectionView } from "../connection/current";
 import { gateOnConnection } from "../connection/gate";
 import { createActionRunner } from "../core/outcome";
+import { useRightPanelStore } from "~/rightPanelStore";
+import { useTerminalUiStateStore } from "~/terminalUiStateStore";
 import { mountRoute, prepare, THREAD_PATH } from "../harness";
 import { DECLARED_REGION_IDS, getAppRegionRegistry, REGION_DECLARATIONS } from "./index";
 
@@ -160,6 +166,25 @@ const reportsSent = () => probe.calls.filter((call) => call.method === "aetheria
 let counter = 0;
 const nextThread = () => `thread-c${++counter}`;
 const SIDEBAR = ["sidebar", "sidebar.connection", "sidebar.sessions"] as const;
+/** T3's own surfaces: registered by one Aetheria component on every page the shell frames, visible only while T3 shows them. */
+const T3 = [
+  "shell",
+  "shell.rail",
+  "shell.drawer",
+  "conversation.transcript",
+  "conversation.composer",
+  "panel.files",
+  "panel.terminal",
+  "panel.diff",
+  "settings",
+] as const;
+const sorted = (ids: readonly string[]) => ids.toSorted((a, b) => (a < b ? -1 : 1));
+const visibleT3 = () =>
+  registry()
+    .snapshot()
+    .regions.filter((r) => r.visible && (T3 as readonly string[]).includes(r.descriptor.id))
+    .map((r) => r.descriptor.id)
+    .toSorted();
 const CONTROL = [
   "control",
   "control.connection",
@@ -210,15 +235,16 @@ describe("what each real route registers", () => {
   it("the sessions page registers its own regions and the sidebar's", async () => {
     const app = await openRoute("/aetheria/sessions", "sessions.list");
     await using _screen = app.screen;
-    expect(mountedIds()).toEqual(
-      [...SIDEBAR, "sessions", "sessions.list"].toSorted((a, b) => (a < b ? -1 : 1)),
-    );
+    expect(mountedIds()).toEqual(sorted([...SIDEBAR, ...T3, "sessions", "sessions.list"]));
+    // Desktop, the sidebar open, no conversation: the shell and its rail are what T3 shows.
+    expect(visibleT3()).toEqual(["shell", "shell.rail"]);
   });
 
   it("the control page registers a panel for each Aetheria card group", async () => {
     const app = await openRoute(controlPath(nextThread()), "control.interactions");
     await using _screen = app.screen;
-    expect(mountedIds()).toEqual([...SIDEBAR, ...CONTROL].toSorted((a, b) => (a < b ? -1 : 1)));
+    expect(mountedIds()).toEqual(sorted([...SIDEBAR, ...T3, ...CONTROL]));
+    expect(visibleT3()).toEqual(["shell", "shell.rail"]);
   });
 
   it("a thread with no strong Pi reference registers no interactions panel and reports its identity as unknown", async () => {
@@ -237,17 +263,21 @@ describe("what each real route registers", () => {
   it("the deliverables page registers its cards, edited files and terminal statement", async () => {
     const app = await openRoute(deliverablesPath("thread-d1"), "deliverables.files");
     await using _screen = app.screen;
-    expect(mountedIds()).toEqual(
-      [...SIDEBAR, ...DELIVERABLES].toSorted((a, b) => (a < b ? -1 : 1)),
-    );
+    expect(mountedIds()).toEqual(sorted([...SIDEBAR, ...T3, ...DELIVERABLES]));
+    expect(visibleT3()).toEqual(["shell", "shell.rail"]);
   });
 
   it("the conversation registers the running indicator while a turn runs", async () => {
     const app = await openRunning();
     await using _screen = app.screen;
-    expect(mountedIds()).toEqual(
-      [...SIDEBAR, "conversation.running"].toSorted((a, b) => (a < b ? -1 : 1)),
-    );
+    expect(mountedIds()).toEqual(sorted([...SIDEBAR, ...T3, "conversation.running"]));
+    // The open conversation: its transcript and composer, and no panel, no drawer, no settings.
+    expect(visibleT3()).toEqual([
+      "conversation.composer",
+      "conversation.transcript",
+      "shell",
+      "shell.rail",
+    ]);
     const reply = registry().query("conversation.running");
     expect(reply.ok && reply.state).toEqual([
       { name: "shape", status: "value", value: "phase" },
@@ -258,15 +288,88 @@ describe("what each real route registers", () => {
   it("at phone width with the drawer closed, the sidebar's regions are absent but the reporter is mounted and reports the page's own", async () => {
     const app = await openRoute("/aetheria/sessions", "sessions.list", 390);
     await using _screen = app.screen;
-    expect(mountedIds()).toEqual(["sessions", "sessions.list"]);
+    expect(mountedIds()).toEqual(sorted([...T3, "sessions", "sessions.list"]));
+    // Phone width, the drawer closed: the shell is shown; the rail and the drawer are not.
+    expect(visibleT3()).toEqual(["shell"]);
     await expect
       .poll(() => {
         const last = reportsSent().at(-1)?.input as {
-          regions: Array<{ descriptor: { id: string } }>;
+          regions: Array<{ descriptor: { id: string }; visible: boolean }>;
         };
         return last?.regions.map((r) => r.descriptor.id).toSorted();
       })
-      .toEqual(["sessions", "sessions.list"]);
+      .toEqual(sorted([...T3, "sessions", "sessions.list"]));
+    const last = reportsSent().at(-1)?.input as {
+      regions: Array<{ descriptor: { id: string }; visible: boolean }>;
+    };
+    expect(
+      last.regions
+        .filter((r) => r.visible && (T3 as readonly string[]).includes(r.descriptor.id))
+        .map((r) => r.descriptor.id),
+    ).toEqual(["shell"]);
+  });
+
+  it("at phone width the drawer region is visible while the drawer is open and the rail never is", async () => {
+    const app = await openRoute("/aetheria/sessions", "sessions.list", 390);
+    await using _screen = app.screen;
+    const trigger = [...document.querySelectorAll<HTMLElement>("button")].find(
+      (button) => button.getAttribute("aria-label") === "Toggle main sidebar",
+    )!;
+    trigger.focus();
+    await userEvent.keyboard("{Enter}");
+    await expect.poll(visibleT3, { timeout: 15_000 }).toEqual(["shell", "shell.drawer"]);
+    // The drawer's own sidebar regions mount with it.
+    await expect.poll(mountedIds).toContain("sidebar.sessions");
+    await userEvent.keyboard("{Escape}");
+    await expect.poll(visibleT3, { timeout: 15_000 }).toEqual(["shell"]);
+  });
+
+  it("T3's panels, terminal drawer and settings are visible exactly while T3 shows them", async () => {
+    const app = await openRoute(THREAD_PATH, "conversation.transcript");
+    await using _screen = app.screen;
+    const ref = scopeThreadRef(ENVIRONMENT_ID, ThreadId.make("thread-matrix"));
+    const base = ["conversation.composer", "conversation.transcript", "shell", "shell.rail"];
+    await expect.poll(visibleT3).toEqual(base);
+    await act(async () => {
+      useRightPanelStore.getState().open(ref, "diff");
+    });
+    await expect.poll(visibleT3).toEqual(sorted([...base, "panel.diff"]));
+    await act(async () => {
+      useRightPanelStore.getState().open(ref, "files");
+    });
+    await expect.poll(visibleT3).toEqual(sorted([...base, "panel.files"]));
+    await act(async () => {
+      useRightPanelStore.getState().close(ref);
+      useTerminalUiStateStore.getState().setTerminalOpen(ref, true);
+    });
+    await expect.poll(visibleT3).toEqual(sorted([...base, "panel.terminal"]));
+    await act(async () => {
+      useTerminalUiStateStore.getState().setTerminalOpen(ref, false);
+    });
+    await expect.poll(visibleT3).toEqual(base);
+    // Settings opens over the thread: T3 keeps the conversation mounted behind it, but shows the settings.
+    await act(async () => {
+      await app.router.navigate({ to: "/settings" });
+    });
+    await expect.poll(visibleT3).toEqual(["settings", "shell", "shell.rail"]);
+    expect(mountedIds()).toEqual(expect.arrayContaining([...T3]));
+  });
+
+  it("answers a T3 surface by shape alone: no value, no title, no path", async () => {
+    const app = await openRoute(THREAD_PATH, "conversation.transcript");
+    await using _screen = app.screen;
+    for (const id of T3) {
+      const reply = registry().query(id);
+      expect(reply.ok, id).toBe(true);
+      if (!reply.ok) continue;
+      expect(reply.props, id).toEqual([]);
+      expect(reply.tokens, id).toEqual([]);
+      for (const reading of reply.state)
+        expect(reading.status, `${id}.${reading.name}`).toBe("shape");
+    }
+    expect(JSON.stringify(T3.map((id) => registry().query(id)))).not.toMatch(
+      /thread-matrix|Answer|\/home|\.jsonl/,
+    );
   });
 
   it("at phone width with the drawer closed, a send while not connected is blocked: the reporter's own connection monitor is mounted (review 1, follow-up 3)", async () => {
@@ -318,6 +421,8 @@ describe("the manifest against the page", () => {
     await visit(controlPath(nextThread()), "control.interactions");
     await visit(controlPath("thread-noident"), "control");
     await visit(deliverablesPath("thread-d3"), "deliverables.files");
+    await visit(THREAD_PATH, "conversation.transcript");
+    await visit("/settings", "settings");
     {
       const app = await openRunning();
       await using _screen = app.screen;
@@ -425,8 +530,6 @@ describe("the reporter and disposal", () => {
     await act(async () => {
       await app.router.navigate({ to: "/aetheria/sessions" });
     });
-    await expect
-      .poll(mountedIds)
-      .toEqual([...SIDEBAR, "sessions", "sessions.list"].toSorted((a, b) => (a < b ? -1 : 1)));
+    await expect.poll(mountedIds).toEqual(sorted([...SIDEBAR, ...T3, "sessions", "sessions.list"]));
   });
 });

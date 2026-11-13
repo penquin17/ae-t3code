@@ -1,9 +1,12 @@
-// The declared M10 regions (D17, XC-19): the manifest's one source and each view's descriptor. Only regions an Aetheria component mounts are declared; T3's own shell, drawer, rail, transcript,
-// composer, diff, settings and terminal are not. A region two mounts can show at once has one id per mount. A field reports its shape unless it says `value`, which is only for a closed status
-// word, a count or a flag, never for anything a person wrote or the Backend named. Tokens are the design names the view draws with, through the stylesheet mapping (cards: layer, border, labels).
+// The declared M10 regions (D17, XC-19): the manifest's one source and each view's descriptor. Two groups. The Aetheria views are owned by `aetheria-ui` and registered by the view that mounts them. T3's own
+// surfaces (shell, rail, drawer, transcript, composer, files, terminal, diff, settings) are owned by `t3` and registered by the one component `T3SurfaceRegions`, which only reads T3's UI state — no T3 component
+// is edited. A region two mounts can show at once has one id per mount. A field reports its shape unless it says `value`, which is only for a closed status word, a count or a flag, never for anything a person
+// wrote or the Backend named; a T3 surface reports no value at all. Tokens are the design names the view draws with, through the stylesheet mapping (cards: layer, border, labels); T3 surfaces draw with T3's own styles and name none.
 import { declareRegion, type FieldDeclaration, type RegionDeclaration } from "./descriptor";
 
 const OWNER = "aetheria-ui";
+/** The module id of T3's own surfaces: T3 owns what is shown, Aetheria only reports whether it is. */
+const T3_OWNER = "t3";
 
 const region = (
   id: string,
@@ -12,6 +15,14 @@ const region = (
   description: string,
   more: Pick<RegionDeclaration, "props" | "state" | "tokens"> = {},
 ) => declareRegion({ id, kind, owner: OWNER, parent, description, ...more });
+
+const t3Region = (
+  id: string,
+  kind: RegionDeclaration["kind"],
+  parent: string | null,
+  description: string,
+  state: readonly FieldDeclaration[] = [],
+) => declareRegion({ id, kind, owner: T3_OWNER, parent, description, state });
 
 const shape = (name: string, type: FieldDeclaration["type"] = "string"): FieldDeclaration => ({
   name,
@@ -195,6 +206,63 @@ export const REGION = {
     null,
     "The running indicator in the open conversation while a turn runs",
     { state: [value("shape", "string"), value("phase", "string")], tokens: RUNNING },
+  ),
+  shell: t3Region(
+    "shell",
+    "screen",
+    null,
+    "T3's app shell around every page: the sidebar beside the page; visible while the app is open",
+    [shape("mobile", "boolean")],
+  ),
+  shellRail: t3Region(
+    "shell.rail",
+    "region",
+    "shell",
+    "T3's resize rail on the open desktop sidebar; visible only at desktop width with the sidebar open",
+  ),
+  shellDrawer: t3Region(
+    "shell.drawer",
+    "panel",
+    "shell",
+    "T3's phone sidebar drawer; visible only at phone width while the drawer is open",
+  ),
+  conversationTranscript: t3Region(
+    "conversation.transcript",
+    "panel",
+    null,
+    "T3's transcript of the open conversation; visible while a conversation page is shown, not behind settings",
+    [shape("draft", "boolean")],
+  ),
+  conversationComposer: t3Region(
+    "conversation.composer",
+    "control-group",
+    null,
+    "T3's composer of the open conversation; visible while a conversation page is shown, not behind settings",
+  ),
+  panelFiles: t3Region(
+    "panel.files",
+    "panel",
+    null,
+    "T3's file browser or file viewer in the conversation's right panel; visible while it is the open tab",
+  ),
+  panelTerminal: t3Region(
+    "panel.terminal",
+    "panel",
+    null,
+    "T3's terminal, as the conversation's terminal drawer or its right-panel tab; visible while either is open",
+  ),
+  panelDiff: t3Region(
+    "panel.diff",
+    "panel",
+    null,
+    "T3's diff view in the conversation's right panel; visible while it is the open tab",
+  ),
+  settings: t3Region(
+    "settings",
+    "screen",
+    null,
+    "T3's settings, opened over the page it was opened from; visible while a settings page is open",
+    [shape("section")],
   ),
 } as const;
 

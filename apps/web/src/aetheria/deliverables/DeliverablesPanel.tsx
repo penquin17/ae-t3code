@@ -7,6 +7,7 @@ import { Button } from "../../components/ui/button";
 import type { Fetches } from "../files/useFetches";
 import { REGION } from "../regions/declarations";
 import { useRegion } from "../regions/useRegion";
+import { touchWithin } from "../control/touchTarget";
 import type { DeliverablesCalls } from "./calls";
 import { DeliverableCardView } from "./DeliverableCardView";
 import { ListNotice } from "./ListNotice";
@@ -51,7 +52,7 @@ export function DeliverablesPanel({
       aria-labelledby={headingId}
       data-aetheria="deliverables"
       data-root={rootThreadId}
-      className="flex min-w-0 flex-col gap-3"
+      className={`flex min-w-0 flex-col gap-3 ${touchWithin}`}
     >
       <header className="flex items-center justify-between gap-2">
         <h2 id={headingId} className="text-base font-semibold">

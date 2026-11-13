@@ -86,14 +86,47 @@ describe("controlReport", () => {
     expect(controlReport(ok.container, 640).findings).toEqual([]);
   });
 
-  it("reports a phone control under 44 px as an advisory, not a failure", async () => {
+  it("fails an Aetheria-owned phone control under 44 px, and only reports one the page does not own", async () => {
     await using screen = await open(
-      <button type="button" aria-label="Close" style={{ width: 30, height: 30 }} />,
+      <div>
+        <div data-aetheria="owned">
+          <button type="button" aria-label="Close" style={{ width: 30, height: 30 }} />
+        </div>
+        <button type="button" aria-label="Elsewhere" style={{ width: 30, height: 30 }} />
+      </div>,
       390,
     );
     const report = controlReport(screen.container, 390);
-    expect(report.findings).toEqual([]);
-    expect(report.advisories.join("\n")).toContain("30x30");
+    expect(report.findings).toHaveLength(1);
+    expect(report.findings[0]).toContain('"Close" is 30x30');
+    expect(report.findings[0]).toContain("44 px phone target");
+    expect(report.advisories).toHaveLength(1);
+    expect(report.advisories[0]).toContain('"Elsewhere" is 30x30');
+  });
+
+  it("holds an owned control to 44 px only at phone widths (767 and below)", async () => {
+    const owned = (
+      <div data-aetheria="owned">
+        <button type="button" aria-label="Close" style={{ width: 30, height: 30 }} />
+      </div>
+    );
+    {
+      await using phone = await open(owned, 767);
+      expect(controlReport(phone.container, 767).findings).toHaveLength(1);
+    }
+    await using wide = await open(owned, 768);
+    expect(controlReport(wide.container, 768).findings).toEqual([]);
+    expect(controlReport(wide.container, 768).advisories).toEqual([]);
+  });
+
+  it("passes an owned phone control of exactly 44 px", async () => {
+    await using screen = await open(
+      <div data-aetheria="owned">
+        <button type="button" aria-label="Close" style={{ width: 44, height: 44 }} />
+      </div>,
+      390,
+    );
+    expect(controlReport(screen.container, 390)).toEqual({ findings: [], advisories: [] });
   });
 
   it("measures a small checkbox by its label, and still fails one with no label", async () => {

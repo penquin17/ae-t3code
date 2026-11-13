@@ -135,7 +135,15 @@ export const RegionsReportResult = Schema.Union([
 ]);
 export type RegionsReportResult = typeof RegionsReportResult.Type;
 
-export const RegionsReadPayload = Schema.Struct({});
+/**
+ * The read takes nothing: the Backend reads this connection's own client. An empty `Schema.Struct({})` passes any key through whole even under `onExcessProperty: "error"` (Effect 4.1 builds no key check for a struct with
+ * no fields), so the exactness is the check: the decoded value has no own key at all.
+ */
+export const RegionsReadPayload = Schema.Struct({}).check(
+  Schema.makeFilter<object>(
+    (payload) => Reflect.ownKeys(payload).length === 0 || "the read takes no field",
+  ),
+);
 export type RegionsReadPayload = typeof RegionsReadPayload.Type;
 
 /** This connection's own client as stored, or a known none (nothing reported yet). Another connection's client is never returned. */

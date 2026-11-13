@@ -106,6 +106,7 @@ export function InteractionCard({
       ref={sectionRef}
       tabIndex={-1}
       aria-labelledby={headingId}
+      data-aetheria="interaction-card"
       data-interaction={record.interactionId}
       aria-busy={busy}
       data-kind={record.kind}

@@ -1,8 +1,14 @@
 // A preview of bytes the person fetched on purpose (M10 Plan step 16; step 15's verdicts). Everything shown comes from a blob made from the Backend's authorized reply: text and markdown are shown as
-// plain source (a link in them is never followed, so no viewer path outside the offered set opens), HTML and PDF go through T3's own document frame (an opaque-origin sandbox for HTML, the native
-// or PDF.js viewer for PDF), and image, audio and video are the browser's own elements. Props in, markup out; no Backend access, and no object URL is made or revoked here.
+// plain source (a link in them is never followed, so no viewer path outside the offered set opens), HTML goes through T3's document frame (an opaque-origin sandbox, never allow-same-origin), PDF is
+// T3's PDF.js viewer mounted directly (never BrowserDocumentFrame, whose native-PDF path is an unsandboxed iframe that would share the app's origin on a blob URL; step 15's `preview.pdf` verdict),
+// and image, audio and video are the browser's own elements. Props in, markup out; no Backend access, and no object URL is made or revoked here.
+import { lazy, Suspense } from "react";
+
 import { BrowserDocumentFrame } from "../../components/files/BrowserDocumentFrame";
+import { FileSurfaceLoading } from "../../components/files/fileSurfaceChrome";
 import type { PreviewContent } from "./useFetches";
+
+const PdfViewer = lazy(() => import("../../components/files/PdfViewer"));
 
 export function PreviewPane({
   content,
@@ -31,17 +37,23 @@ export function PreviewPane({
         </div>
       );
     case "html":
+      return (
+        <div
+          data-preview="html"
+          className="flex h-96 min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border"
+        >
+          <BrowserDocumentFrame src={content.url} title={`Preview of ${title}`} pdf={false} />
+        </div>
+      );
     case "pdf":
       return (
         <div
-          data-preview={content.mode}
+          data-preview="pdf"
           className="flex h-96 min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border"
         >
-          <BrowserDocumentFrame
-            src={content.url}
-            title={`Preview of ${title}`}
-            pdf={content.mode === "pdf"}
-          />
+          <Suspense fallback={<FileSurfaceLoading />}>
+            <PdfViewer src={content.url} title={`Preview of ${title}`} />
+          </Suspense>
         </div>
       );
     case "image":

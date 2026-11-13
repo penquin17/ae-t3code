@@ -186,6 +186,15 @@ describe("indexMarkdown", () => {
     expect(md.split("\n").filter((line) => line.startsWith("| sessions |"))).toHaveLength(28);
   });
 
+  it("states the phone touch rule: Aetheria's controls fail under 44 px, T3's are listed as advisories", () => {
+    const md = indexMarkdown(complete());
+    const rules = md.slice(md.indexOf("## What fails"), md.indexOf("## Known defects"));
+    expect(rules).toContain("767 px and below");
+    expect(rules).toContain("--ae-size-touch-min");
+    expect(rules).toMatch(/Aetheria-owned .* finding/);
+    expect(rules).toMatch(/T3-owned .* advisor/);
+  });
+
   it("states the counts and the dropped items", () => {
     const md = indexMarkdown(complete());
     expect(md).toContain(`${expectedCombos().length} combinations`);

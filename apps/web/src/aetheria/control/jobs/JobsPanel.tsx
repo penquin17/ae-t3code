@@ -21,6 +21,7 @@ import {
   type OutboxRowValue,
   type StreamView,
 } from "./model";
+import { touchWithin } from "../touchTarget";
 import type { ReadView } from "./reply";
 import { useJobsTransport } from "./transport";
 import { useJobOutput, useJobs, type OutputProblem } from "./useJobs";
@@ -60,7 +61,7 @@ export function JobsPanel(props: JobsPanelProps) {
       aria-labelledby={headingId}
       data-aetheria="jobs"
       data-root={rootThreadId}
-      className="flex min-w-0 flex-col gap-3"
+      className={`flex min-w-0 flex-col gap-3 ${touchWithin}`}
     >
       <header className="flex items-center justify-between gap-2">
         <h2 id={headingId} className="text-base font-semibold">

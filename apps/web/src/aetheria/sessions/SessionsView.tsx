@@ -2,6 +2,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useState } from "react";
 
 import { Input } from "../../components/ui/input";
+import { touchWithin } from "../control/touchTarget";
 import type { RunResult } from "../core/outcome";
 import type { GroupsHandle } from "../groups/useGroups";
 import { RefusalNotice } from "../refusals/RefusalNotice";
@@ -62,7 +63,7 @@ export function SessionsView(props: {
   const groupsStatus = groupsStatusText(groups.state);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div data-aetheria="sessions-view" className={`flex min-h-0 flex-1 flex-col ${touchWithin}`}>
       <div className="px-2 pb-1">
         <Input
           type="search"

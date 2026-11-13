@@ -2,6 +2,7 @@
 // Presentational: a ConnectionView in, markup out; the model owns every decision. A control appears only when its intent is supplied, and the view never offers a read-only fallback.
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Button } from "../../components/ui/button";
+import { touchWithin } from "../control/touchTarget";
 import type { ConnectionKind, ConnectionView, Locale } from "./state";
 
 const LABELS = {
@@ -76,7 +77,7 @@ export function ConnectionBanner({
         <span className="text-foreground">{view.headline}</span>
       </AlertTitle>
       <AlertDescription>
-        <div className="text-foreground">
+        <div data-aetheria="connection-banner" className={`text-foreground ${touchWithin}`}>
           {view.detail !== undefined ? (
             <span className="block min-w-0 break-words" data-source={view.detail.source}>
               <span className="font-medium">{labels.source[view.detail.source]}: </span>

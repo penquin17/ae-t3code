@@ -118,7 +118,13 @@ export function sidewaysScrollers(root: Element): Report {
   return { findings, advisories };
 }
 
-/** Every control named, and at least 24 px each way; a phone control under 44 px is an advisory (the accepted token), not a failure. */
+/** A control inside an Aetheria root (`data-aetheria`) is Aetheria's own; any other is T3's. */
+const isAetheriaOwned = (control: Element) => control.closest("[data-aetheria]") !== null;
+
+/**
+ * Every control named, and at least 24 px each way. At phone widths (767 px and below) an Aetheria-owned control under 44 px (the accepted token `--ae-size-touch-min`) is a finding; a T3-owned one
+ * under 44 px stays an advisory, listed separately.
+ */
 export function controlReport(root: ParentNode, width: number): Report {
   const findings: string[] = [];
   const advisories: string[] = [];
@@ -144,10 +150,10 @@ export function controlReport(root: ParentNode, width: number): Report {
       !inlineLink &&
       width <= PHONE_MAX_WIDTH &&
       (box.width < PHONE_TOUCH_PX || box.height < PHONE_TOUCH_PX)
-    )
-      advisories.push(
-        `${short(control)} is ${size} px, under the ${PHONE_TOUCH_PX} px phone target`,
-      );
+    ) {
+      const line = `${short(control)} is ${size} px, under the ${PHONE_TOUCH_PX} px phone target`;
+      (isAetheriaOwned(control) ? findings : advisories).push(line);
+    }
   }
   return { findings, advisories };
 }

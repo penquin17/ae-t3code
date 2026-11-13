@@ -5,6 +5,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useId } from "react";
 
 import { Button } from "../../components/ui/button";
+import { touchWithin } from "../control/touchTarget";
 import type { DeliverablesCalls } from "../deliverables/calls";
 import { ListNotice } from "../deliverables/ListNotice";
 import { REGION } from "../regions/declarations";
@@ -56,7 +57,7 @@ export function OfferedPathsPanel({
       aria-labelledby={headingId}
       data-aetheria="offered-paths"
       data-root={rootThreadId}
-      className="flex min-w-0 flex-col gap-3"
+      className={`flex min-w-0 flex-col gap-3 ${touchWithin}`}
     >
       <header className="flex items-center justify-between gap-2">
         <h2 id={headingId} className="text-base font-semibold">

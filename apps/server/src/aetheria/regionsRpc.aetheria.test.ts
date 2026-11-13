@@ -170,14 +170,13 @@ describe("the two methods are in T3's group with the read scope (IP-58)", () => 
  * is told when it sends a report with a field the contract does not declare; they do not show T3's websocket transport (the same decode, a different protocol) or the native client (slice-2 `regions-round-trip`).
  */
 describe("a report with a field the contract does not declare is refused at the wire decode (M10 slice-2 finding)", () => {
-  /** One `aetheria.regions.report` request over the real server decode: the replies the server wrote, and every payload the handler received. */
-  const callOverWire = (wirePayload: unknown) =>
+  /** One region request (the report unless a tag is given) over the real server decode: the replies the server wrote, and every payload the handler received. */
+  const callOverWire = (wirePayload: unknown, tag: string = M.regionsReport) =>
     Effect.gen(function* () {
       const registry = registryOf();
       const connection = open(registry);
       const actor = yield* actorOf();
       const handled: Array<unknown> = [];
-      const tag = M.regionsReport;
       const group = WsRpcGroup.omit(
         ...([...WsRpcGroup.requests.keys()].filter((other) => other !== tag) as never[]),
       );
@@ -198,7 +197,12 @@ describe("a report with a field the contract does not declare is refused at the 
       const handlers = loose.toLayerHandler(tag, (received) => {
         handled.push(received);
         // The handler runs inside the server's own fibre, which does not inherit the test's services: it is given the device-session store itself.
-        return regionsReport(connection, actor, received as never).pipe(
+        const handler = (tag === M.regionsRead ? regionsRead : regionsReport) as (
+          connection: RegionConnection,
+          actor: Parameters<typeof regionsReport>[1],
+          payload: never,
+        ) => Effect.Effect<unknown, unknown, AuthSessionRepository>;
+        return handler(connection, actor, received as never).pipe(
           Effect.provide(repo(() => Effect.succeedSome(live()))),
         );
       });
@@ -303,6 +307,35 @@ describe("a report with a field the contract does not declare is refused at the 
         const { replies, handled } = yield* callOverWire(forged);
         expect(handled).toEqual([]);
         expect(replies[0]).toMatchObject({ _tag: "Exit", exit: { _tag: "Failure" } });
+      }
+    }),
+  );
+
+  // Review 2 finding F5: the read's payload is empty, and an empty struct passes an unknown key through whole, so the option alone refused nothing there.
+  it.effect("accepts an empty read: the handler runs and the reply is the contract's success", () =>
+    Effect.gen(function* () {
+      const { replies, handled } = yield* callOverWire({}, M.regionsRead);
+      expect(handled).toEqual([{}]);
+      expect(replies[0]).toMatchObject({
+        _tag: "Exit",
+        exit: { _tag: "Success", value: { ok: true, value: { client: null } } },
+      });
+    }),
+  );
+
+  it.effect("refuses a read that carries any key at all: the handler never runs", () =>
+    Effect.gen(function* () {
+      for (const forged of [
+        { principal: { subject: "bob" } },
+        { clientId: "client-bob-0000000001" },
+        { viewing: ["forged-thread"] },
+        { value: "forged-value" },
+      ]) {
+        const { replies, handled } = yield* callOverWire(forged, M.regionsRead);
+        expect(handled).toEqual([]);
+        expect(replies).toHaveLength(1);
+        expect(replies[0]).toMatchObject({ _tag: "Exit", exit: { _tag: "Failure" } });
+        expect(JSON.stringify(replies[0])).not.toMatch(/forged-thread|forged-value|client-bob/);
       }
     }),
   );

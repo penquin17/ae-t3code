@@ -5,6 +5,7 @@ import { RegionsReportPayload } from "@t3tools/aetheria-contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { SidebarProvider } from "~/components/ui/sidebar";
 import { act, fakeTimers, render } from "../../../test/render";
 import {
   DECLARED_REGION_IDS,
@@ -34,6 +35,8 @@ const shell = declareRegion({
   description: "The app shell",
 });
 
+const T3_SURFACES = 9;
+
 const fakeTransport = () => {
   const calls: Array<Parameters<RegionsTransport["report"]>[0]> = [];
   const transport: RegionsTransport = {
@@ -60,17 +63,19 @@ describe("RegionsSync", () => {
     const { calls, transport } = fakeTransport();
     const screen = await render(
       <RegionRegistryProvider registry={registry}>
-        <RegionsSync transport={transport} />
+        <SidebarProvider>
+          <RegionsSync transport={transport} />
+        </SidebarProvider>
       </RegionRegistryProvider>,
-      { router: false },
     );
+    // The reporter registers T3's nine surfaces itself (review 2, F2); the first report carries them all.
     await act(async () => void (await vi.advanceTimersByTimeAsync(150)));
-    expect(calls.map((c) => c.sequence)).toEqual([1]);
-    registry.register(shell, () => ({ props: {}, state: {} }));
+    expect(calls.map((c) => [c.sequence, c.regions.length])).toEqual([[1, T3_SURFACES]]);
+    registry.register(declareRegion({ ...shell, id: "extra" }), () => ({ props: {}, state: {} }));
     await act(async () => void (await vi.advanceTimersByTimeAsync(150)));
     expect(calls.map((c) => [c.sequence, c.regions.length])).toEqual([
-      [1, 0],
-      [2, 1],
+      [1, T3_SURFACES],
+      [2, T3_SURFACES + 1],
     ]);
     for (const call of calls) expect(() => decodeStrict(call)).not.toThrow();
     await screen.unmount();
