@@ -515,6 +515,7 @@ export function createOrchestrationFactory(
             watchRoot(state, thread.rootThreadId);
       } catch (error) {
         for (const watcher of watchers.values()) watcher.unsubscribe();
+        await children.stop();
         jobs.close();
         store.close();
         return { ok: false, code: "BOOT_RECONCILIATION_FAILED", detail: message(error) };
@@ -800,6 +801,8 @@ export function createOrchestrationFactory(
         // The sweep first: it writes job records, so it must end before the stores close.
         await state.sweeps.runner?.stop();
         await state.wakes.drain();
+        // Review 2, F3: the restart-notice retries end here (timers cancelled, the one in flight joined), so nothing delivers or writes a child record once the stores close.
+        await state.children.stop();
         state.jobs.close();
         state.store.close();
       }

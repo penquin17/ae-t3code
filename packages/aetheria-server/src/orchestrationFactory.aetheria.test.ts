@@ -1625,6 +1625,43 @@ describe("restart reconciliation of a cut child (step 13)", () => {
     await fifth.service.drain();
   });
 
+  // Review 2, F3. PENDING THE RE-STAMP: this calls `ChildService.stop()` (new in the archive) from the factory's drain, so it cannot pass until the archive carries it and
+  // `artifacts/aetheria-orchestration-0.1.0.tgz` and its stamp are re-stamped by the caller.
+  it("drain cancels the restart-notice retry and delivers nothing afterwards: zero scheduled timers, the notice stays pending for the next boot", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const first = await started(w);
+    ok(await first.service.handle("children.spawn", who, { ...SPAWN, mode: "continuable" }));
+    await first.service.drain();
+    w.lineage.threads = [childRow()];
+    w.fake.activity.set("thread-child-1", "idle");
+    w.fake.lastRuns.set("thread-child-1", {
+      runId: "run-7",
+      outcome: "interrupted",
+      settledAt: "2026-11-12T09:00:00.000Z",
+      errorText: null,
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // The parent cannot take the notice at boot, so the child service schedules its bounded retry; the sweep's own timer is kept out of the count.
+      const second = await started(w, callerOk, { retentionSchedule: () => () => undefined });
+      expect(vi.getTimerCount()).toBeGreaterThanOrEqual(1);
+      await second.service.drain();
+      expect(vi.getTimerCount()).toBe(0);
+      w.fake.activity.set(CALLER_THREAD, "idle");
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(w.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+    // Still owed: the next boot delivers it once, under its key.
+    const reports: Array<{ notices: { sent: string[]; pending: string[] } }> = [];
+    const third = await started(w, callerOk, { onRestart: (r) => void reports.push(r) });
+    expect(reports[0]?.notices.sent).toHaveLength(1);
+    expect(w.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toHaveLength(1);
+    await third.service.drain();
+  });
+
   it("opens the job store beside the orchestration store (jobs/FORMAT declared) and closes both at drain", async () => {
     const w = world();
     writeMainRecord(w.stateRoot, MAIN);
