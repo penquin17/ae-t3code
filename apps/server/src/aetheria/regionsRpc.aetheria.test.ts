@@ -31,6 +31,10 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import * as RpcServer from "effect/rpc/RpcServer";
 import * as RpcTest from "effect/rpc/RpcTest";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -157,6 +161,150 @@ describe("the two methods are in T3's group with the read scope (IP-58)", () => 
         }
       }
     }).pipe(Effect.scoped),
+  );
+});
+
+/**
+ * The wire. `RpcTest.makeClient` passes the payload through unserialized, so it never runs the server's decode. These cases serve the REAL `WsRpcGroup` `aetheria.regions.report` request over `RpcServer.toHttpEffect` with JSON
+ * serialization: the server decodes the payload from bytes with the parse options the Rpc carries, then hands it to the REAL `regionsReport` handler over the real region state. They show what a client
+ * is told when it sends a report with a field the contract does not declare; they do not show T3's websocket transport (the same decode, a different protocol) or the native client (slice-2 `regions-round-trip`).
+ */
+describe("a report with a field the contract does not declare is refused at the wire decode (M10 slice-2 finding)", () => {
+  /** One `aetheria.regions.report` request over the real server decode: the replies the server wrote, and every payload the handler received. */
+  const callOverWire = (wirePayload: unknown) =>
+    Effect.gen(function* () {
+      const registry = registryOf();
+      const connection = open(registry);
+      const actor = yield* actorOf();
+      const handled: Array<unknown> = [];
+      const tag = M.regionsReport;
+      const group = WsRpcGroup.omit(
+        ...([...WsRpcGroup.requests.keys()].filter((other) => other !== tag) as never[]),
+      );
+      const loose = group as unknown as {
+        toLayerHandler: (t: string, h: (p: unknown) => unknown) => Layer.Layer<never>;
+      };
+      const toHttpEffect = RpcServer.toHttpEffect as unknown as (
+        g: unknown,
+      ) => Effect.Effect<
+        Effect.Effect<
+          HttpServerResponse.HttpServerResponse,
+          never,
+          Scope.Scope | HttpServerRequest.HttpServerRequest
+        >,
+        never,
+        Scope.Scope | RpcSerialization.RpcSerialization
+      >;
+      const handlers = loose.toLayerHandler(tag, (received) => {
+        handled.push(received);
+        // The handler runs inside the server's own fibre, which does not inherit the test's services: it is given the device-session store itself.
+        return regionsReport(connection, actor, received as never).pipe(
+          Effect.provide(repo(() => Effect.succeedSome(live()))),
+        );
+      });
+      const http = yield* toHttpEffect(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            handlers,
+            RpcSerialization.layerJson,
+            RpcAuthorization.layer([AuthOrchestrationReadScope] as never),
+          ),
+        ),
+      );
+      const request = HttpServerRequest.fromWeb(
+        new Request("http://localhost/rpc", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            _tag: "Request",
+            id: "1",
+            tag,
+            payload: wirePayload,
+            headers: [],
+          }),
+        }),
+      );
+      const response = yield* http.pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      );
+      const replies = JSON.parse(
+        yield* Effect.promise(() => HttpServerResponse.toWeb(response).text()),
+      ) as ReadonlyArray<{
+        _tag: string;
+        exit?: { _tag: string; value?: unknown; cause?: unknown };
+      }>;
+      return { replies, handled, registry };
+    }).pipe(Effect.scoped, (effect) => withDevice(effect as never)) as Effect.Effect<{
+      replies: ReadonlyArray<{
+        _tag: string;
+        exit?: { _tag: string; value?: unknown; cause?: unknown };
+      }>;
+      handled: Array<unknown>;
+      registry: RegionRegistry;
+    }>;
+
+  it.effect(
+    "accepts a valid report: the handler runs and the reply is the contract's success",
+    () =>
+      Effect.gen(function* () {
+        const { replies, handled, registry } = yield* callOverWire(payload(1, "shell"));
+        expect(handled).toHaveLength(1);
+        expect(replies[0]).toMatchObject({
+          _tag: "Exit",
+          exit: { _tag: "Success", value: { ok: true, value: { sequence: 1 } } },
+        });
+        expect(registry.clientsFor({ subject: SUBJECT })).toHaveLength(1);
+      }),
+  );
+
+  it.effect(
+    "refuses a report carrying a principal, a viewing and a value: the handler never runs and nothing is stored",
+    () =>
+      Effect.gen(function* () {
+        const forged = {
+          ...payload(1, "shell"),
+          principal: { subject: "bob" },
+          viewing: ["forged-thread"],
+          value: "forged-value",
+        };
+        const { replies, handled, registry } = yield* callOverWire(forged);
+        expect(handled).toEqual([]);
+        expect(registry.clientsFor({ subject: SUBJECT })).toEqual([]);
+        expect(registry.clientsFor({ subject: "bob" })).toEqual([]);
+        expect(replies).toHaveLength(1);
+        // What the client receives: an RPC exit that is a failure naming the first key the contract does not declare, never a success carrying a REGIONS_* reply. The refusal is not a coded value (the decode runs before the handler).
+        expect(replies[0]).toMatchObject({
+          _tag: "Exit",
+          exit: {
+            _tag: "Failure",
+            cause: [
+              { _tag: "Die", defect: expect.stringContaining("Expected no excess property") },
+            ],
+          },
+        });
+        expect(JSON.stringify(replies[0])).not.toMatch(/forged-thread|forged-value|REGIONS_/);
+      }),
+  );
+
+  it.effect("refuses an unknown key inside a region entry and inside a descriptor", () =>
+    Effect.gen(function* () {
+      const base = payload(1, "shell");
+      const inEntry = {
+        ...base,
+        regions: [{ ...base.regions[0]!, value: "forged-value" }],
+      };
+      const inDescriptor = {
+        ...base,
+        regions: [
+          { ...base.regions[0]!, descriptor: { ...base.regions[0]!.descriptor, principal: "bob" } },
+        ],
+      };
+      for (const forged of [inEntry, inDescriptor]) {
+        const { replies, handled } = yield* callOverWire(forged);
+        expect(handled).toEqual([]);
+        expect(replies[0]).toMatchObject({ _tag: "Exit", exit: { _tag: "Failure" } });
+      }
+    }),
   );
 });
 

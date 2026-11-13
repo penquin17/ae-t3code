@@ -1,6 +1,8 @@
 // AETHERIA M10 Plan step 23 (D17, R3, XC-19): the strict client contracts for the declared region registry — the region descriptor, the client's report of which regions are mounted and visible,
 // and the read of what the Backend holds for this connection. A payload carries no principal, session or "viewing" field: the Backend binds the principal to the connection and observes the viewed session itself.
+import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
+import * as Rpc from "effect/rpc/Rpc";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -265,5 +267,70 @@ describe("the read of this connection's own client", () => {
     };
     expect(decode(RegionsReadResult)(some)).toEqual(some);
     refuses(RegionsReadResult, { ok: true, value: {} });
+  });
+});
+
+// The wire. T3's RPC server decodes a payload with the parse options its Rpc carries (`Rpc.ParseOptions`); an Rpc that names none ignores an unknown key and drops it. The cases below decode as the server does: with the options
+// read off the Rpc definition in the joined group, not with options written here, so they show what the wire applies.
+describe("the wire decode refuses what the contract says a strict decode refuses (M10 slice-2 finding)", () => {
+  const wire = (tag: string, schema: Schema.Top) => {
+    const rpc = AetheriaRpcGroup.requests.get(tag);
+    if (rpc === undefined) throw new Error(`${tag} is not in the group`);
+    const options = Context.get(rpc.annotations, Rpc.ParseOptions);
+    return (input: unknown) => Schema.decodeUnknownSync(schema as never, options)(input);
+  };
+  const wireReport = wire(AETHERIA_WS_METHODS.regionsReport, RegionsReportPayload);
+
+  it("names the strict option on both region Rpcs", () => {
+    for (const tag of [AETHERIA_WS_METHODS.regionsReport, AETHERIA_WS_METHODS.regionsRead])
+      expect(
+        Context.get(AetheriaRpcGroup.requests.get(tag)!.annotations, Rpc.ParseOptions)
+          .onExcessProperty,
+      ).toBe("error");
+  });
+
+  it("decodes a valid report as before", () => {
+    expect(wireReport(report)).toEqual(report);
+    expect(wireReport({ clientId: report.clientId, sequence: 2, regions: [] })).toEqual({
+      clientId: report.clientId,
+      sequence: 2,
+      regions: [],
+    });
+  });
+
+  it("refuses a report that carries a principal, a viewing, a value or any unknown key, at the top", () => {
+    for (const extra of [
+      { principal: { subject: "bob" } },
+      { viewing: ["thread-1"] },
+      { value: "leak" },
+      { unknown: 1 },
+    ])
+      expect(() => wireReport({ ...report, ...extra })).toThrow();
+  });
+
+  it("refuses an unknown key inside a region entry, its descriptor and a declared field", () => {
+    expect(() =>
+      wireReport({ ...report, regions: [{ descriptor, visible: true, value: "leak" }] }),
+    ).toThrow();
+    expect(() =>
+      wireReport({
+        ...report,
+        regions: [{ descriptor: { ...descriptor, principal: "bob" }, visible: true }],
+      }),
+    ).toThrow();
+    expect(() =>
+      wireReport({
+        ...report,
+        regions: [
+          {
+            descriptor: {
+              ...descriptor,
+              props: [{ name: "a", type: "string", report: "value", value: "leak" }],
+            },
+            visible: true,
+          },
+        ],
+      }),
+    ).toThrow();
   });
 });

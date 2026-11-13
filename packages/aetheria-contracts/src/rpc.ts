@@ -276,14 +276,18 @@ const AetheriaJobsRpcGroup = RpcGroup.make(
 const AetheriaUsageRpcGroup = RpcGroup.make(AetheriaUsageReadRpc);
 
 // The declared region registry (M10 step 23). Payloads carry a client id, a sequence and the declared regions only; the principal comes from the connection and the viewed thread from T3's own subscription. A failure is a coded value in the reply.
+// Strict at the wire: the contract says a strict decode refuses a principal, session, viewing or value field. A schema cannot carry that (Effect 4.1 reads no parse-options annotation on a schema), and the server decodes a payload
+// with the options its Rpc carries, whose default drops an unknown key and accepts the rest (M10 slice-2 `regions-round-trip`). So both Rpcs name `onExcessProperty: "error"`: an unknown key at any depth is refused before
+// the handler runs. The read's payload is an empty struct, which Effect passes through whole even under this option, so on the read the option guards the reply encoding and the client's encode, not a payload key.
+const STRICT_WIRE = { onExcessProperty: "error" } as const;
 const AetheriaRegionsReportRpc = Rpc.make(AETHERIA_WS_METHODS.regionsReport, {
   payload: RegionsReportPayload,
   success: RegionsReportResult,
-});
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
 const AetheriaRegionsReadRpc = Rpc.make(AETHERIA_WS_METHODS.regionsRead, {
   payload: RegionsReadPayload,
   success: RegionsReadResult,
-});
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
 export const AetheriaRegionsRpcGroup = RpcGroup.make(
   AetheriaRegionsReportRpc,
   AetheriaRegionsReadRpc,

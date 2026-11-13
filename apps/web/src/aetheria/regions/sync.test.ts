@@ -1,5 +1,13 @@
 // AETHERIA M10 step 23 (D17, XC-19; D4): the client's report of what is mounted. It sends the WHOLE set with a rising sequence (a lost reply is repeated safely; the Backend refuses a stale one),
 // one call at a time, never carrying a principal, a session or a value, and it never lets a reply to an abandoned call replace what a newer call settled.
+import {
+  AetheriaRpcGroup,
+  AETHERIA_WS_METHODS,
+  RegionsReportPayload,
+} from "@t3tools/aetheria-contracts";
+import * as Context from "effect/Context";
+import * as Schema from "effect/Schema";
+import * as Rpc from "effect/rpc/Rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { declareRegion } from "./descriptor";
@@ -26,6 +34,13 @@ const held = (sequence: number): RegionsReply => ({
   ok: true,
   value: { clientId: CLIENT, sequence, regions: [], viewing: [] },
 });
+
+// The options the server decodes a report with: the ones the Rpc carries.
+const wireOptions = Context.get(
+  AetheriaRpcGroup.requests.get(AETHERIA_WS_METHODS.regionsReport)!.annotations,
+  Rpc.ParseOptions,
+);
+const decodeOnWire = Schema.decodeUnknownSync(RegionsReportPayload as never, wireOptions);
 
 type Payload = Parameters<RegionsTransport["report"]>[0];
 
@@ -87,6 +102,30 @@ describe("what is sent", () => {
     expect(Object.keys(calls[0]!).toSorted()).toEqual(["clientId", "regions", "sequence"]);
     expect(Object.keys(calls[0]!.regions[0]!).toSorted()).toEqual(["descriptor", "visible"]);
     expect(JSON.stringify(calls)).not.toContain("SECRET");
+    sync.stop();
+  });
+
+  it("sends only keys the contract declares at every depth: each report decodes under the wire's own strict options", async () => {
+    const { calls, registry, sync } = setup(async (_p, n) => held(n));
+    registry.register(
+      declareRegion({
+        id: "composer",
+        kind: "panel",
+        owner: "aetheria-ui",
+        parent: "shell",
+        description: "The composer",
+        props: [{ name: "draft", type: "string", report: "value" }],
+        state: [{ name: "phase", type: "string" }],
+        tokens: ["--ae-color-accent"],
+      }),
+      () => ({ props: { draft: "SECRET" }, state: { phase: "idle" } }),
+    );
+    registry.register(shell, () => ({ props: {}, state: {} }));
+    sync.start();
+    await tick(50);
+    expect(wireOptions.onExcessProperty).toBe("error");
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(() => decodeOnWire(call)).not.toThrow();
     sync.stop();
   });
 
