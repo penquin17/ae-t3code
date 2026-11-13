@@ -32,11 +32,13 @@ import {
   createJobLifecycle,
   createJobOutput,
   createJobRegistry,
+  createJobRetention,
   createJobWakes,
   jobLostKey,
   lostNoticeOwed,
   nodeHostProcessPort,
   nodeJobOutputPort,
+  nodeJobRetentionPort,
   nodeStoreDeps,
   openJobsStore,
   orchestrationParameter,
@@ -44,7 +46,9 @@ import {
   reconcileChildren,
   reconcileForkRollbacks,
   retireRolledBackMain,
+  startRetentionSweeps,
   type BootReport,
+  type RetentionReport,
   type HostProcessPort,
   type JobLifecycle,
   type JobOutput,
@@ -85,6 +89,12 @@ export interface OrchestrationFactoryOptions {
    * Told what restart reconciliation did (step 13): which children's runs the restart cut and how each notice stands. Never required for the service to run.
    */
   readonly onRestart?: ((report: RestartReport) => void) | undefined;
+  /** Told what each terminal-output retention sweep did (step 19a), the one at boot included. Never required for the service to run. */
+  readonly onRetention?: ((report: RetentionReport) => void) | undefined;
+  /** Test seam: the retention sweep's timer. Default: an unref'd timeout. */
+  readonly retentionSchedule?:
+    | ((fn: () => void | Promise<void>, ms: number) => () => void)
+    | undefined;
   /**
    * The restart-notice delivery seam: the outbox of step 15. Absent until step 15 is integrated, so every notice stays pending under its key and the next boot retries it.
    */
@@ -106,6 +116,8 @@ export interface OrchestrationFactoryOptions {
   readonly hostProcess?: HostProcessPort | undefined;
   /** Test seam: the delay in which completion notices for one owner coalesce into one message. Default 50 ms. */
   readonly wakeCoalesceMs?: number | undefined;
+  /** Test seam: the coalescing wake's timer, `(fn, ms) => cancel`. Default: an unref'd timeout. */
+  readonly wakeSchedule?: ((fn: () => unknown, ms: number) => () => void) | undefined;
   /** Test seam: the id of each new job. Default: `job-<uuid>`. */
   readonly newJobId?: (() => string) | undefined;
   /** Test seam: the T3 thread id of each fork's copy. Default: random. */
@@ -154,6 +166,8 @@ interface Running {
   readonly children: ChildService;
   readonly watchers: Map<string, { unsubscribe(): void }>;
   readonly notifyLost: (jobId: string, boot: boolean) => Promise<void>;
+  /** Step 19a: the terminal-output retention sweeps, started once boot has succeeded and stopped first at drain. */
+  readonly sweeps: { runner?: ReturnType<typeof startRetentionSweeps> };
 }
 
 export function createOrchestrationFactory(
@@ -162,6 +176,8 @@ export function createOrchestrationFactory(
   return (deps: OrchestrationServiceDeps): OrchestrationService => {
     let running: Running | undefined;
     let draining = false;
+    /** Aborted when the service drains: it ends every pending wait (see `handle`). */
+    const drainAbort = new AbortController();
     let attempts = 0;
     const inflight = new Map<number, Promise<unknown>>();
     /** The last lineage listing boot read, to subscribe the roots of the children it found. */
@@ -361,6 +377,7 @@ export function createOrchestrationFactory(
         wakeCap: () => orchestrationParameter("maxConsecutiveWakes"),
         now: deps.now,
         coalesceMs: options.wakeCoalesceMs ?? 50,
+        ...(options.wakeSchedule === undefined ? {} : { schedule: options.wakeSchedule }),
         beforeDeliver: (sessionId) => deps.resume.resumed(sessionId),
         humanMessageId: async (sessionId) => {
           const threadId = deps.threadOfSession(sessionId);
@@ -399,7 +416,18 @@ export function createOrchestrationFactory(
         waitDefaultMs: () => orchestrationParameter("waitDefaultMs"),
         waitCapMs: () => orchestrationParameter("waitCapMs"),
       });
-      state = { store, jobs, lifecycle, output, wakes, identity, children, watchers, notifyLost };
+      state = {
+        store,
+        jobs,
+        lifecycle,
+        output,
+        wakes,
+        identity,
+        children,
+        watchers,
+        notifyLost,
+        sweeps: {},
+      };
       try {
         const report = await reconcileChildren({
           threads,
@@ -469,6 +497,20 @@ export function createOrchestrationFactory(
         store.close();
         return { ok: false, code: "BOOT_RECONCILIATION_FAILED", detail: message(error) };
       }
+      // Step 19a: terminal job output is swept at boot and then once per interval (unaccepted parameters). The sweep walks the registry's records only: an adopted, terminal, collected job older
+      // than the retention loses its run folder, and nothing else is touched. The registry is the one writer of the removal record.
+      state.sweeps.runner = startRetentionSweeps({
+        retention: createJobRetention({
+          registry,
+          port: nodeJobRetentionPort({ stateRoot: deps.stateRoot }),
+          now: deps.now,
+          retentionMs: () => orchestrationParameter("jobOutputRetention") * 86_400_000,
+        }),
+        intervalMs: orchestrationParameter("jobRetentionSweepMs"),
+        ...(options.retentionSchedule === undefined ? {} : { schedule: options.retentionSchedule }),
+        onReport: (report) => options.onRetention?.(report),
+        onError: () => undefined,
+      });
       running = state;
       return { ok: true };
     };
@@ -657,6 +699,11 @@ export function createOrchestrationFactory(
         return Promise.resolve(unavailable(`${operation} is not built yet (Plan steps 11 to 20)`));
       attempts += 1;
       const ticket = attempts;
+      // A wait (job output, report) also ends when the service drains, so a drain never waits out a long wait nor closes the stores under it. Work that is not a wait is never aborted by a drain.
+      const waitSignal = (): AbortSignal =>
+        handleOptions?.signal === undefined
+          ? drainAbort.signal
+          : AbortSignal.any([handleOptions.signal, drainAbort.signal]);
       const work = (async (): Promise<OrchestrationOutcome> => {
         try {
           if (
@@ -664,7 +711,13 @@ export function createOrchestrationFactory(
             operation === "jobs.list" ||
             operation === "jobs.cancel"
           )
-            return await outputOperation(state, operation, who, args, handleOptions?.signal);
+            return await outputOperation(
+              state,
+              operation,
+              who,
+              args,
+              operation === "jobs.output" ? waitSignal() : handleOptions?.signal,
+            );
           if (
             operation === "jobs.reserve" ||
             operation === "jobs.attach" ||
@@ -682,7 +735,7 @@ export function createOrchestrationFactory(
                 operation as Parameters<typeof control>[1],
                 who,
                 args,
-                handleOptions?.signal,
+                operation === "children.await-report" ? waitSignal() : handleOptions?.signal,
               );
         } catch (error) {
           return unavailable(`${operation} failed: ${message(error)}`);
@@ -698,6 +751,8 @@ export function createOrchestrationFactory(
       draining = true;
       const state = running;
       running = undefined;
+      // Waits end now; the operations that are not waits are given their bounded time below.
+      drainAbort.abort();
       const pending = [...inflight.entries()];
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<"timeout">((resolve) => {
@@ -720,6 +775,8 @@ export function createOrchestrationFactory(
           }
         }
         state.watchers.clear();
+        // The sweep first: it writes job records, so it must end before the stores close.
+        await state.sweeps.runner?.stop();
         await state.wakes.drain();
         state.jobs.close();
         state.store.close();

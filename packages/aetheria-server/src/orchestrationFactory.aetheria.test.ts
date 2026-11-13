@@ -13,7 +13,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ORCHESTRATION_OPERATIONS, type Xc6OperationContext } from "@t3tools/aetheria-contracts";
 
@@ -913,6 +913,52 @@ describe("job kill and Backend boot reconciliation (step 18)", () => {
     await rebooted.service.drain();
   });
 
+  it("boot sweeps the output of an adopted, terminal, collected job older than the retention and records it; a younger or uncollected one keeps its folder; drain stops the sweeps", async () => {
+    const DAY = 86_400_000;
+    const RUN2 = "0197d3c0-aaaa-4000-8000-00000000f00d";
+    const first = world();
+    const ids = ["job-old", "job-uncollected"];
+    let n = 0;
+    const initial = await started(first, callerOk, {
+      hostProcess: host(),
+      newJobId: () => ids[n++]!,
+    });
+    const old = await reserveAndAdopt(first, initial.service, "job-old", who, RUN);
+    const uncollected = await reserveAndAdopt(first, initial.service, "job-uncollected", who, RUN2);
+    for (const job of [old, uncollected])
+      ok(
+        await initial.service.handle("jobs.exited", who, {
+          jobId: job.jobId,
+          exit: { code: 0, signal: null },
+        }),
+      );
+    // Only the first is read by its owner, so only it is collected.
+    ok(await initial.service.handle("jobs.output", who, { jobId: old.jobId }));
+    await initial.service.drain();
+
+    const reports: unknown[] = [];
+    const second = world(first.stateRoot);
+    const later = { ...second, deps: { ...second.deps, now: () => 1_700_000_000_000 + 8 * DAY } };
+    const rebooted = await started(later, callerOk, {
+      hostProcess: host(),
+      onRetention: (report) => reports.push(report),
+    });
+    await vi.waitFor(() => expect(reports.length).toBeGreaterThan(0));
+    expect(reports[0]).toMatchObject({ removed: ["job-old"], problems: [] });
+    expect(NodeFS.existsSync(NodePath.dirname(old.stdout))).toBe(false);
+    expect(NodeFS.existsSync(NodePath.dirname(uncollected.stdout))).toBe(true);
+    const record = JSON.parse(
+      NodeFS.readFileSync(
+        NodePath.join(second.stateRoot, "jobs", "job-old", "record.json"),
+        "utf8",
+      ),
+    );
+    expect(typeof record.outputRemoved).toBe("number");
+    const swept = await rebooted.service.handle("jobs.output", who, { jobId: "job-old" });
+    expect(swept).toMatchObject({ ok: false });
+    await rebooted.service.drain();
+  });
+
   it("boot marks a reserved job that never got a process identity lost and owes the model no notice", async () => {
     const first = world();
     const initial = await started(first, callerOk, {
@@ -1714,6 +1760,103 @@ describe("drain", () => {
     });
     const next = await started(world(w.stateRoot));
     await next.service.drain();
+  });
+
+  // Step 20: disposal with managed jobs in flight. The helpers are local: the job-output describe's own are not in scope here.
+  const RUN_D = "0197d3c0-aaaa-4000-8000-00000000d15d";
+  const hostD = () => ({
+    startTime: async () => "T",
+    probeGroup: () => ({ state: "live" as const }),
+    inspectRun: async () => ({ ok: true as const }),
+  });
+  async function adoptedD(w: World, service: Awaited<ReturnType<typeof started>>["service"]) {
+    const jobId = ok(
+      await service.handle("jobs.reserve", who, {
+        runKey: RUN_D,
+        label: "npm test",
+        mode: "background",
+      }),
+    ).jobId as string;
+    const folder = NodePath.join(w.stateRoot, "shell", "runs", RUN_D);
+    NodeFS.mkdirSync(folder, { recursive: true, mode: 0o700 });
+    NodeFS.writeFileSync(NodePath.join(folder, "stdout"), "");
+    NodeFS.writeFileSync(NodePath.join(folder, "stderr"), "");
+    ok(
+      await service.handle("jobs.attach", who, {
+        jobId,
+        pid: 4242,
+        pgid: 4242,
+        startIdentity: { pid: 4242, startTime: "T" },
+      }),
+    );
+    ok(await service.handle("jobs.adopted", who, { jobId, via: "background" }));
+    return jobId;
+  }
+
+  it("settles a pending wait and stops the retention timer before it returns, admits nothing afterwards, and reports no live work", async () => {
+    const w = world();
+    const cancelled: string[] = [];
+    const { service } = await started(w, callerOk, {
+      hostProcess: hostD(),
+      newJobId: () => "job-drain",
+      retentionSchedule: (_fn, ms) => () => void cancelled.push(`timer:${ms}`),
+    });
+    const jobId = await adoptedD(w, service);
+    const waiting = service.handle("jobs.output", who, {
+      jobId,
+      wait: true,
+      timeoutMs: 600_000,
+      requestId: "drain-wait",
+    });
+    // The wait is still pending (the job is running); a drain must end it, never leave it for the stores to be closed under.
+    let settled = false;
+    void waiting.then(() => (settled = true));
+    for (let i = 0; i < 50; i += 1) await Promise.resolve();
+    expect(settled).toBe(false);
+    const drained = await service.drain();
+    expect(drained).toEqual({ stopped: [], stillLive: [] });
+    expect(await waiting).toMatchObject({ ok: false });
+    expect(settled).toBe(true);
+    expect(cancelled.length).toBe(1);
+    for (const op of ["jobs.reserve", "jobs.output", "jobs.list", "jobs.kill"] as const) {
+      expect(
+        await service.handle(op, who, { jobId, runKey: RUN_D, label: "x", mode: "background" }),
+      ).toMatchObject({
+        ok: false,
+        code: "ORCHESTRATION_UNAVAILABLE",
+      });
+    }
+    const next = await started(world(w.stateRoot), callerOk, { hostProcess: hostD() });
+    await next.service.drain();
+  });
+
+  it("cancels the coalescing wake of a pending completion: nothing is sent to the owner after drain, the notice stays pending for the next boot", async () => {
+    const w = world();
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    const scheduled: { fn: () => unknown; ms: number; cancelled: boolean }[] = [];
+    const { service } = await started(w, callerOk, {
+      hostProcess: hostD(),
+      newJobId: () => "job-wake",
+      wakeCoalesceMs: 60_000,
+      wakeSchedule: (fn, ms) => {
+        const entry = { fn, ms, cancelled: false };
+        scheduled.push(entry);
+        return () => void (entry.cancelled = true);
+      },
+    });
+    const jobId = await adoptedD(w, service);
+    ok(await service.handle("jobs.exited", who, { jobId, exit: { code: 0, signal: null } }));
+    expect(scheduled.map((entry) => entry.ms)).toEqual([60_000]);
+    await service.drain();
+    // The one coalescing wake was cancelled by the drain, so it never ran: nothing reached the owner.
+    expect(scheduled.map((entry) => entry.cancelled)).toEqual([true]);
+    expect(w.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD)).toHaveLength(0);
+    const record = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(w.stateRoot, "jobs", jobId, "record.json"), "utf8"),
+    );
+    expect(record.outbox).toContainEqual(
+      expect.objectContaining({ key: `job:${jobId}:completion`, state: "pending" }),
+    );
   });
 });
 
