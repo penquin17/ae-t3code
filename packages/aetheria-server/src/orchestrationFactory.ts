@@ -266,7 +266,7 @@ export function createOrchestrationFactory(
         inboxDedupEstablished: true,
         clock: { now: deps.now },
         authorizer: deps.spawnAuthorizer,
-        availability: null,
+        availability: deps.availability ?? null,
         newAttemptId,
         newSessionId,
         sessionOfThread: deps.sessionOfThread,

@@ -2598,7 +2598,7 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/orchestration@file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz':
-    resolution: {integrity: sha512-lFkhf7ddaVzfp5IOziXn5NKIj0tKMV6NGkNv89DleEQSYt48zVrtVMAfVKIyV74A1wPWbRpLmnxR1L5OmhpsEA==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
+    resolution: {integrity: sha512-ZnIUPLxBn+yJPqFzOCjk/ZhS3vC64zXfS1VH/aAcc8Xr4nGIgbnWCEanIXdHz7f/WzDHRojIx1UDl8q5WQryIw==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 

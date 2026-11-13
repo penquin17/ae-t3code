@@ -29,6 +29,28 @@ export interface SpawnRoute {
   readonly model: string;
   readonly effort?: string | undefined;
 }
+/** The most routes a child keeps (M05's record bound). */
+const MAX_CHILD_ROUTES = 16;
+/**
+ * The routes of a role child: the caller's own route first (the child runs on the caller's model, as ever), then each of the role's routes that is not the same provider and model, in the role's
+ * order. A role with no other route leaves the caller's single route, which never falls back.
+ */
+function withRoleRoutes(
+  own: readonly SpawnRoute[],
+  role: readonly SpawnRoute[] | undefined,
+): readonly SpawnRoute[] {
+  const out: SpawnRoute[] = [...own];
+  for (const route of role ?? []) {
+    if (out.length >= MAX_CHILD_ROUTES) break;
+    if (out.some((r) => r.provider === route.provider && r.model === route.model)) continue;
+    out.push({
+      provider: route.provider,
+      model: route.model,
+      ...(route.effort === undefined ? {} : { effort: route.effort }),
+    });
+  }
+  return out;
+}
 /** What the Backend knows about how a child launches. It comes from T3's record of the caller's thread, not from the model. */
 export interface SpawnLaunchFacts {
   readonly routes: readonly SpawnRoute[];
@@ -241,7 +263,8 @@ export function createSpawnAuthorizer(options: SpawnAuthorizerOptions): SpawnAut
         roleOrigin: definition.origin,
         roleDigest: definition.digest,
       },
-      routes: facts.routes,
+      // The child starts on the caller's own route (route 1, as ever); the role's own routes follow, so the child can fall back to one (M05 step 24, D12).
+      routes: withRoleRoutes(facts.routes, definition.routes),
       runtimeMode: facts.runtimeMode,
       interactionMode: facts.interactionMode,
     });

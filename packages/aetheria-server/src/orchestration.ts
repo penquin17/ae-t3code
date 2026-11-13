@@ -106,6 +106,7 @@ export type OrchestrationDirectApi = Pick<
   | "cancelParentTurn"
   | "listChildren"
   | "readReport"
+  | "currentRoute"
 >;
 
 /** What a service factory is given: the Backend's own seams, nothing else. The identity store, job registry and outbox are the service's, under `stateRoot`. */
@@ -127,6 +128,17 @@ export interface OrchestrationServiceDeps {
   readonly spawnAuthorizer: SpawnAuthorizerPort;
   /** Boot's lineage listing; `unavailable` when T3's shells cannot be read, never an empty list. */
   readonly lineage: ChildLineageReader;
+  /** M09's route availability for the launch route and fallback (steps 21 and 22). Absent: every route is unknown and no failure is classified, so nothing switches. */
+  readonly availability?: {
+    routeStates(
+      routes: readonly { readonly provider: string; readonly model: string }[],
+      purpose: "launch" | "switch" | "display",
+    ): Promise<unknown>;
+    reportFailure(
+      route: { readonly provider: string; readonly model: string },
+      failure: { readonly message: string },
+    ): Promise<unknown>;
+  };
 }
 export type OrchestrationServiceFactory = (deps: OrchestrationServiceDeps) => OrchestrationService;
 

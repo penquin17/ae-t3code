@@ -217,9 +217,17 @@ interface SeamAsk {
   readonly model: string;
   readonly effort?: string;
   readonly child: boolean;
+  /** Step 23: the thread, sent for a child only. */
+  readonly threadId?: string;
 }
 type SeamAnswer =
-  | { readonly outcome: "resolved"; readonly effort: string | null }
+  | {
+      readonly outcome: "resolved";
+      readonly effort: string | null;
+      /** Step 23: the route the policy chose for a child's persisted state; the adapter applies it. */
+      readonly provider?: string;
+      readonly model?: string;
+    }
   | { readonly outcome: "refused"; readonly code: string; readonly message: string };
 
 /** Installs a recording stub in the slot for the effect's duration and always empties it. */
@@ -430,6 +438,78 @@ describe("T3's Pi selection seam (IP-17)", () => {
         ]);
       }).pipe(Effect.scoped, Effect.provide(layerTest)),
     ),
+  );
+
+  // Step 23 (M05): a failed child's next turn runs on the route the Backend's persisted state names. The adapter sends the thread (child only) and applies the provider, model and effort the policy
+  // returns; the scripted Pi's own provider request shows what would actually reach the provider.
+  it.effect(
+    "asks a child's route by its thread id, and applies the provider, model and effort the policy returns (the next provider request is the new route)",
+    () =>
+      withSeam(
+        () => ({
+          outcome: "resolved",
+          effort: "xhigh",
+          provider: "openai-codex",
+          model: "gpt-6.1-sol",
+        }),
+        (asks) =>
+          Effect.gen(function* () {
+            const fake = yield* makeScriptedPi;
+            const { runtime, providerThread } = yield* openRuntime(fake);
+            yield* startTurn(
+              runtime,
+              providerThread,
+              selection("anthropic/claude-fable-5-1", "high"),
+              {
+                subagent: true,
+              },
+            );
+            yield* fake.nextPrompt;
+            assert.deepEqual(asks, [
+              {
+                provider: "anthropic",
+                model: "claude-fable-5-1",
+                effort: "high",
+                child: true,
+                threadId: THREAD_ID,
+              },
+            ]);
+            assert.deepEqual(fake.selectionCommands(), [
+              "set_model openai-codex/gpt-6.1-sol",
+              "set_thinking_level xhigh",
+            ]);
+            assert.deepEqual(fake.providerRequests, [
+              { provider: "openai-codex", model: "gpt-6.1-sol", thinking: "xhigh" },
+            ]);
+          }).pipe(Effect.scoped, Effect.provide(layerTest)),
+      ),
+  );
+
+  it.effect(
+    "a policy that returns the same route changes nothing: no thread id for a main thread, and the requested model stays",
+    () =>
+      withSeam(
+        (ask) => ({
+          outcome: "resolved",
+          effort: "high",
+          provider: ask.provider,
+          model: ask.model,
+        }),
+        (asks) =>
+          Effect.gen(function* () {
+            const fake = yield* makeScriptedPi;
+            const { runtime, providerThread } = yield* openRuntime(fake);
+            yield* startTurn(runtime, providerThread, selection("anthropic/claude-fable-5-1"));
+            yield* fake.nextPrompt;
+            assert.deepEqual(asks, [
+              { provider: "anthropic", model: "claude-fable-5-1", child: false },
+            ]);
+            assert.deepEqual(fake.selectionCommands(), [
+              "set_model anthropic/claude-fable-5-1",
+              "set_thinking_level high",
+            ]);
+          }).pipe(Effect.scoped, Effect.provide(layerTest)),
+      ),
   );
 
   it.effect("sends no thinking command when the policy resolves none", () =>

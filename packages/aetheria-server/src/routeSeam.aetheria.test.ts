@@ -136,6 +136,115 @@ describe("the Pi selection seam resolves the route and effort once", () => {
   });
 });
 
+// Step 23 (M05): a role child's next turn runs on the route its persisted state names. The request carries the trusted thread id; the Backend's `childRoute` answers by it; the policy (effectiveRoute
+// and the capability check) stays the only owner of precedence and effort.
+describe("a role child's persisted route is applied to its next turn", () => {
+  const route = (provider: string, model: string, effort?: string) => ({
+    kind: "route" as const,
+    index: 2,
+    switches: 1,
+    role: "reviewer",
+    route: { provider, model, ...(effort === undefined ? {} : { effort }) },
+  });
+  const make = (answer: (threadId: string) => unknown, caps = LEVELS) =>
+    createPiSelectionSeam({
+      capabilities: (r) => known(r, caps),
+      childRoute: answer as never,
+    });
+
+  it("replaces the requested provider, model and effort with the persisted route's, and keeps the route's explicit effort", () => {
+    const seam = make(() => route("openai-codex", "gpt-6.1-sol", "xhigh"));
+    expect(
+      seam.resolve({ ...FABLE, effort: "high", child: true, threadId: "thread-child" }),
+    ).toEqual({
+      outcome: "resolved",
+      provider: "openai-codex",
+      model: "gpt-6.1-sol",
+      effort: "xhigh",
+      source: "explicit",
+      effortSource: "explicit",
+      validation: "supported",
+    });
+  });
+
+  it("a route with no effort gets the child default of the model, never the other route's effort", () => {
+    const seam = make(() => route("anthropic", "claude-fable-5-1"));
+    expect(
+      seam.resolve({ ...LUNA, effort: "low", child: true, threadId: "thread-child" }),
+    ).toMatchObject({
+      outcome: "resolved",
+      provider: "anthropic",
+      model: "claude-fable-5-1",
+      effort: "medium",
+      effortSource: "aetheria-default",
+    });
+  });
+
+  it("asks the Backend by the trusted thread id, once, and only for a child with a thread id", () => {
+    const asked: string[] = [];
+    const seam = make((threadId) => {
+      asked.push(threadId);
+      return { kind: "none" };
+    });
+    seam.resolve({ ...FABLE, child: true, threadId: "thread-a" });
+    seam.resolve({ ...FABLE, child: false, threadId: "thread-main" });
+    seam.resolve({ ...FABLE, child: true });
+    expect(asked).toEqual(["thread-a"]);
+  });
+
+  it("`none` leaves the request exactly as the policy resolves it today (explicit, fork, single-route role, bare T3)", () => {
+    const withNone = make(() => ({ kind: "none" }));
+    const bare = createPiSelectionSeam({ capabilities: (r) => known(r, LEVELS) });
+    expect(withNone.resolve({ ...FABLE, effort: "low", child: true, threadId: "t" })).toEqual(
+      bare.resolve({ ...FABLE, effort: "low", child: true }),
+    );
+  });
+
+  it("an unknown route state, or a Backend that throws, is a visible refusal: the default is never used silently", () => {
+    for (const answer of [
+      () => ({ kind: "unknown", detail: "the child's route record is corrupt" }),
+      () => {
+        throw new Error("service stopped");
+      },
+    ]) {
+      const refused = make(answer).resolve({ ...FABLE, child: true, threadId: "thread-child" });
+      expect(refused).toMatchObject({ outcome: "refused", code: "route-state-unknown" });
+      expect(refused.outcome === "refused" && refused.message).not.toContain(
+        "aetheria-route-refused",
+      );
+    }
+  });
+
+  it("an effort the persisted route's model cannot take, or cannot verify, is refused with the marker that makes it count as that route failing", () => {
+    const unsupported = make(
+      () => route("openai-codex", "gpt-6-luna", "max"),
+      ["off", "low"],
+    ).resolve({ ...FABLE, child: true, threadId: "thread-child" });
+    expect(unsupported).toMatchObject({ outcome: "refused", code: "effort-unsupported" });
+    expect(unsupported.outcome === "refused" && unsupported.message).toContain(
+      "[aetheria-route-refused:effort-unsupported]",
+    );
+    const unverifiable = createPiSelectionSeam({
+      capabilities: (r) => unknown(r),
+      childRoute: (() => route("anthropic", "claude-fable-5-1")) as never,
+    }).resolve({ ...LUNA, child: true, threadId: "thread-child" });
+    expect(unverifiable).toMatchObject({ outcome: "refused", code: "default-effort-unverifiable" });
+    expect(unverifiable.outcome === "refused" && unverifiable.message).toContain(
+      "[aetheria-route-refused:default-effort-unverifiable]",
+    );
+  });
+
+  it("a plain refusal without a persisted route carries no marker (it is not a route failing)", () => {
+    const refused = createPiSelectionSeam({ capabilities: (r) => unknown(r) }).resolve({
+      ...FABLE,
+      child: true,
+    });
+    expect(refused.outcome === "refused" && refused.message).not.toContain(
+      "aetheria-route-refused",
+    );
+  });
+});
+
 describe("the process slot the Pi adapter reads", () => {
   const slot = (): unknown => (globalThis as Record<symbol, unknown>)[PI_SELECTION_SEAM_SLOT];
   const seamOf = (): PiSelectionSeam =>

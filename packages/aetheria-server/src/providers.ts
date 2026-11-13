@@ -92,6 +92,11 @@ export interface ProvidersRegistrationOptions {
 /** The registration, plus the in-process capability answer the Pi selection seam uses (it throws while the service is not running). */
 export type ProvidersBackendRegistration = BackendRegistration & {
   readonly routeCapabilities: (route: Route) => RouteCapabilities;
+  /**
+   * M05 steps 21 and 22: M09's route states and failure report, in-process, for the children service's fallback. Each throws while the service is not running; the reader turns a throw into
+   * `unknown` / `other`, never into `out` or a switch (the module's fallback/consult.ts).
+   */
+  readonly availability: Pick<RouteAvailability, "routeStates" | "reportFailure">;
   /** Open a snapshot for its owning session (M10's download route); unavailable while snapshots are not running. */
   readonly openSnapshot: ProductionSnapshots["openSnapshot"];
   /** Remove a Pi session's snapshots; unavailable while snapshots are not running. */
@@ -244,6 +249,10 @@ export function createProvidersBackendRegistration(
     },
     operations,
     routeCapabilities: (route) => proxy.routeCapabilities(route),
+    availability: {
+      routeStates: (routes, purpose) => proxy.routeStates(routes, purpose),
+      reportFailure: (route, failure) => proxy.reportFailure(route, failure),
+    },
     openSnapshot: (sessionId, snapshotId) =>
       snapshots === undefined
         ? Promise.resolve(unavailable)

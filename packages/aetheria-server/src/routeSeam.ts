@@ -21,12 +21,35 @@ export interface PiSelectionRequest {
   readonly effort?: string;
   /** A spawned (subagent) thread takes the child column of the default table. */
   readonly child: boolean;
+  /**
+   * AETHERIA M05 step 23: the T3 thread the turn runs on, from T3's own turn input (never model input), sent for a child only. The Backend answers with the route a role child's persisted state names
+   * (`childRoute`), which then replaces the requested provider, model and effort for this turn.
+   */
+  readonly threadId?: string;
 }
 
 export type PiSelectionRefusal =
   | RoutePolicyErrorCode
   | "default-effort-unverifiable"
+  | "route-state-unknown"
   | "policy-failed";
+
+/** What the Backend says a child's next turn runs on (M05's `currentRoute`). */
+export type PiChildRoute =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "route";
+      readonly index: number;
+      readonly route: {
+        readonly provider: string;
+        readonly model: string;
+        readonly effort?: string;
+      };
+    }
+  | { readonly kind: "unknown"; readonly detail: string };
+
+/** A refusal of a route the persisted state chose carries this marker, so the failed run's text lets M05 count THAT route as failing (children/route.ts). */
+const routeRefusedMarker = (code: string): string => `[aetheria-route-refused:${code}]`;
 
 export type PiSelectionOutcome =
   | {
@@ -49,6 +72,8 @@ export interface PiSelectionSeam {
 export interface PiSelectionSeamOptions {
   /** The Backend's capability answer for a route; a throw (service not running) counts as unknown. */
   readonly capabilities: (route: Route) => RouteCapabilities | undefined;
+  /** Step 23: the route a child thread's next turn runs on, by thread id. Absent (bare T3, no orchestration): nothing is overridden. A throw counts as unknown. */
+  readonly childRoute?: ((threadId: string) => PiChildRoute) | undefined;
 }
 
 export function createPiSelectionSeam(options: PiSelectionSeamOptions): PiSelectionSeam {
@@ -61,23 +86,55 @@ export function createPiSelectionSeam(options: PiSelectionSeamOptions): PiSelect
   };
   return Object.freeze({
     resolve(request: PiSelectionRequest): PiSelectionOutcome {
+      // Step 23: a role child's persisted route decides this turn. The policy below stays the only owner of precedence and effort: the route is passed to it as the explicit selection.
+      let explicit: { provider: string; model: string; effort?: string } = {
+        provider: request.provider,
+        model: request.model,
+        ...(request.effort === undefined ? {} : { effort: request.effort }),
+      };
+      let fromRoute = false;
+      if (request.child && request.threadId !== undefined && options.childRoute !== undefined) {
+        let answer: PiChildRoute | undefined;
+        try {
+          answer = options.childRoute(request.threadId);
+        } catch {
+          answer = {
+            kind: "unknown",
+            detail: "the Backend could not be asked for the child's route",
+          };
+        }
+        if (answer?.kind !== "none" && answer?.kind !== "route")
+          return {
+            outcome: "refused",
+            code: "route-state-unknown",
+            message: `the child's route state is unknown (${answer?.kind === "unknown" ? answer.detail : "no readable answer"}), so no model command was sent`,
+          };
+        if (answer.kind === "route") {
+          explicit = {
+            provider: answer.route.provider,
+            model: answer.route.model,
+            ...(answer.route.effort === undefined ? {} : { effort: answer.route.effort }),
+          };
+          fromRoute = true;
+        }
+      }
+      const refusal = (code: PiSelectionRefusal, message: string): PiSelectionOutcome => ({
+        outcome: "refused",
+        code,
+        message: fromRoute ? `${message} ${routeRefusedMarker(code)}` : message,
+      });
       try {
         const resolved = effectiveRoute({
           kind: request.child ? "child" : "chat",
-          explicit: {
-            provider: request.provider,
-            model: request.model,
-            ...(request.effort === undefined ? {} : { effort: request.effort }),
-          },
+          explicit,
           capabilities,
         });
         // An effort the policy chose itself and the catalog cannot vouch for is not sent: Pi would clamp it without saying so.
         if (resolved.validation === "unknown-capability" && resolved.effortSource !== "explicit")
-          return {
-            outcome: "refused",
-            code: "default-effort-unverifiable",
-            message: `${resolved.provider}/${resolved.model}: the default effort ${String(resolved.effort)} cannot be verified against the model's catalog, so it was not sent`,
-          };
+          return refusal(
+            "default-effort-unverifiable",
+            `${resolved.provider}/${resolved.model}: the default effort ${String(resolved.effort)} cannot be verified against the model's catalog, so it was not sent`,
+          );
         return {
           outcome: "resolved",
           provider: resolved.provider,
@@ -88,8 +145,7 @@ export function createPiSelectionSeam(options: PiSelectionSeamOptions): PiSelect
           validation: resolved.validation,
         };
       } catch (error) {
-        if (error instanceof RoutePolicyError)
-          return { outcome: "refused", code: error.code, message: error.message };
+        if (error instanceof RoutePolicyError) return refusal(error.code, error.message);
         return {
           outcome: "refused",
           code: "policy-failed",

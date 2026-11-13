@@ -333,13 +333,22 @@ interface AetheriaSelectionSeam {
     readonly model: string;
     readonly effort?: string;
     readonly child: boolean;
+    // AETHERIA-IP:IP-46 a subagent's own thread id (T3's turn input, never model input), so the Backend can answer with the route that child's persisted state names
+    readonly threadId?: string;
   }) =>
-    | { readonly outcome: "resolved"; readonly effort: string | null }
+    | {
+        readonly outcome: "resolved";
+        readonly effort: string | null;
+        // AETHERIA-IP:IP-46 the provider and model the policy chose (a child's persisted route); the same as the request's when nothing was overridden
+        readonly provider?: string;
+        readonly model?: string;
+      }
     | { readonly outcome: "refused"; readonly message: string };
 }
 const aetheriaSelection = (
   selection: ModelSelection,
   child: boolean,
+  threadId: string,
 ): Effect.Effect<ModelSelection, ProviderAdapter.ProviderAdapterProtocolError> => {
   const seam = (globalThis as Record<symbol, AetheriaSelectionSeam | undefined>)[
     AETHERIA_SELECTION_SEAM
@@ -357,24 +366,29 @@ const aetheriaSelection = (
         model: parsed.modelId,
         ...(thinking !== undefined && PI_THINKING_LEVELS.has(thinking) ? { effort: thinking } : {}),
         child,
+        // AETHERIA-IP:IP-46 only a subagent's turn names its thread
+        ...(child ? { threadId } : {}),
       }),
     catch: () => fail("The Aetheria route policy failed before any model command was sent"),
   }).pipe(
-    Effect.flatMap((verdict) =>
-      verdict.outcome === "refused"
-        ? Effect.fail(fail(verdict.message))
-        : Effect.succeed(
-            verdict.effort === null
-              ? selection
-              : {
-                  ...selection,
-                  options: [
-                    ...(selection.options ?? []).filter((option) => option.id !== "thinking"),
-                    { id: "thinking", value: verdict.effort },
-                  ],
-                },
-          ),
-    ),
+    Effect.flatMap((verdict) => {
+      if (verdict.outcome === "refused") return Effect.fail(fail(verdict.message));
+      // AETHERIA-IP:IP-46 a policy that chose another provider or model (a child's persisted route) changes the selection; the old effort belonged to the old route
+      const moved =
+        verdict.provider !== undefined &&
+        verdict.model !== undefined &&
+        (verdict.provider !== parsed.provider || verdict.model !== parsed.modelId);
+      const model = moved ? `${verdict.provider}/${verdict.model}` : selection.model;
+      if (verdict.effort === null && !moved) return Effect.succeed(selection);
+      return Effect.succeed({
+        ...selection,
+        model,
+        options: [
+          ...(selection.options ?? []).filter((option) => option.id !== "thinking"),
+          ...(verdict.effort === null ? [] : [{ id: "thinking", value: verdict.effort }]),
+        ],
+      });
+    }),
   );
 };
 
@@ -2637,7 +2651,9 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
             // AETHERIA-IP:IP-17 resolve the route and effort once; a refusal ends the turn before any model command
             if (!continuation) {
               const child = turnInput.appThread.lineage.relationshipToParent === "subagent";
-              yield* applySelection(yield* aetheriaSelection(turnInput.modelSelection, child));
+              yield* applySelection(
+                yield* aetheriaSelection(turnInput.modelSelection, child, turnInput.appThread.id),
+              );
             }
             if (turnInput.appThread.title !== appliedSessionName) {
               yield* request({

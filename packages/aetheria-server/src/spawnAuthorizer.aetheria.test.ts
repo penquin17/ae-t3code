@@ -84,10 +84,44 @@ describe("a main session spawns a role or a generic child", () => {
       ok: true,
       parent: { sessionId: ROOT, rootSessionId: ROOT, parentChain: [] },
       child: { authoritySource: "role", role: "reviewer", roleOrigin: "checkout" },
-      routes: FACTS.routes,
+      // Step 24 (M05 decision): the child starts on the caller's own route (route 1, as before) and the role's own routes follow, so a role with another route can fall back to it.
+      routes: [...FACTS.routes, { provider: "openai-codex", model: "gpt-6.1-sol", effort: "high" }],
       runtimeMode: "full-access",
       interactionMode: "default",
     });
+  });
+
+  it("does not repeat a route the caller already runs on, and gives a spawn-explicit child only the caller's route", async () => {
+    const same = build({
+      facts: {
+        ...FACTS,
+        routes: [{ provider: "openai-codex", model: "gpt-6.1-sol", effort: "medium" }],
+      },
+    });
+    writeEnvelope(same.stateRoot, mainRecord(ROOT));
+    const role = await same.authorizer.authorize({
+      callerSessionId: ROOT,
+      workingFolder: folder(),
+      args: { role: "reviewer", prompt: "look", mode: "one-shot" },
+    });
+    expect(role).toMatchObject({
+      ok: true,
+      routes: [{ provider: "openai-codex", model: "gpt-6.1-sol", effort: "medium" }],
+    });
+    const { stateRoot, authorizer } = build();
+    writeEnvelope(stateRoot, mainRecord(ROOT));
+    const explicit = await authorizer.authorize({
+      callerSessionId: ROOT,
+      workingFolder: folder(),
+      args: { allow: ["read"], prompt: "go", mode: "continuable" },
+    });
+    expect(explicit).toMatchObject({ ok: true, routes: FACTS.routes });
+    const fork = await authorizer.authorizeFork?.({
+      callerSessionId: ROOT,
+      workingFolder: folder(),
+      allow: ["read"],
+    });
+    expect(fork).toMatchObject({ ok: true, routes: FACTS.routes });
   });
 
   it("is authorized for an explicit allow-list through the generic tool", async () => {

@@ -373,6 +373,7 @@ export function createAetheriaBackendService(
                 },
               },
               resume: resumeBarrier,
+              availability: providersRegistration.availability,
               sessionOfThread,
               threadOfSession,
               lineageSessionOf,
@@ -532,6 +533,9 @@ export function createAetheriaBackendService(
     backend,
     piSelectionSeam: createPiSelectionSeam({
       capabilities: (route) => providersRegistration.routeCapabilities(route),
+      // M05 step 23: a role child's next turn runs on the route its persisted state names. Without a running children service nothing is overridden (the module answers unavailable elsewhere).
+      childRoute: (threadId) =>
+        orchestrationRegistration.service()?.direct()?.currentRoute(threadId) ?? { kind: "none" },
     }),
     openSnapshot: (sessionId, snapshotId) =>
       providersRegistration.openSnapshot(sessionId, snapshotId),

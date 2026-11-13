@@ -1746,6 +1746,83 @@ describe("boot reconciliation", () => {
   });
 });
 
+// Step 22/23 (M05) through the factory: M09's availability reaches the children service, a failed run of a two-route role child is classified by it and moves the child, and the direct API says
+// which route the next turn runs on (what the Pi selection seam asks). The availability source is scripted in M09's own shapes; nothing here reads a credential.
+describe("route fallback through the factory (steps 22 and 23)", () => {
+  const TWO: SpawnAuthorization = {
+    ...allowed,
+    routes: [
+      { provider: "p1", model: "m1", effort: "high" },
+      { provider: "p2", model: "m2", effort: "xhigh" },
+    ],
+  };
+  it("a failed run classified as a limit moves the child to route 2, sends the notice once as the next turn, and `currentRoute` names route 2", async () => {
+    const w = world();
+    w.options.verdict = TWO;
+    const reports: unknown[] = [];
+    const asked: string[] = [];
+    const deps = {
+      ...w,
+      deps: {
+        ...w.deps,
+        availability: {
+          routeStates: async (_routes: unknown, purpose: string) => {
+            asked.push(purpose);
+            return [
+              { state: "available", reasonClass: "signed-in", observedAt: "x", basis: [] },
+              { state: "available", reasonClass: "signed-in", observedAt: "x", basis: [] },
+            ];
+          },
+          reportFailure: async (route: unknown, failure: unknown) => {
+            reports.push([route, failure]);
+            return { class: "limit", remembered: true, rememberedUntil: "2026-11-13T01:00:00Z" };
+          },
+        },
+      },
+    };
+    const { service } = await started(deps, callerOk);
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    const child = ok(
+      await service.handle("children.spawn", who, { ...SPAWN, mode: "continuable" }),
+    );
+    const childId = child.childId as string;
+    const direct = service.direct();
+    expect(direct?.currentRoute(childId)).toMatchObject({
+      kind: "route",
+      index: 1,
+      route: { provider: "p1", model: "m1", effort: "high" },
+    });
+    w.fake.activity.set(childId, "idle");
+    w.fake.emit({
+      threadId: childId,
+      turnId: "run-failed",
+      outcome: "failed",
+      settledAt: "2026-11-13T00:00:10.000Z",
+      errorText: "You hit your usage limit.",
+    });
+    await vi.waitFor(() =>
+      expect(direct?.currentRoute(childId)).toMatchObject({
+        kind: "route",
+        index: 2,
+        switches: 1,
+        route: { provider: "p2", model: "m2", effort: "xhigh" },
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        w.fake.turns.filter(
+          (turn) => turn.threadId === childId && turn.content.includes("Route notice"),
+        ).length,
+      ).toBe(1),
+    );
+    expect(asked).toEqual(["launch", "switch"]);
+    expect(reports).toEqual([
+      [{ provider: "p1", model: "m1" }, { message: "You hit your usage limit." }],
+    ]);
+    await service.drain();
+  });
+});
+
 describe("drain", () => {
   it("refuses new work, unsubscribes the watchers and frees the store for the next Backend", async () => {
     const w = world();
