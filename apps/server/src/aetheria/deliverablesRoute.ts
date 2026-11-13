@@ -270,7 +270,8 @@ const reachableDeclaration = async (service: Service, actor: ClientActor, id: st
   const entry = got.value;
   const notFound = () => refusal("DOWNLOAD_NOT_FOUND", "not available to this connection");
   if (entry === null) throw notFound();
-  if (service.index.bindingOfSession(entry.rootSessionId) === undefined) throw notFound();
+  // A root its thread has since replaced is still reachable, read-only (the index's alias); a root no thread ever held is not.
+  if (service.index.aliasOfSession(entry.rootSessionId) === undefined) throw notFound();
   const kind = service.identityKind(entry.rootSessionId);
   if (kind === "child") throw notFound();
   if (kind === "unavailable")
@@ -295,7 +296,8 @@ const serveDeclaration = async (
   const maxBytes = options.maxBytes ?? DELIVERABLE_DOWNLOAD_MAX_BYTES;
   const entry = await reachableDeclaration(service, actor, id);
   if (semantics === "current") {
-    const folder = service.index.bindingOfSession(entry.sessionId)?.workingFolder;
+    // The alias's binding is the thread's CURRENT one, so a replaced session's file is read from the folder the thread works in now.
+    const folder = service.index.aliasOfSession(entry.sessionId)?.binding.workingFolder;
     if (folder === undefined)
       throw refusal("DOWNLOAD_NOT_FOUND", "not available to this connection");
     return readCurrent(entry.canonicalPath, folder, maxBytes, options.afterOpen);

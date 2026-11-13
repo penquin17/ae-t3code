@@ -9,6 +9,8 @@ import "~/index.css";
 import "@t3tools/aetheria-design/aetheria.css";
 import { refreshTheme, setAppearanceMode, setTheme } from "~/hooks/useTheme";
 import { act, render } from "../../../../test/render";
+import { withdrawConnectionView } from "../../connection/current";
+import { accessEndedView, connectedView, showConnection } from "../../connection/testing";
 import { over, ratio, resolveColor, surfaceBehind } from "../../measure";
 import { JobsPanel } from "./JobsPanel";
 import type { Reply } from "./reply";
@@ -404,6 +406,22 @@ describe("Kill", () => {
     expect(
       screen.container.querySelector("[data-job-id='job-a'] button[aria-label^='Kill ']"),
     ).toBe(null);
+  });
+
+  it("while the connection does not allow actions, confirming sends nothing and says so; once connected it sends", async () => {
+    await setup(1280, 800, "light");
+    const hide = showConnection(accessEndedView);
+    await using screen = await mount();
+    await killButton(screen, "npm test").click();
+    await screen.getByRole("button", { name: "Confirm kill of npm test" }).click();
+    await expect.poll(() => text()).toContain("Nothing was killed: Not connected (access-ended)");
+    expect(callsTo("kill")).toHaveLength(0);
+    hide();
+    showConnection(connectedView);
+    await killButton(screen, "npm test").click();
+    await screen.getByRole("button", { name: "Confirm kill of npm test" }).click();
+    await expect.poll(() => callsTo("kill")).toHaveLength(1);
+    withdrawConnectionView("test");
   });
 
   it("while the kill is away, a second confirm cannot send another", async () => {

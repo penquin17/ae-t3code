@@ -1,8 +1,9 @@
 // The group store's behaviour: every change ends as one honest outcome, success only from the Backend's reply plus a
 // re-read that shows the effect, nothing resent, nothing edited optimistically. Boundary: the store over a transport;
 // the transport here is the in-memory fake (testing.ts), so these tests show the web side's handling, not a real Backend.
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { accessEndedView, connectedView, showConnection } from "../connection/testing";
 import type { RunResult } from "../core/outcome";
 import { renameBody } from "./operations";
 import type { GroupRecord } from "./record";
@@ -132,7 +133,8 @@ describe("a read that does not answer", () => {
     const backend = createFakeBackend(seeded);
     const store = overTimeout({ read: never.read, apply: backend.transport.apply });
     const result = await store.group("c", "d");
-    expect(result.outcome).toMatchObject({ kind: "confirmed", refreshed: false });
+    expect(result.outcome).toMatchObject({ kind: "unknown" });
+    expect((result.outcome as { reason: string }).reason).toMatch(/Group.*reading.*back failed/);
   });
 
   it("takes a late answer when nothing newer has been read", async () => {
@@ -232,13 +234,15 @@ describe("outcomes that depend on the re-read", () => {
     expect(recordOf(store)).toEqual(seeded);
   });
 
-  it("accepted but the re-read fails: confirmed, not refreshed, with the reason shown", async () => {
+  it("accepted but the re-read fails: unknown, with the step and the read failure in the reason", async () => {
     const backend = createFakeBackend(seeded);
     const store = await ready(backend);
     backend.readFaults.push("throw");
     const result = await store.group("c", "d");
-    expect(result.outcome).toMatchObject({ kind: "confirmed", refreshed: false });
-    expect(result.outcome.kind === "confirmed" && result.outcome.message).toBeTruthy();
+    expect(result.outcome.kind).toBe("unknown");
+    expect(result.outcome.kind === "unknown" && result.outcome.reason).toMatch(
+      /"Group" was accepted, but reading the backend's projection back failed \(.+\)/,
+    );
     expect(recordOf(store)).toEqual(seeded);
     expect(store.getState().problem).toBeDefined();
   });
@@ -312,6 +316,41 @@ describe("concurrent calls", () => {
     release();
     await Promise.all([change, refresh]);
     expect(recordOf(store)?.links.some((l) => l.a === "c")).toBe(true);
+  });
+});
+
+describe("a change while the connection does not allow actions (review finding 2)", () => {
+  let hide = () => {};
+  afterEach(() => hide());
+
+  it.each(MUTATIONS)(
+    "$label is blocked in the gate's words and never reaches the Backend",
+    async (m) => {
+      const backend = createFakeBackend(m.from);
+      const store = await ready(backend);
+      hide = showConnection(accessEndedView);
+      const result = await m.run(store);
+      expect(backend.events).toEqual([]);
+      expect(result.outcome).toMatchObject({ kind: "unavailable" });
+      expect((result.outcome as { reason: string }).reason).toMatch(/nothing was sent/i);
+      expect(recordOf(store)).toEqual(m.from);
+    },
+  );
+
+  it.each(MUTATIONS)("$label is sent when the connection allows actions", async (m) => {
+    const backend = createFakeBackend(m.from);
+    const store = await ready(backend);
+    hide = showConnection(connectedView);
+    const result = await m.run(store);
+    expect(backend.events[0]).toMatch(/^apply:/);
+    expect(result.outcome.kind).toBe("confirmed");
+  });
+
+  it("reading the record is not gated: a read is still attempted while actions are blocked", async () => {
+    const backend = createFakeBackend(seeded);
+    hide = showConnection(accessEndedView);
+    await storeOver(backend).refresh();
+    expect(backend.events).toEqual(["read"]);
   });
 });
 

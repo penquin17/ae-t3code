@@ -9,7 +9,7 @@ import { connectionAtomRuntime } from "../../connection/runtime";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { sendResultFromCommand } from "../sessions/commandResult";
+import { aetheriaSendResult } from "../connection/sendResult";
 import type { GroupBody } from "./operations";
 import {
   GROUPS_UNAVAILABLE,
@@ -59,7 +59,7 @@ function useT3GroupsTransport(): GroupsTransport {
   const environmentId = usePrimaryEnvironmentId();
   const readCommand = useAtomCommand(aetheriaGroups.read, { reportFailure: false });
   const applyCommand = useAtomCommand(aetheriaGroups.apply, { reportFailure: false });
-  const settle = (sent: ReturnType<typeof sendResultFromCommand<unknown>>): GroupsReply => {
+  const settle = (sent: ReturnType<typeof aetheriaSendResult<unknown>>): GroupsReply => {
     if (sent.tag === "accepted") return sent.value as GroupsReply;
     if (sent.tag === "refused")
       return { ok: false, code: "GROUPS_NOT_AUTHORIZED", detail: sent.message };
@@ -67,11 +67,11 @@ function useT3GroupsTransport(): GroupsTransport {
   };
   const read = useStableCallback(async (): Promise<GroupsReply> => {
     if (environmentId === null) return NOT_CONNECTED;
-    return settle(sendResultFromCommand(await readCommand({ environmentId, input: {} })));
+    return settle(aetheriaSendResult(await readCommand({ environmentId, input: {} })));
   });
   const apply = useStableCallback(async (body: GroupBody): Promise<GroupsReply> => {
     if (environmentId === null) return NOT_CONNECTED;
-    return settle(sendResultFromCommand(await applyCommand({ environmentId, input: body })));
+    return settle(aetheriaSendResult(await applyCommand({ environmentId, input: body })));
   });
   const [transport] = useState<GroupsTransport>(() => ({ read, apply }));
   return transport;

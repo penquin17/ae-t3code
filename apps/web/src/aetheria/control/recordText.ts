@@ -103,10 +103,7 @@ export function reportNotice(label: string, report: ActionReport<unknown>): Repo
       if (outcome.refreshed) return { tone: "ok", text: `${label} done.` };
       return {
         tone: "ok",
-        text:
-          outcome.message === undefined
-            ? `${label} sent; the view will show it when the Backend reports it.`
-            : `${label} sent, but the view could not be refreshed (${outcome.message}).`,
+        text: `${label} sent; the view will show it when the Backend reports it.`,
       };
     case "unknown":
       return {

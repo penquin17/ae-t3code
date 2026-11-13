@@ -7,7 +7,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 
 import { connectionAtomRuntime } from "../../../connection/runtime";
 import { useAtomCommand } from "../../../state/use-atom-command";
-import { sendResultFromCommand } from "../../sessions/commandResult";
+import { aetheriaSendResult } from "../../connection/sendResult";
 import type { Reply } from "./reply";
 import type { JobsTransport } from "./transport";
 
@@ -36,7 +36,7 @@ export function useT3JobsTransport(): JobsTransport {
   const output = useAtomCommand(aetheriaJobs.output, { reportFailure: false });
   const outbox = useAtomCommand(aetheriaJobs.outbox, { reportFailure: false });
   const kill = useAtomCommand(aetheriaJobs.kill, { reportFailure: false });
-  const settle = (sent: ReturnType<typeof sendResultFromCommand<unknown>>): Reply<unknown> => {
+  const settle = (sent: ReturnType<typeof aetheriaSendResult<unknown>>): Reply<unknown> => {
     if (sent.tag === "accepted") return sent.value as Reply<unknown>;
     if (sent.tag === "refused")
       return { ok: false, code: "JOBS_NOT_AUTHORIZED", detail: sent.message };
@@ -45,13 +45,13 @@ export function useT3JobsTransport(): JobsTransport {
   return {
     list: async ({ environmentId, rootThreadId }) =>
       settle(
-        sendResultFromCommand(
+        aetheriaSendResult(
           await list({ environmentId: environmentId as EnvironmentId, input: { rootThreadId } }),
         ),
       ),
     output: async ({ environmentId, rootThreadId, jobId, offsets }) =>
       settle(
-        sendResultFromCommand(
+        aetheriaSendResult(
           await output({
             environmentId: environmentId as EnvironmentId,
             input: {
@@ -64,13 +64,13 @@ export function useT3JobsTransport(): JobsTransport {
       ),
     outbox: async ({ environmentId, rootThreadId }) =>
       settle(
-        sendResultFromCommand(
+        aetheriaSendResult(
           await outbox({ environmentId: environmentId as EnvironmentId, input: { rootThreadId } }),
         ),
       ),
     kill: async ({ environmentId, rootThreadId, jobId }) =>
       settle(
-        sendResultFromCommand(
+        aetheriaSendResult(
           await kill({
             environmentId: environmentId as EnvironmentId,
             input: { rootThreadId, jobId },

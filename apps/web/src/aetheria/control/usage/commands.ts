@@ -6,7 +6,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 
 import { connectionAtomRuntime } from "../../../connection/runtime";
 import { useAtomCommand } from "../../../state/use-atom-command";
-import { sendResultFromCommand } from "../../sessions/commandResult";
+import { aetheriaSendResult } from "../../connection/sendResult";
 import type { Reply } from "../jobs/reply";
 import { usageFromContract } from "./adapt";
 import type { UsageTransport } from "./transport";
@@ -20,7 +20,7 @@ export function useT3UsageTransport(): UsageTransport {
   const read = useAtomCommand(aetheriaUsageRead, { reportFailure: false });
   return {
     read: async ({ environmentId, rootThreadId }): Promise<Reply<unknown>> => {
-      const sent = sendResultFromCommand(
+      const sent = aetheriaSendResult(
         await read({ environmentId: environmentId as EnvironmentId, input: { rootThreadId } }),
       );
       if (sent.tag === "refused")

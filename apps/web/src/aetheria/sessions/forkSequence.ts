@@ -1,10 +1,9 @@
 import type { ActionRunner, OutcomeStep, RunResult } from "../core/outcome";
 
 /**
- * Fork a session, then rename the fork, as one run of two steps. The rename is built from the fork's new
- * session only after the fork was accepted; if the fork did not apply the rename is never attempted, and a
- * rename that fails after a fork that applied ends as `partial` naming the fork. The value of a full success
- * lists the fork's new session first.
+ * Fork a session, then rename the fork, as one run of two steps; the rename is never attempted unless the fork
+ * applied, and a rename that fails after it ends `partial` naming the fork. The rename counts as applied only
+ * when its own read-back shows it: with no read-back, or an absent or failed one, it ends `partial` and unknown.
  */
 export function forkThenRename<Target>(
   runner: ActionRunner,
@@ -31,8 +30,11 @@ export function forkThenRename<Target>(
       renameStep = rename(target.value);
       return renameStep.send(requestId);
     },
+    // A rename with no read-back is never "shown": it ends unknown, not confirmed.
     confirm: async (accepted) =>
-      renameStep?.confirm === undefined ? { tag: "shows" } : renameStep.confirm(accepted),
+      renameStep?.confirm === undefined
+        ? { tag: "failed", reason: "the rename has no way to be read back from the projection" }
+        : renameStep.confirm(accepted),
   };
   return runner.runSequence(key, [forkStep as OutcomeStep<unknown>, secondStep]);
 }

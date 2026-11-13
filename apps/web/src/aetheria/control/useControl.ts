@@ -10,6 +10,7 @@ import { environmentCatalog } from "~/connection/catalog";
 import { randomUUID } from "~/lib/utils";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { createControlActions, type ControlActions } from "./actions";
+import { readWithEarlier } from "./earlier";
 import {
   afterRead,
   classifyRead,
@@ -121,10 +122,17 @@ export function useInteractions(
   /** One read applied to the state; `again` is true when a push already seen is newer than what it returned. */
   const readOnce = useStableCallback(
     async (): Promise<{ readonly read: SnapshotRead; readonly again: boolean }> => {
-      const read = classifySnapshot(
+      const live = classifySnapshot(
         await transport.snapshot(environmentId, rootSessionId),
         rootSessionId,
       );
+      // What the thread's replaced sessions left open is read with it: one list, so a re-read after an action (which looks a record up by id) sees those records too.
+      const read =
+        live.tag === "ok"
+          ? await readWithEarlier(live.snapshot, async (earlierRoot) =>
+              classifySnapshot(await transport.snapshot(environmentId, earlierRoot), earlierRoot),
+            )
+          : live;
       if (read.tag !== "ok") {
         apply(snapshotFailed(stateRef.current, read.reason));
         return { read, again: false };

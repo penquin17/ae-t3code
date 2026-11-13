@@ -73,19 +73,49 @@ describe("the five outcomes", () => {
 });
 
 describe("saving, then reading back", () => {
-  it("a refresh failure after an accepted save stays confirmed, with refreshed:false and the message", async () => {
+  it("a failed read-back after an accepted save is unknown, never confirmed, and says why", async () => {
     const s = step(
       "rename",
       { tag: "accepted", value: undefined },
       { tag: "failed", reason: "snapshot read failed" },
     );
     const { outcome } = await runner().run("row-1", s);
-    expect(outcome).toEqual({
-      kind: "confirmed",
-      value: undefined,
-      refreshed: false,
-      message: "snapshot read failed",
-    });
+    expect(outcome.kind).toBe("unknown");
+    expect(outcome.kind === "unknown" && outcome.reason).toContain("snapshot read failed");
+    expect(outcome.kind === "unknown" && outcome.reason).toContain("rename");
+    expect(s.sends).toHaveLength(1);
+  });
+
+  it("the words of a failed read-back differ from those of an absent one", async () => {
+    const failed = await runner().run(
+      "k1",
+      step("rename", { tag: "accepted", value: 1 }, { tag: "failed", reason: "boom" }),
+    );
+    const absent = await runner().run(
+      "k2",
+      step("rename", { tag: "accepted", value: 1 }, { tag: "absent" }),
+    );
+    expect(failed.outcome).not.toEqual(absent.outcome);
+  });
+
+  it("only a read-back that shows the result is refreshed:true", async () => {
+    const results = await Promise.all(
+      (["shows", "absent", "failed"] as const).map((tag, i) =>
+        runner().run(
+          `k${i}`,
+          step(
+            "pin",
+            { tag: "accepted", value: 1 },
+            tag === "failed" ? { tag, reason: "x" } : { tag },
+          ),
+        ),
+      ),
+    );
+    expect(results.map((r) => r.outcome.kind === "confirmed" && r.outcome.refreshed)).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 
   it("an accepted save the projection does not show is unknown, not confirmed", async () => {
@@ -175,6 +205,21 @@ describe("a sequence of steps (fork, then rename)", () => {
     expect(outcome.kind).toBe("partial");
     expect(outcome.kind === "partial" && outcome.failed.outcome.kind).toBe("unknown");
     expect(rename.sends).toHaveLength(1);
+  });
+
+  it("the fork lands and the rename's read-back fails: partial with an unknown rename, not confirmed", async () => {
+    const fork = step("fork", { tag: "accepted", value: "new-id" }, { tag: "shows" });
+    const rename = step(
+      "rename",
+      { tag: "accepted", value: undefined },
+      { tag: "failed", reason: "snapshot read failed" },
+    );
+    const { outcome } = await runner().runSequence("row-1", [fork, rename]);
+    expect(outcome).toMatchObject({
+      kind: "partial",
+      applied: ["fork"],
+      failed: { step: "rename", outcome: { kind: "unknown" } },
+    });
   });
 
   it("the first step failing runs nothing after it and reports that step's own outcome", async () => {

@@ -18,11 +18,6 @@ const MESSAGE = "This device is read-only: ‘no’ — verbatim.";
 const OUTCOMES: readonly (readonly [string, ActionOutcome<unknown>, RegExp])[] = [
   ["confirmed and re-read", { kind: "confirmed", value: null, refreshed: true }, /done\.$/],
   [
-    "confirmed, re-read failed",
-    { kind: "confirmed", value: null, refreshed: false, message: "socket closed" },
-    /saved, but the list couldn't refresh \(socket closed\)/,
-  ],
-  [
     "refused",
     { kind: "refused", code: "GROUPS_NOT_AUTHORIZED", message: MESSAGE },
     new RegExp(`refused: ${MESSAGE}`),

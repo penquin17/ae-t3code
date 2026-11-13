@@ -19,7 +19,11 @@ import {
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { act } from "../../../test/render";
+import { COMPOSITION_STATUS_REPLY, stubBuildDigest } from "../connection/testing";
 import { THREAD_PATH, mountRoute, prepare } from "../harness";
+
+// The app gates actions on a connected, matching Backend (D6–D8): this build embeds a digest and the fake socket reports a running Backend with that digest.
+stubBuildDigest();
 
 /** Every call the app made to the socket, and the way the test answers the Aetheria ones. */
 const probe = vi.hoisted(() => ({
@@ -48,6 +52,9 @@ vi.mock(
     const wrap = (client: Record<string, (input: unknown) => unknown>) =>
       new Proxy(client, {
         get: (target, method: string) => {
+          if (method === "aetheria.composition.status") {
+            return () => Effect.succeed(COMPOSITION_STATUS_REPLY);
+          }
           if (method.startsWith("aetheria.children.")) {
             return (input: unknown) => {
               probe.calls.push({ method, input });
@@ -189,6 +196,29 @@ describe("Stop in the real app sends the Aetheria tree Stop once and never T3's 
     await using _screen = app.screen;
     await stopButton().click();
     await expect.poll(() => document.body.textContent).toContain("revoked or has expired");
+  });
+
+  it("a revoked device ends access in the connection banner, and the next Stop is blocked and never sent (review finding 2)", async () => {
+    probe.answer = async () => ({ ok: false, code: "CHILDREN_DEVICE_REVOKED" });
+    const { app, stopButton } = await openRunningThread();
+    await using _screen = app.screen;
+    await stopButton().click();
+    await expect.poll(() => callsTo("aetheria.children.cancelTree").length).toBe(1);
+    await expect.poll(() => document.body.textContent).toContain("Sign in or pair again");
+    await stopButton().click();
+    await expect.poll(() => document.body.textContent).toContain("nothing was sent");
+    expect(callsTo("aetheria.children.cancelTree").length).toBe(1);
+  });
+
+  it("a target denial is not a device refusal: the Stop is refused, the banner is unchanged and a later Stop is still sent", async () => {
+    probe.answer = async () => ({ ok: false, code: "CHILDREN_NOT_FOUND" });
+    const { app, stopButton } = await openRunningThread();
+    await using _screen = app.screen;
+    await stopButton().click();
+    await expect.poll(() => callsTo("aetheria.children.cancelTree").length).toBe(1);
+    await stopButton().click();
+    await expect.poll(() => callsTo("aetheria.children.cancelTree").length).toBe(2);
+    expect(document.body.textContent).not.toContain("nothing was sent");
   });
 
   it("a lost reply is shown as not known and is not sent again", async () => {

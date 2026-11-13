@@ -634,12 +634,12 @@ describe("the edited files", () => {
 });
 
 describe("the terminal statement", () => {
-  it("says the page is not mounted, and who a terminal runs as", async () => {
+  it("says where the terminal is, and who a terminal runs as", async () => {
     await setup(1280, 800, "light");
     await using screen = await mount();
     const notice = screen.container.querySelector("[data-aetheria='terminal-notice']")!;
     expect(notice.textContent).toContain(
-      "Terminal page not mounted; T3's own drawer remains the terminal surface.",
+      "The terminal is in the chat view of a session: open the session and use Toggle terminal drawer.",
     );
     expect(notice.textContent).toContain("run as the Backend user");
     expect(notice.querySelector("button, textarea, input")).toBe(null);

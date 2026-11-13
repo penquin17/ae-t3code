@@ -1,6 +1,7 @@
 // The seven human-control actions as honest outcomes (D4, D14, C7, A2). Each one is sent once through the transport, ends as exactly one of the five outcomes (`core/outcome.ts`), and is
 // confirmed only by the Backend's own projection: a snapshot re-read for a record action, a mode re-read for plan mode. A lost or unavailable reply is `unknown` and is NEVER resent. A second action
 // on a target still in flight sends nothing. Nothing is edited optimistically: the view changes only when a re-read shows the change. Plain TypeScript; the effect is the supplied transport.
+import { gateOnConnection } from "../connection/gate";
 import {
   createActionRunner,
   type ActionOutcome,
@@ -73,9 +74,11 @@ export function createControlActions(deps: ControlActionsDeps): ControlActions {
     try {
       let reply: ClassifiedReply<V> = { class: "unknown", reread: true };
       let confirmRead = false;
+      let attempted = false;
       const step: OutcomeStep<V> = {
         label,
         send: async () => {
+          attempted = true;
           reply = classifyTransport<V>(await send());
           return sendResultOf(reply);
         },
@@ -88,7 +91,9 @@ export function createControlActions(deps: ControlActionsDeps): ControlActions {
               },
             }),
       };
-      const run = await runner.run(key, step);
+      // The gate blocks the send while the connection does not allow actions; nothing was sent, so there is nothing to re-read.
+      const run = await runner.run(key, gateOnConnection(step));
+      if (!attempted) reply = { class: "unknown", reread: false };
       // Whatever the reply, the view re-reads unless a confirming read already did: it never trusts the reply to change it.
       if (reply.reread && !confirmRead) await deps.readSnapshot();
       return {

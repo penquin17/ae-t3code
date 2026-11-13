@@ -426,9 +426,7 @@ function readRecord(value: unknown): DeliverableRecord | undefined {
 }
 
 /** Check data read from the file. Refusal, never repair: a version above 1 is newer (judged before anything else is read); anything else outside the exact shape is unusable. */
-function parseDeliverablesFile(
-  data: unknown,
-):
+function parseDeliverablesFile(data: unknown):
   | { readonly ok: true; readonly records: readonly DeliverableRecord[] }
   | {
       readonly ok: false;

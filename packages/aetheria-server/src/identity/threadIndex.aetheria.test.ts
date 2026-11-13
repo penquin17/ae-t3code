@@ -377,3 +377,136 @@ describe("a cold start", () => {
     expect(NodeFS.existsSync(dir)).toBe(false);
   });
 });
+
+const SESSION_C = "0197d3c0-3333-7000-8000-000000000003";
+
+describe("a replaced session stays a read-only alias of its thread", () => {
+  const rebound = (index: ReturnType<typeof make>["index"]) => {
+    index.bind(input());
+    return index.bind(
+      input({ providerSessionId: "prov-2", sessionFile: sessionFileOf(SESSION_B) }),
+    );
+  };
+
+  it("keeps the strict live reads unchanged: the replaced session is no one's live binding", () => {
+    const { index } = make();
+    rebound(index);
+    expect(index.bindingOfSession(SESSION)).toBeUndefined();
+    expect(index.threadsOf(SESSION)).toEqual([]);
+    expect(index.sessions()).toEqual([SESSION_B]);
+    expect(index.bindingOfSession(SESSION_B)?.threadId).toBe(THREAD);
+  });
+
+  it("resolves the replaced session to the thread's current binding, marked retired, with when and by what it was replaced", () => {
+    const { index } = make();
+    rebound(index);
+    const alias = index.aliasOfSession(SESSION);
+    expect(alias).toMatchObject({
+      retired: true,
+      binding: { threadId: THREAD, sessionId: SESSION_B },
+      retiredSession: {
+        sessionId: SESSION,
+        providerSessionId: "prov-1",
+        providerInstanceId: "pi",
+        evidence: "filename",
+        replacedBy: SESSION_B,
+        retiredAt: 1000,
+      },
+    });
+    expect(index.aliasOfSession(SESSION_B)).toMatchObject({
+      retired: false,
+      binding: { sessionId: SESSION_B },
+    });
+    expect(index.aliasOfSession("0197d3c0-9999-7000-8000-000000000009")).toBeUndefined();
+  });
+
+  it("keeps every replaced session of a chain, and a session that came back is live again", () => {
+    const { index } = make();
+    rebound(index);
+    index.bind(input({ providerSessionId: "prov-3", sessionFile: sessionFileOf(SESSION_C) }));
+    expect(index.aliasOfSession(SESSION)).toMatchObject({ retired: true });
+    expect(index.aliasOfSession(SESSION_B)).toMatchObject({ retired: true });
+    expect(index.aliasOfSession(SESSION_C)).toMatchObject({ retired: false });
+    index.bind(input({ providerSessionId: "prov-4", sessionFile: sessionFileOf(SESSION) }));
+    expect(index.aliasOfSession(SESSION)).toMatchObject({ retired: false });
+    expect(index.bindingOfSession(SESSION)?.threadId).toBe(THREAD);
+    expect(index.aliasOfSession(SESSION_C)).toMatchObject({ retired: true });
+    expect(index.aliasOfSession(SESSION_B)).toMatchObject({ retired: true });
+  });
+
+  it("does not retire a session when only its provider session changes", () => {
+    const { index } = make();
+    index.bind(input());
+    index.bind(input({ providerSessionId: "prov-2" }));
+    const found = index.lookup(THREAD);
+    expect(found.status === "ok" && found.binding.retired).toBeUndefined();
+  });
+
+  it("refuses another thread's claim on a replaced session", () => {
+    const { index } = make();
+    rebound(index);
+    const refused = index.bind(
+      input({
+        threadId: THREAD_B,
+        providerSessionId: "prov-9",
+        sessionFile: sessionFileOf(SESSION),
+      }),
+    );
+    expect(refused).toMatchObject({ ok: false, code: "INDEX_SESSION_BOUND_ELSEWHERE" });
+    expect(index.aliasOfSession(SESSION)).toMatchObject({ retired: true });
+  });
+
+  it("is persisted with the thread's one file, so a cold start and a boot keep the alias", () => {
+    const { index, stateRoot, dir } = make();
+    rebound(index);
+    expect(files(dir)).toEqual([digestName(THREAD)]);
+    const cold = createThreadIndex({ stateRoot, now: () => 5000 });
+    expect(cold.aliasOfSession(SESSION)).toMatchObject({
+      retired: true,
+      binding: { sessionId: SESSION_B },
+      retiredSession: { retiredAt: 1000 },
+    });
+    expect(cold.bindingOfSession(SESSION)).toBeUndefined();
+    const booted = createThreadIndex({ stateRoot, now: () => 6000 });
+    expect(booted.boot()).toMatchObject({ loaded: 1, corrupt: [] });
+    expect(booted.aliasOfSession(SESSION)).toMatchObject({ retired: true });
+  });
+
+  it("loads an older file that has no retired field, and writes none until a session is replaced", () => {
+    const { index, stateRoot, dir } = make();
+    index.bind(input());
+    const path = NodePath.join(dir, digestName(THREAD));
+    const stored = JSON.parse(NodeFS.readFileSync(path, "utf8"));
+    expect("retired" in stored).toBe(false);
+    const older = createThreadIndex({ stateRoot, now: () => 2000 });
+    const found = older.lookup(THREAD);
+    expect(found).toMatchObject({ status: "ok", binding: { sessionId: SESSION } });
+    expect(older.aliasOfSession(SESSION)).toMatchObject({ retired: false });
+    older.bind(input({ providerSessionId: "prov-2", sessionFile: sessionFileOf(SESSION_B) }));
+    expect(older.aliasOfSession(SESSION)).toMatchObject({
+      retired: true,
+      retiredSession: { retiredAt: 2000 },
+    });
+  });
+
+  it("reads a damaged retired list as corrupt, never as an alias", () => {
+    const { index, stateRoot, dir } = make();
+    rebound(index);
+    const path = NodePath.join(dir, digestName(THREAD));
+    const good = JSON.parse(NodeFS.readFileSync(path, "utf8"));
+    const entry = good.retired[0];
+    for (const bad of [
+      { ...good, retired: "x" },
+      { ...good, retired: [{ ...entry, extra: 1 }] },
+      { ...good, retired: [{ ...entry, sessionId: "../escape" }] },
+      { ...good, retired: [{ ...entry, retiredAt: "later" }] },
+      { ...good, retired: [{ ...entry, sessionId: good.sessionId }] },
+      { ...good, retired: [entry, entry] },
+    ]) {
+      NodeFS.writeFileSync(path, JSON.stringify(bad), { mode: 0o600 });
+      expect(index.lookup(THREAD)).toMatchObject({ status: "corrupt" });
+      const cold = createThreadIndex({ stateRoot, now: () => 1 });
+      expect(cold.aliasOfSession(SESSION)).toBeUndefined();
+    }
+  });
+});

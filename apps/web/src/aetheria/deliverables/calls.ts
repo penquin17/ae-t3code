@@ -8,7 +8,7 @@ import { createContext } from "react";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { SendResult } from "../core/outcome";
-import { sendResultFromCommand } from "../sessions/commandResult";
+import { aetheriaSendResult } from "../connection/sendResult";
 
 export interface RootTarget {
   readonly environmentId: EnvironmentId;
@@ -39,8 +39,8 @@ export function useT3DeliverablesCalls(): DeliverablesCalls {
   const offeredPaths = useAtomCommand(aetheriaDeliverables.offeredPaths, { reportFailure: false });
   return {
     list: async ({ environmentId, rootThreadId }) =>
-      sendResultFromCommand(await list({ environmentId, input: { rootThreadId } })),
+      aetheriaSendResult(await list({ environmentId, input: { rootThreadId } })),
     offeredPaths: async ({ environmentId, rootThreadId }) =>
-      sendResultFromCommand(await offeredPaths({ environmentId, input: { rootThreadId } })),
+      aetheriaSendResult(await offeredPaths({ environmentId, input: { rootThreadId } })),
   };
 }

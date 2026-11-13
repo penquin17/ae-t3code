@@ -3,7 +3,12 @@
 // the T3 fork and rename commands are not exercised here.
 import { describe, expect, it } from "vite-plus/test";
 
-import { createActionRunner, type OutcomeStep, type SendResult } from "../core/outcome";
+import {
+  createActionRunner,
+  type ConfirmResult,
+  type OutcomeStep,
+  type SendResult,
+} from "../core/outcome";
 import { forkThenRename } from "./forkSequence";
 
 let counter = 0;
@@ -18,17 +23,41 @@ const forkStep = (sent: SendResult<string>, calls: string[]): OutcomeStep<string
   confirm: async () => ({ tag: "shows" }),
 });
 const renameStep =
-  (sent: SendResult<unknown>, calls: string[]) =>
+  (sent: SendResult<unknown>, calls: string[], confirm?: ConfirmResult) =>
   (target: string): OutcomeStep<unknown> => ({
     label: "Rename",
     send: async () => {
       calls.push(`rename:${target}`);
       return sent;
     },
+    ...(confirm === undefined
+      ? {}
+      : {
+          confirm: async () => {
+            calls.push(`confirm:${target}`);
+            return confirm;
+          },
+        }),
   });
 
 describe("forkThenRename", () => {
-  it("confirmed: the fork's new session comes first in the value, and the rename names it", async () => {
+  it("confirmed: the fork's new session comes first in the value, and the rename's read-back shows it", async () => {
+    const calls: string[] = [];
+    const result = await forkThenRename(
+      runner(),
+      "s",
+      forkStep({ tag: "accepted", value: "new-thread" }, calls),
+      renameStep({ tag: "accepted", value: null }, calls, { tag: "shows" }),
+    );
+    expect(result.outcome).toEqual({
+      kind: "confirmed",
+      value: ["new-thread", null],
+      refreshed: true,
+    });
+    expect(calls).toEqual(["fork", "rename:new-thread", "confirm:new-thread"]);
+  });
+
+  it("a rename with no read-back is not confirmed: partial, the rename unknown, never refreshed", async () => {
     const calls: string[] = [];
     const result = await forkThenRename(
       runner(),
@@ -36,9 +65,34 @@ describe("forkThenRename", () => {
       forkStep({ tag: "accepted", value: "new-thread" }, calls),
       renameStep({ tag: "accepted", value: null }, calls),
     );
-    expect(result.outcome).toMatchObject({ kind: "confirmed", value: ["new-thread", null] });
-    expect(calls).toEqual(["fork", "rename:new-thread"]);
+    expect(result.outcome.kind).not.toBe("confirmed");
+    expect(result.outcome).toMatchObject({
+      kind: "partial",
+      applied: ["Fork"],
+      failed: { step: "Rename", outcome: { kind: "unknown" } },
+    });
   });
+
+  it.each([
+    ["absent", { tag: "absent" }],
+    ["failed", { tag: "failed", reason: "snapshot read failed" }],
+  ] as const)(
+    "a rename whose read-back is %s: partial with an unknown rename, never confirmed",
+    async (_name, readback) => {
+      const calls: string[] = [];
+      const result = await forkThenRename(
+        runner(),
+        "s",
+        forkStep({ tag: "accepted", value: "new-thread" }, calls),
+        renameStep({ tag: "accepted", value: null }, calls, readback),
+      );
+      expect(result.outcome).toMatchObject({
+        kind: "partial",
+        applied: ["Fork"],
+        failed: { step: "Rename", outcome: { kind: "unknown" } },
+      });
+    },
+  );
 
   it.each([
     ["refused", { tag: "refused", code: "NOPE", message: "title is taken" }, "refused"],

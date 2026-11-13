@@ -20,6 +20,9 @@ import {
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { act } from "../../../test/render";
+import { currentConnectionView } from "../connection/current";
+import { gateOnConnection } from "../connection/gate";
+import { createActionRunner } from "../core/outcome";
 import { mountRoute, prepare, THREAD_PATH } from "../harness";
 import { DECLARED_REGION_IDS, getAppRegionRegistry, REGION_DECLARATIONS } from "./index";
 
@@ -264,6 +267,21 @@ describe("what each real route registers", () => {
         return last?.regions.map((r) => r.descriptor.id).toSorted();
       })
       .toEqual(["sessions", "sessions.list"]);
+  });
+
+  it("at phone width with the drawer closed, a send while not connected is blocked: the reporter's own connection monitor is mounted (review 1, follow-up 3)", async () => {
+    const app = await openRoute("/aetheria/sessions", "sessions.list", 390);
+    await using _screen = app.screen;
+    // The sidebar's status line is not mounted, so only the always-mounted monitor can have published a view.
+    expect(mountedIds()).not.toContain("sidebar.connection");
+    await expect.poll(currentConnectionView, { timeout: 15_000 }).not.toBeNull();
+    const send = vi.fn(async () => ({ tag: "accepted", value: null }) as const);
+    const run = await createActionRunner({ newRequestId: () => "r1" }).run(
+      "k",
+      gateOnConnection({ label: "Stop", send }),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(run.outcome.kind).toBe("unavailable");
   });
 
   it("the connection region is visible exactly when the status line shows a state other than connected", async () => {

@@ -120,7 +120,13 @@ interface Options {
     | "DELIVERABLES_NOT_RUNNING";
   readonly bindings?: Record<
     string,
-    { sessionId: string; subagent: boolean | null; threadId?: string }
+    {
+      sessionId: string;
+      subagent: boolean | null;
+      threadId?: string;
+      /** Pi sessions this thread held before and has since replaced: read-only aliases of the thread. */
+      retired?: ReadonlyArray<string>;
+    }
   >;
   readonly corruptThreads?: ReadonlyArray<string>;
   readonly denied?: ReadonlyArray<string>;
@@ -141,6 +147,15 @@ const fakeBackend = (options: Options = {}) => {
     "t-denied": { sessionId: "pi-denied", subagent: false },
   };
   const byThread = new Map(Object.entries(bindings));
+  /** The index's binding of a thread: its live session, and the replaced ones as the index lists them. */
+  const bindingOf = (threadId: string, held: (typeof bindings)[string]) => {
+    const { retired, ...rest } = held;
+    return {
+      ...rest,
+      threadId,
+      ...(retired === undefined ? {} : { retired: retired.map((sessionId) => ({ sessionId })) }),
+    };
+  };
   const bySession = new Map(
     Object.entries(bindings).map(([threadId, value]) => [value.sessionId, { threadId, ...value }]),
   );
@@ -174,12 +189,25 @@ const fakeBackend = (options: Options = {}) => {
         const found = byThread.get(threadId);
         return found === undefined
           ? { status: "absent" }
-          : { status: "ok", binding: { threadId, ...found } };
+          : { status: "ok", binding: bindingOf(threadId, found) };
       },
       bindingOfSession: (sessionId: string) => {
         calls.push({ method: "bindingOfSession", args: [sessionId] });
         const found = bySession.get(sessionId);
         return found === undefined ? undefined : { ...found };
+      },
+      aliasOfSession: (sessionId: string) => {
+        calls.push({ method: "aliasOfSession", args: [sessionId] });
+        const live = bySession.get(sessionId);
+        if (live !== undefined) return { retired: false, binding: bindingOf(live.threadId, live) };
+        for (const [threadId, held] of byThread)
+          if (held.retired?.includes(sessionId) === true)
+            return {
+              retired: true,
+              binding: bindingOf(threadId, held),
+              retiredSession: { sessionId },
+            };
+        return undefined;
       },
     },
     identityKind: (sessionId: string) =>
@@ -392,6 +420,58 @@ describe("aetheria.deliverables.list", () => {
           ).toEqual([id(1)]);
         }),
       ),
+  );
+
+  it.effect(
+    "lists the deliverables a replaced root left, with the thread now bound, after the live root's own, oldest first (review 1, follow-up 4c)",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const fake = fakeBackend({
+            bindings: { "t-a": { sessionId: "pi-b", subagent: false, retired: ["pi-a0"] } },
+            entries: [
+              entry({ id: id(1), rootSessionId: "pi-a0", sessionId: "pi-a0", declaredAt: 10 }),
+              entry({ id: id(2), rootSessionId: "pi-b", sessionId: "pi-b", declaredAt: 20 }),
+              // a root the thread never held is still not listed
+              entry({ id: id(3), rootSessionId: "pi-other", sessionId: "pi-other" }),
+            ],
+          });
+          const reply = yield* deliverablesList(fake.backend, (yield* actorOf()) as never, {
+            rootThreadId: "t-a",
+          });
+          expect(fake.calls.filter((c) => c.method === "store.list").map((c) => c.args)).toEqual([
+            ["pi-b"],
+            ["pi-a0"],
+          ]);
+          const cards = (reply as Extract<typeof reply, { ok: true }>).value.deliverables;
+          expect(cards.map((c) => [c.id, c.threadId])).toEqual([
+            [id(1), "t-a"],
+            [id(2), "t-a"],
+          ]);
+          expect(() => decodeListResult(reply)).not.toThrow();
+        }),
+      ),
+  );
+
+  it.effect("a replaced root the connection may not reach lists nothing", () =>
+    withDevice(
+      Effect.gen(function* () {
+        const fake = fakeBackend({
+          denied: ["pi-a0"],
+          bindings: { "t-a": { sessionId: "pi-b", subagent: false, retired: ["pi-a0"] } },
+          entries: [
+            entry({ id: id(1), rootSessionId: "pi-a0", sessionId: "pi-a0" }),
+            entry({ id: id(2), rootSessionId: "pi-b", sessionId: "pi-b", declaredAt: 20 }),
+          ],
+        });
+        const reply = yield* deliverablesList(fake.backend, (yield* actorOf()) as never, {
+          rootThreadId: "t-a",
+        });
+        expect(
+          (reply as Extract<typeof reply, { ok: true }>).value.deliverables.map((c) => c.id),
+        ).toEqual([id(2)]);
+      }),
+    ),
   );
 
   it.effect("an empty root is a known empty list", () =>

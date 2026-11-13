@@ -593,6 +593,11 @@ export const InteractionsSnapshotResult = reply(
     rootSessionId: Id,
     version: Nat,
     interactions: Schema.Array(InteractionRecord),
+    /**
+     * Additive (M10 review 1): present only on the snapshot of a thread's LIVE root, when the thread has replaced Pi sessions; each id is a replaced root the connection may read, oldest first.
+     * A client reads each one's snapshot too, to show what that session left open. A replaced root's own snapshot never carries it, and an older reply without it is valid.
+     */
+    retiredRoots: Schema.optionalKey(Schema.Array(Id)),
   }),
   ["INTERACTION_NOT_FOUND", "INTERACTION_UNAVAILABLE"],
 );

@@ -30,7 +30,11 @@ export type FailedOutcome =
   | { readonly kind: "unavailable"; readonly reason: string };
 
 export type ActionOutcome<T> =
-  /** The backend accepted it. `refreshed` is true only when a re-read showed it. */
+  /**
+   * The backend accepted it. `refreshed` is true only when a re-read showed it; false means sent and
+   * accepted with no read-back seat. A re-read that failed or did not show it is `unknown`, never this.
+   * (`message` is no longer produced by the runner; it stays for callers outside this module.)
+   */
   | {
       readonly kind: "confirmed";
       readonly value: T;
@@ -76,12 +80,18 @@ async function settle<T>(step: OutcomeStep<T>, requestId: string): Promise<Actio
       return { kind: "unavailable", reason: sent.reason };
     case "accepted": {
       if (step.confirm === undefined) {
+        // Sent and accepted, never read back: `refreshed:false` is the "sent, not confirmed" state, and
+        // its notice says "sent", not "done". Actions that can be read back must supply `confirm`.
         return { kind: "confirmed", value: sent.value, refreshed: false };
       }
       const read = await step.confirm(sent.value);
       if (read.tag === "shows") return { kind: "confirmed", value: sent.value, refreshed: true };
+      // A read-back that failed shows nothing: the save is accepted but not seen, so it is not confirmed.
       if (read.tag === "failed") {
-        return { kind: "confirmed", value: sent.value, refreshed: false, message: read.reason };
+        return {
+          kind: "unknown",
+          reason: `"${step.label}" was accepted, but reading the backend's projection back failed (${read.reason}); it is not known whether it shows.`,
+        };
       }
       return {
         kind: "unknown",

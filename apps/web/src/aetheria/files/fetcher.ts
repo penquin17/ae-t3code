@@ -4,6 +4,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { createContext, use } from "react";
 
 import { readPreparedConnection } from "../../state/session";
+import { reportRefusalIn } from "../connection/callRefusals";
 import {
   fetchDeliverable,
   type DownloadRequest,
@@ -17,14 +18,18 @@ export interface DeliverableFetcher {
 }
 
 const productionFetcher: DeliverableFetcher = {
-  fetch: (environmentId, request) =>
-    fetchDeliverable(
+  // A refused download is reported to the connection: the route's credential refusal ends access, any other refusal does not (`reportRefusalIn`).
+  fetch: async (environmentId, request) => {
+    const result = await fetchDeliverable(
       {
         fetch: (input, init) => globalThis.fetch(input, init),
         connection: readPreparedConnection(EnvironmentId.make(environmentId)),
       },
       request,
-    ),
+    );
+    reportRefusalIn(result);
+    return result;
+  },
   save: saveBlob,
 };
 

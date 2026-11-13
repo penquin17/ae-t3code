@@ -210,14 +210,36 @@ const read = <A>(
 /** A target named by a root alone, or by one session whose root the client cannot name: the same id stands for both. */
 const rootOnly = (rootSessionId: string) => ({ sessionId: rootSessionId, rootSessionId });
 
+/** The snapshot also reads the thread index, when the Backend has one, to name the roots a thread has replaced. */
+type SnapshotBackend = Option.Option<
+  Pick<AetheriaBackendService, "interactions"> & Partial<Pick<AetheriaBackendService, "index">>
+>;
+
+/**
+ * The reply of a thread's LIVE root names the roots the thread replaced (the index's read-only aliases), oldest first and only those this connection may read, so the client can read what each left
+ * open. A replaced root's own snapshot names none, and a thread that replaced nothing keeps the old reply. An index that cannot answer fails the read (unavailable); it never yields an empty list.
+ */
 export const interactionsSnapshot = (
-  backend: Backend,
+  backend: SnapshotBackend,
   actor: ClientActor,
   payload: InteractionsSnapshotPayload,
 ): Effect.Effect<InteractionsSnapshotResult> =>
-  read(backend, actor, rootOnly(payload.rootSessionId), (service) =>
-    service.snapshot(payload.rootSessionId),
-  );
+  read(backend, actor, rootOnly(payload.rootSessionId), async (service) => {
+    const reply = await service.snapshot(payload.rootSessionId);
+    const index = Option.isSome(backend) ? backend.value.index : undefined;
+    if (!reply.ok || index === undefined) return reply;
+    const alias = index.aliasOfSession(payload.rootSessionId);
+    if (alias === undefined || alias.retired) return reply;
+    const retiredRoots: string[] = [];
+    for (const retired of alias.binding.retired ?? []) {
+      if (await mayRead(service, actor, rootOnly(retired.sessionId))) {
+        retiredRoots.push(retired.sessionId);
+      }
+    }
+    return retiredRoots.length === 0
+      ? reply
+      : { ok: true as const, value: { ...reply.value, retiredRoots } };
+  }) as Effect.Effect<InteractionsSnapshotResult>;
 
 export const planModeGet = (
   backend: Backend,

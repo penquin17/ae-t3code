@@ -372,9 +372,6 @@ export function killNotice(label: string, outcome: ActionOutcome<KillValue>): Ki
       if (outcome.value.livenessIndeterminate === true) {
         parts.push("The Backend could not tell whether the process is still running.");
       }
-      if (!outcome.refreshed && outcome.message !== undefined) {
-        parts.push(`The list could not be read again: ${outcome.message}`);
-      }
       const doubtful =
         outcome.value.terminationUnconfirmed === true ||
         outcome.value.livenessIndeterminate === true ||

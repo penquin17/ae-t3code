@@ -64,6 +64,9 @@ import { type GhosttyColor, type GhosttyTheme } from "~/terminal/ghostty/core";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { isTerminalUrl } from "../terminal-links";
+// AETHERIA-IP:IP-61 the drawer's authority label and the guard that refuses input to an ended terminal (imports).
+import { TerminalAuthorityLabel } from "../aetheria/terminal/TerminalAuthorityLabel";
+import { createEndedWriteGuard } from "../aetheria/terminal/endedWrite";
 import {
   isDiffToggleShortcut,
   isTerminalClearShortcut,
@@ -629,6 +632,14 @@ function TerminalSessionViewport({
     (listener: (session: TerminalSessionState) => void) =>
       appAtomRegistry.subscribe(terminalSessionAtom, listener),
   );
+  // AETHERIA-IP:IP-61 T3's server answers a write to an exited terminal with success and delivers nothing: refuse it here and say so, once per ended state.
+  const [endedWriteGuard] = useState(createEndedWriteGuard);
+  const refuseEndedWrite = useEffectEvent((): boolean => {
+    const session = readTerminalSession();
+    const words = endedWriteGuard.check(session);
+    if (words !== null && terminalRef.current) writeSystemMessage(terminalRef.current, words);
+    return endedWriteGuard.blocks(session);
+  });
   const writeTerminal = useEffectEvent((data: string) =>
     runTerminalWrite({
       environmentId,
@@ -987,6 +998,7 @@ function TerminalSessionViewport({
 
       const sendTerminalInput = async (data: string, fallbackError: string) => {
         if (!hasTerminalWriteAccess()) return;
+        if (refuseEndedWrite()) return; // AETHERIA-IP:IP-61
         const activeTerminal = terminalRef.current;
         if (!activeTerminal) return;
         const result = await writeTerminal(data);
@@ -1092,6 +1104,7 @@ function TerminalSessionViewport({
 
       function handleData(data: string): void {
         if (!hasTerminalWriteAccess()) return;
+        if (refuseEndedWrite()) return; // AETHERIA-IP:IP-61
         void (async () => {
           const result = await writeTerminal(data);
           if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
@@ -1813,6 +1826,8 @@ export default function ThreadTerminalDrawer({
             onLostPointerCapture={handleResizePointerEnd}
           />
         ) : null}
+        {/* AETHERIA-IP:IP-61 who a terminal runs as, before any is opened. */}
+        <TerminalAuthorityLabel />
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center text-sm text-muted-foreground">
           <p>No terminal sessions for this thread yet.</p>
           <Button
@@ -1901,6 +1916,8 @@ export default function ThreadTerminalDrawer({
         </div>
       )}
 
+      {/* AETHERIA-IP:IP-61 who a terminal runs as, above the terminal (the action buttons float over the right end). */}
+      <TerminalAuthorityLabel />
       <div className="min-h-0 w-full flex-1">
         <div
           className={cn(

@@ -122,6 +122,8 @@ export interface InteractionsSnapshot {
   readonly rootSessionId: string;
   readonly version: number;
   readonly interactions: readonly InteractionRecord[];
+  /** Additive: the roots the thread has replaced and the connection may read, oldest first; only on the live root's snapshot (`earlier.ts` reads them). */
+  readonly retiredRoots?: readonly string[];
 }
 
 /** IO `InteractionsChangeEvent` (~616): a push carries no record; it only prompts a fresh snapshot. */

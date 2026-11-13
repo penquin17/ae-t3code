@@ -14,7 +14,11 @@ import {
   threadWithHistory,
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
+import { COMPOSITION_STATUS_REPLY, stubBuildDigest } from "../connection/testing";
 import { prepare, mountRoute } from "../harness";
+
+// The app gates actions on a connected, matching Backend (D6–D8): this build embeds a digest and the fake socket reports a running Backend with that digest.
+stubBuildDigest();
 
 // T3 keeps a thread's projection and a root's change-stream atom alive across tests, so each test opens its own thread `thread-c<n>`, whose projection names the Pi session `pi-for-thread-c<n>`.
 // `thread-noident` names none. Installed once, for the file's life.
@@ -207,6 +211,7 @@ function backend(records: Json[]) {
     return ok(structuredClone(find(input)));
   };
   const answer = async (method: string, input: Json): Promise<unknown> => {
+    if (method === "aetheria.composition.status") return COMPOSITION_STATUS_REPLY;
     if (method === "aetheria.interactions.snapshot") {
       return ok({
         rootSessionId: ROOT,

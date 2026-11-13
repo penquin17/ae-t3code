@@ -318,17 +318,22 @@ describe("kill", () => {
     });
   });
 
-  it("an unconfirmed termination and a failed re-read are both said", () => {
-    const text = killNotice(
+  it("an unconfirmed termination is said, and a kill never read back is not called settled", () => {
+    const notice = killNotice(
       "npm test",
-      confirmed({
-        value: { ...killed, terminationUnconfirmed: true },
-        refreshed: false,
-        message: "could not read the list",
-      }),
-    )?.text;
-    expect(text).toContain("The Backend could not confirm that the process ended.");
-    expect(text).toContain("The list could not be read again: could not read the list");
+      confirmed({ value: { ...killed, terminationUnconfirmed: true }, refreshed: false }),
+    );
+    expect(notice?.text).toContain("The Backend could not confirm that the process ended.");
+    expect(notice?.tone).toBe("warn");
+  });
+
+  it("a failed re-read after an accepted kill arrives as unknown with the runner's reason, kept in the words", () => {
+    const reason =
+      '"Kill" was accepted, but reading the backend\'s projection back failed (could not read the list); it is not known whether it shows.';
+    const notice = killNotice("npm test", { kind: "unknown", reason });
+    expect(notice?.tone).toBe("warn");
+    expect(notice?.text).toContain("could not read the list");
+    expect(notice?.text).toContain("not sent again");
   });
 
   it("an unknown outcome says it may have landed and was not sent again", () => {

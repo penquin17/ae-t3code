@@ -7,7 +7,7 @@ import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runti
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { sendResultFromCommand } from "../sessions/commandResult";
+import { aetheriaSendResult } from "../connection/sendResult";
 import type { RegionsReply, RegionsTransport } from "./sync";
 
 const aetheriaRegions = {
@@ -30,7 +30,7 @@ export function useT3RegionsTransport(): RegionsTransport {
   return {
     report: async (payload: RegionsReportPayload) => {
       if (environmentId === null) return NOT_CONNECTED;
-      const sent = sendResultFromCommand(await report({ environmentId, input: payload }));
+      const sent = aetheriaSendResult(await report({ environmentId, input: payload }));
       if (sent.tag === "accepted") return sent.value as RegionsReply;
       if (sent.tag === "refused")
         return { ok: false, code: "REGIONS_NOT_AUTHORIZED", detail: sent.message };

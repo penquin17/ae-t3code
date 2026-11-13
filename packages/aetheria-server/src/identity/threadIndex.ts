@@ -17,6 +17,12 @@
 // the old binding or the new one, never a partial one. A file that is loose, linked, truncated or not a binding is `corrupt`: reported, never
 // trusted and never repaired by a read; the next bind of that thread replaces it.
 //
+// Retired sessions. A thread's Pi session can change (T3 starts a fresh Pi session when its first run was cancelled before it recorded a native
+// session id). The replaced session is kept as a READ-ONLY alias of its thread, in the same file as the new binding (one rename, so the replace and
+// the alias appear together or not at all), under the optional `retired` list. An alias grants nothing live: `bindingOfSession`, `threadsOf` and
+// `sessions` never show it, so every caller that launches, steers or delivers to a session still sees only the live one. Only `aliasOfSession`
+// names it, and its callers choose to read through it. A file without `retired` is a valid older file; the format version stays 1.
+//
 // Limits. One Backend process writes the index; the reverse view (session -> threads) is held in memory from a scan and kept current by this
 // instance's own binds. The folder is not fsynced after rename, so a power loss can lose the newest bind (the next launch or resume writes it
 // again) but cannot leave a partial file visible.
@@ -27,6 +33,8 @@ import * as NodePath from "node:path";
 
 const INDEX_FORMAT_VERSION = 1;
 const INDEX_DIRECTORY = "thread-index";
+/** The newest replaced sessions one thread keeps as aliases; the oldest beyond this fall away (they are history, not authority). */
+const MAX_RETIRED = 64;
 
 export type ThreadIndexFs = Pick<
   typeof NodeFS,
@@ -83,7 +91,32 @@ export interface ThreadBinding {
   /** The asserted role; `null` means none asserted. */
   readonly expectedRole: string | null;
   readonly boundAt: number;
+  /** Sessions this thread held before, newest last. Absent means none (and is how an older file reads). Read-only aliases; see the file's header. */
+  readonly retired?: readonly RetiredSession[];
 }
+
+/** A Pi session a thread no longer holds live, kept so what it asked and left open can still be read. */
+export interface RetiredSession {
+  readonly sessionId: string;
+  readonly providerSessionId: string;
+  readonly providerInstanceId: string;
+  readonly evidence: "header" | "filename";
+  /** When the thread was bound to it. */
+  readonly boundAt: number;
+  /** When a bind replaced it (the Backend's clock at that bind). */
+  readonly retiredAt: number;
+  /** The Pi session that replaced it. */
+  readonly replacedBy: string;
+}
+
+/** What a Pi session means to a thread: its live session, or a retired one the thread has since replaced. `binding` is always the thread's CURRENT binding. */
+export type SessionAlias =
+  | { readonly retired: false; readonly binding: ThreadBinding }
+  | {
+      readonly retired: true;
+      readonly binding: ThreadBinding;
+      readonly retiredSession: RetiredSession;
+    };
 
 export type BindResult =
   | {
@@ -118,6 +151,11 @@ export interface ThreadIndex {
   threadsOf(sessionId: string): readonly string[];
   /** The binding of a Pi session when exactly one thread holds it. */
   bindingOfSession(sessionId: string): ThreadBinding | undefined;
+  /**
+   * The thread's binding for a Pi session the thread holds live (`retired: false`) or held before and has since replaced (`retired: true`). For READS and
+   * for routing to the THREAD only: a retired alias is never a session to launch, steer or write to; use `bindingOfSession` for that.
+   */
+  aliasOfSession(sessionId: string): SessionAlias | undefined;
   /** Every Pi session some thread holds, sorted. What the lifecycle snapshot lists (step 16). */
   sessions(): readonly string[];
   /** Scan the folder, rebuild the reverse view and remove this module's own leftover temporary files. Reads nothing of M03's folders. */
@@ -150,6 +188,15 @@ const BINDING_KEYS = [
   "expectedRole",
   "boundAt",
 ];
+const RETIRED_KEYS = [
+  "sessionId",
+  "providerSessionId",
+  "providerInstanceId",
+  "evidence",
+  "boundAt",
+  "retiredAt",
+  "replacedBy",
+];
 
 const text = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const codeOf = (error: unknown): string | undefined =>
@@ -179,7 +226,11 @@ function parseBinding(
     return { problem: "the file is not a binding object" };
   const b = json as Record<string, unknown>;
   const keys = Object.keys(b);
-  if (keys.length !== BINDING_KEYS.length || !BINDING_KEYS.every((k) => keys.includes(k)))
+  const hasRetired = keys.includes("retired");
+  if (
+    keys.length !== BINDING_KEYS.length + (hasRetired ? 1 : 0) ||
+    !BINDING_KEYS.every((k) => keys.includes(k))
+  )
     return { problem: "the binding has unexpected fields" };
   if (b.v !== INDEX_FORMAT_VERSION)
     return { problem: `unsupported version ${JSON.stringify(b.v)}` };
@@ -198,7 +249,44 @@ function parseBinding(
     return { problem: "expectedRole is invalid" };
   if (typeof b.boundAt !== "number" || !Number.isFinite(b.boundAt))
     return { problem: "boundAt is invalid" };
+  if (hasRetired) {
+    const retired = parseRetired(b.retired, b.sessionId);
+    if (typeof retired === "string") return { problem: retired };
+    return { binding: Object.freeze({ ...b, retired }) as unknown as ThreadBinding };
+  }
   return { binding: Object.freeze({ ...b }) as unknown as ThreadBinding };
+}
+
+function parseRetired(raw: unknown, current: string): readonly RetiredSession[] | string {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_RETIRED)
+    return "retired is not a non-empty list within its bound";
+  const seen = new Set<string>();
+  const out: RetiredSession[] = [];
+  for (const item of raw as unknown[]) {
+    if (item === null || typeof item !== "object" || Array.isArray(item))
+      return "a retired session is not an object";
+    const r = item as Record<string, unknown>;
+    const keys = Object.keys(r);
+    if (keys.length !== RETIRED_KEYS.length || !RETIRED_KEYS.every((k) => keys.includes(k)))
+      return "a retired session has unexpected fields";
+    if (typeof r.sessionId !== "string" || !NAME.test(r.sessionId))
+      return "a retired sessionId is not a safe name";
+    if (typeof r.replacedBy !== "string" || !NAME.test(r.replacedBy))
+      return "a retired replacedBy is not a safe name";
+    if (!idString(r.providerSessionId) || !idString(r.providerInstanceId))
+      return "a retired id field is invalid";
+    if (r.evidence !== "header" && r.evidence !== "filename")
+      return "a retired evidence is invalid";
+    if (typeof r.boundAt !== "number" || !Number.isFinite(r.boundAt))
+      return "a retired boundAt is invalid";
+    if (typeof r.retiredAt !== "number" || !Number.isFinite(r.retiredAt))
+      return "a retired retiredAt is invalid";
+    if (r.sessionId === current || seen.has(r.sessionId))
+      return "a retired session repeats another or is the live one";
+    seen.add(r.sessionId);
+    out.push(Object.freeze({ ...r }) as unknown as RetiredSession);
+  }
+  return Object.freeze(out);
 }
 
 type HeaderRead =
@@ -217,6 +305,8 @@ export function createThreadIndex(options: ThreadIndexOptions): ThreadIndex {
   const uid = typeof process.getuid === "function" ? process.getuid() : null;
 
   const bySession = new Map<string, Set<string>>();
+  /** Replaced sessions by the thread(s) that kept them as aliases. Never consulted for a live read. */
+  const retiredBySession = new Map<string, Set<string>>();
   let loaded = false;
 
   const readPlain = (
@@ -280,8 +370,24 @@ export function createThreadIndex(options: ThreadIndexOptions): ThreadIndex {
     if (set !== undefined && set.size === 0) bySession.delete(sessionId);
   };
 
+  const noteRetired = (binding: ThreadBinding) => {
+    for (const r of binding.retired ?? []) {
+      const set = retiredBySession.get(r.sessionId) ?? new Set<string>();
+      set.add(binding.threadId);
+      retiredBySession.set(r.sessionId, set);
+    }
+  };
+  const forgetRetired = (binding: ThreadBinding) => {
+    for (const r of binding.retired ?? []) {
+      const set = retiredBySession.get(r.sessionId);
+      set?.delete(binding.threadId);
+      if (set !== undefined && set.size === 0) retiredBySession.delete(r.sessionId);
+    }
+  };
+
   const scan = (removeTemps: boolean): BootReport => {
     bySession.clear();
+    retiredBySession.clear();
     const corrupt: { file: string; problem: string }[] = [];
     let removedTemps = 0;
     let count = 0;
@@ -330,6 +436,7 @@ export function createThreadIndex(options: ThreadIndexOptions): ThreadIndex {
         continue;
       }
       note(parsed.binding.sessionId, parsed.binding.threadId);
+      noteRetired(parsed.binding);
       count += 1;
     }
     loaded = true;
@@ -477,9 +584,37 @@ export function createThreadIndex(options: ThreadIndexOptions): ThreadIndex {
     }
 
     ensureLoaded();
-    const others = [...(bySession.get(session.id) ?? [])].filter((t) => t !== input.threadId);
+    const others = [
+      ...(bySession.get(session.id) ?? []),
+      ...(retiredBySession.get(session.id) ?? []),
+    ].filter((t) => t !== input.threadId);
     if (others.length > 0)
-      return fail("INDEX_SESSION_BOUND_ELSEWHERE", "another thread already holds this Pi session");
+      return fail(
+        "INDEX_SESSION_BOUND_ELSEWHERE",
+        "another thread already holds this Pi session, live or as a replaced one",
+      );
+
+    const existing = lookup(input.threadId);
+    // A replaced session stays an alias of this thread; one that came back is live again and so no longer an alias.
+    const at = now();
+    const replaced: readonly RetiredSession[] =
+      existing.status === "ok" && existing.binding.sessionId !== session.id
+        ? [
+            ...(existing.binding.retired ?? []),
+            Object.freeze({
+              sessionId: existing.binding.sessionId,
+              providerSessionId: existing.binding.providerSessionId,
+              providerInstanceId: existing.binding.providerInstanceId,
+              evidence: existing.binding.evidence,
+              boundAt: existing.binding.boundAt,
+              retiredAt: at,
+              replacedBy: session.id,
+            }),
+          ]
+        : existing.status === "ok"
+          ? (existing.binding.retired ?? [])
+          : [];
+    const retired = replaced.filter((r) => r.sessionId !== session.id).slice(-MAX_RETIRED);
 
     const binding: ThreadBinding = Object.freeze({
       v: INDEX_FORMAT_VERSION,
@@ -492,9 +627,9 @@ export function createThreadIndex(options: ThreadIndexOptions): ThreadIndex {
       projectRoot,
       subagent: input.subagent ?? null,
       expectedRole: input.expectedRole ?? null,
-      boundAt: now(),
+      boundAt: at,
+      ...(retired.length === 0 ? {} : { retired: Object.freeze(retired) }),
     });
-    const existing = lookup(input.threadId);
     if (existing.status === "ok" && same(existing.binding, binding))
       return Object.freeze({
         ok: true as const,
@@ -527,13 +662,27 @@ export function createThreadIndex(options: ThreadIndexOptions): ThreadIndex {
       }
       return fail("INDEX_IO", text(error));
     }
-    if (existing.status === "ok") forget(existing.binding.sessionId, input.threadId);
+    if (existing.status === "ok") {
+      forget(existing.binding.sessionId, input.threadId);
+      forgetRetired(existing.binding);
+    }
     note(binding.sessionId, input.threadId);
+    noteRetired(binding);
     return Object.freeze({
       ok: true as const,
       binding,
       change: existing.status === "absent" ? ("created" as const) : ("replaced" as const),
     });
+  };
+
+  const bindingOfSession = (sessionId: string): ThreadBinding | undefined => {
+    ensureLoaded();
+    const threads = bySession.get(sessionId);
+    if (threads === undefined || threads.size !== 1) return undefined;
+    const found = lookup([...threads][0] as string);
+    return found.status === "ok" && found.binding.sessionId === sessionId
+      ? found.binding
+      : undefined;
   };
 
   class Unsafe extends Error {}
@@ -557,13 +706,22 @@ export function createThreadIndex(options: ThreadIndexOptions): ThreadIndex {
       ensureLoaded();
       return Object.freeze([...bySession.keys()].sort());
     },
-    bindingOfSession(sessionId: string): ThreadBinding | undefined {
+    bindingOfSession,
+    aliasOfSession(sessionId: string): SessionAlias | undefined {
       ensureLoaded();
-      const threads = bySession.get(sessionId);
+      const live = bindingOfSession(sessionId);
+      if (live !== undefined) return Object.freeze({ retired: false as const, binding: live });
+      // A session some thread holds live, but ambiguously, is never settled by an alias.
+      if (bySession.has(sessionId)) return undefined;
+      const threads = retiredBySession.get(sessionId);
       if (threads === undefined || threads.size !== 1) return undefined;
       const found = lookup([...threads][0] as string);
-      return found.status === "ok" && found.binding.sessionId === sessionId
-        ? found.binding
+      const retiredSession =
+        found.status === "ok"
+          ? found.binding.retired?.find((r) => r.sessionId === sessionId)
+          : undefined;
+      return found.status === "ok" && retiredSession !== undefined
+        ? Object.freeze({ retired: true as const, binding: found.binding, retiredSession })
         : undefined;
     },
     boot: () => scan(true),

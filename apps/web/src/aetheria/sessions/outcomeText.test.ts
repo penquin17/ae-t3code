@@ -12,14 +12,6 @@ describe("outcomeText", () => {
       tone: "ok",
       text: "Pin sent; the list will show it when the backend reports it.",
     });
-    expect(
-      outcomeText("Rename", {
-        kind: "confirmed",
-        value: 1,
-        refreshed: false,
-        message: "read failed",
-      }),
-    ).toEqual({ tone: "ok", text: "Rename saved, but the list couldn't refresh (read failed)." });
   });
 
   it("a refusal carries the backend's message and says nothing changed only as the backend said it", () => {

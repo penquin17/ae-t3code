@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { environmentCatalog } from "~/connection/catalog";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { randomUUID } from "~/lib/utils";
+import { gateOnConnection } from "../connection/gate";
 import { createActionRunner, type ActionOutcome, type SendResult } from "../core/outcome";
 import { childStopSend } from "../run/childStop";
 import type { ChildrenCalls } from "./calls";
@@ -106,18 +107,22 @@ export function useChildren(input: {
 
   async function runStop(forRoot: string, key: string, row: ChildRowView): Promise<void> {
     const target = { environmentId, rootThreadId: forRoot, childThreadId: row.childId };
-    const run = await runner.run(key, {
-      label: "Stop",
-      send: () =>
-        childStopSend(
-          {
-            list: () => settled(() => calls.list({ environmentId, rootThreadId: forRoot })),
-            interrupt: () => settled(() => calls.interrupt(target)),
-            close: () => settled(() => calls.close(target)),
-          },
-          { rootThreadId: forRoot, childThreadId: row.childId },
-        ),
-    });
+    // Sent only while the connection allows actions, judged when it is sent; a blocked stop is never queued.
+    const run = await runner.run(
+      key,
+      gateOnConnection({
+        label: "Stop",
+        send: () =>
+          childStopSend(
+            {
+              list: () => settled(() => calls.list({ environmentId, rootThreadId: forRoot })),
+              interrupt: () => settled(() => calls.interrupt(target)),
+              close: () => settled(() => calls.close(target)),
+            },
+            { rootThreadId: forRoot, childThreadId: row.childId },
+          ),
+      }),
+    );
     // The page may have moved to another root while the Stop was away: its re-read and notice belong to the root it was sent for.
     if (root.current !== forRoot) return;
     const readBack = await read(forRoot);

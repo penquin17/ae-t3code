@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "../../components/ui/alert";
 import { REGION } from "../regions/declarations";
 import { useRegion } from "../regions/useRegion";
 import { browserDraftStorage, createDraftStore, type DraftStore } from "./drafts";
+import { isFromEarlierSession } from "./earlier";
 import { InteractionCard } from "./InteractionCard";
 import { PlanModeCard } from "./PlanModeCard";
 import { cardClass, mutedClass } from "./parts";
@@ -100,6 +101,7 @@ export function ControlPanel({ environmentId, rootSessionId, drafts }: ControlPa
               record={record}
               actions={actions}
               drafts={store}
+              earlierSession={isFromEarlierSession(record, rootSessionId)}
             />
           )),
           ...(settled.length > 0
@@ -118,6 +120,7 @@ export function ControlPanel({ environmentId, rootSessionId, drafts }: ControlPa
               record={record}
               actions={actions}
               drafts={store}
+              earlierSession={isFromEarlierSession(record, rootSessionId)}
             />
           )),
         ]}

@@ -66,6 +66,8 @@ export const offeredIdOf = (rootSessionId: string, canonicalPath: string): strin
 export interface RootGate {
   readonly service: Service;
   readonly rootSessionId: string;
+  /** The roots the thread held before and has since replaced, oldest first: read-only aliases of the thread, so what they declared stays listed. */
+  readonly retiredRootSessionIds: readonly string[];
 }
 
 /**
@@ -99,7 +101,13 @@ export const openRoot = async (
   } catch {
     return unavailable("the host's access rule could not be asked");
   }
-  return reachable ? { service, rootSessionId } : notFound();
+  return reachable
+    ? {
+        service,
+        rootSessionId,
+        retiredRootSessionIds: (found.binding.retired ?? []).map((r) => r.sessionId),
+      }
+    : notFound();
 };
 
 /** Every call: the device session first, then the scope, then the gate, then the one read. */
@@ -167,31 +175,40 @@ export const deliverablesList = (
   guarded<ClientDeliverablesListResult>(backend, actor, payload.rootThreadId, async (gate) => {
     const store = gate.service.deliverables();
     if (store === undefined) return unavailable("the deliverables store is not running");
-    const read = await store.list(gate.rootSessionId);
-    if (!read.ok)
-      return read.code === "DELIVERABLES_STORE_UNUSABLE" ||
-        read.code === "DELIVERABLES_FORMAT_NEWER"
-        ? refuse(read.code, "the declaration store cannot be used; nothing is listed")
-        : unavailable("the deliverables store is not running");
-    const reachable = new Map<string, boolean>([[gate.rootSessionId, true]]);
     const interactions = gate.service.interactions();
-    const cards: DeliverableCard[] = [];
-    for (const entry of read.value) {
-      let allowed = reachable.get(entry.sessionId);
+    const reachable = new Map<string, boolean>();
+    const mayReach = async (sessionId: string, rootSessionId: string): Promise<boolean> => {
+      const key = `${rootSessionId}\u0000${sessionId}`;
+      let allowed = reachable.get(key);
       if (allowed === undefined) {
         allowed =
           interactions !== undefined &&
-          (await interactions.canAccess(actor, {
-            sessionId: entry.sessionId,
-            rootSessionId: gate.rootSessionId,
-          }));
-        reachable.set(entry.sessionId, allowed);
+          (await interactions.canAccess(actor, { sessionId, rootSessionId }));
+        reachable.set(key, allowed);
       }
-      if (!allowed) continue;
-      const binding = gate.service.index.bindingOfSession(entry.sessionId);
-      if (binding === undefined) continue;
-      cards.push(cardOf(entry, binding.threadId));
+      return allowed;
+    };
+    reachable.set(`${gate.rootSessionId}\u0000${gate.rootSessionId}`, true);
+    // The live root's declarations, then each replaced root's the connection may reach: all read-only, the thread's own.
+    const cards: DeliverableCard[] = [];
+    for (const rootSessionId of [gate.rootSessionId, ...gate.retiredRootSessionIds]) {
+      if (!(await mayReach(rootSessionId, rootSessionId))) continue;
+      const read = await store.list(rootSessionId);
+      if (!read.ok)
+        return read.code === "DELIVERABLES_STORE_UNUSABLE" ||
+          read.code === "DELIVERABLES_FORMAT_NEWER"
+          ? refuse(read.code, "the declaration store cannot be used; nothing is listed")
+          : unavailable("the deliverables store is not running");
+      for (const entry of read.value) {
+        if (!(await mayReach(entry.sessionId, rootSessionId))) continue;
+        // The alias is the thread the session belongs to, live or replaced; a session no thread holds is not listed.
+        const alias = gate.service.index.aliasOfSession(entry.sessionId);
+        if (alias === undefined) continue;
+        cards.push(cardOf(entry, alias.binding.threadId));
+      }
     }
+    // Each root's cards are oldest first already; one list is, across roots (a stable sort keeps a root's own order for equal times).
+    cards.sort((a, b) => a.declaredAt - b.declaredAt);
     return { ok: true, value: { rootThreadId: payload.rootThreadId, deliverables: cards } };
   }) as Effect.Effect<ClientDeliverablesListResult>;
 

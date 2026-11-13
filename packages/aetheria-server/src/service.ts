@@ -44,6 +44,7 @@ import { createSnapshotRetention } from "./snapshotRetention.ts";
 import { createIdentityFeed, type StoredEventLike } from "./identity/feed.ts";
 import { createResumeSignal } from "./identity/resume.ts";
 import { createIdentityReader } from "./identity/backendEntry.ts";
+import { createSessionAccess } from "./identity/sessionAccess.ts";
 import { createSessionDirectory } from "./identity/sessionDirectory.ts";
 import { createSessionKind, type SessionKind } from "./identity/sessionKind.ts";
 import { adaptAvailability } from "./routeVocabulary.ts";
@@ -330,6 +331,7 @@ export function createAetheriaBackendService(
     env: options.auditRoles?.env,
     homedir: options.auditRoles?.homedir,
   });
+  const sessionAccess = createSessionAccess(index);
   const humanControlRegistration = createHumanControlBackendRegistration({
     audit: options.auditPort ?? {
       access: (who) => auditAccess.check(who.sessionId),
@@ -344,11 +346,10 @@ export function createAetheriaBackendService(
               stateRoot: options.stateRoot,
               now: options.now ?? Date.now,
               ...(options.turnDispatch === undefined ? {} : { turnDispatch: options.turnDispatch }),
-              threadOfSession: (sessionId) => index.bindingOfSession(sessionId)?.threadId,
+              // Human control reads and routes a late answer through a replaced session's thread; nothing here writes to a Pi session (identity/sessionAccess.ts).
+              threadOfSession: sessionAccess.threadOf,
               sessions: createSessionDirectory(identityReader),
-              canOperate: (_actor, target) =>
-                index.bindingOfSession(target.sessionId) !== undefined &&
-                index.bindingOfSession(target.rootSessionId) !== undefined,
+              canOperate: (_actor, target) => sessionAccess.canOperate(target),
             }),
   });
   interactionsNow = () => humanControlRegistration.interactions();
@@ -360,8 +361,8 @@ export function createAetheriaBackendService(
       ? found.binding.sessionId
       : undefined;
   };
-  const threadOfSession = (sessionId: string): string | undefined =>
-    index.bindingOfSession(sessionId)?.threadId;
+  // Orchestration writes (job notices, wakes, spawn) need the LIVE session's thread: a replaced session is not one.
+  const threadOfSession = sessionAccess.liveThreadOf;
   const lineageSessionOf = (threadId: string): string | null | "unknown" => {
     const found = index.lookup(threadId);
     return found.status === "ok"

@@ -1,6 +1,7 @@
 // The group store's client: the last confirmed record as a Known<GroupRecord>, and the five changes. Each is
 // sent once through the action runner and counts as done only when the Backend accepted it and a re-read shows
 // the effect. Calls run one at a time, so a send and its re-read never interleave. No optimistic edit.
+import { gateOnConnection } from "../connection/gate";
 import { known, unavailable, unknown, type Known } from "../core/known";
 import {
   createActionRunner,
@@ -141,7 +142,8 @@ export function createGroupsStore(options: GroupsStoreOptions): GroupsStore {
       };
     }
     const { body } = built;
-    return {
+    // A change is sent only while the connection allows actions, judged when it is sent; a blocked one is never queued (the read that confirms a sent one is not an action).
+    return gateOnConnection({
       label,
       send: async () => {
         let reply: unknown;
@@ -157,7 +159,7 @@ export function createGroupsStore(options: GroupsStoreOptions): GroupsStore {
         if (read.tag !== "record") return { tag: "failed", reason: read.reason };
         return effectShown(body, read.record) ? { tag: "shows" } : { tag: "absent" };
       },
-    };
+    });
   };
 
   const change = (label: string, built: BuiltBody) =>

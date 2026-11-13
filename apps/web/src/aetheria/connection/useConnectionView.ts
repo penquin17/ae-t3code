@@ -7,7 +7,7 @@ import { AVAILABLE_CONNECTION_STATE } from "@t3tools/client-runtime/connection";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
 import * as Option from "effect/Option";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { environmentCatalog } from "~/connection/catalog";
 import { connectionAtomRuntime } from "~/connection/runtime";
@@ -19,6 +19,7 @@ import { sendResultFromCommand } from "../sessions/commandResult";
 import { compositionFromReply, expectedDigestFrom, probeUpgrade } from "./adapter";
 import { subscribeCallRefusals } from "./callRefusals";
 import { createConnectionController, type ConnectionInputs } from "./controller";
+import { publishConnectionView, withdrawConnectionView } from "./current";
 import {
   initialFacts,
   viewOf,
@@ -126,5 +127,15 @@ export function useConnectionView(locale: Locale = "en"): ConnectionHandle {
     if (inputs !== null) controller.observe(inputs);
   }, [controller, inputs]);
 
-  return { view: viewOf(facts, locale), facts };
+  const view = viewOf(facts, locale);
+  // Action sites outside React's tree judge the connection when they send (`gateOnConnection`); this is what they read while this hook is mounted.
+  const monitorId = useId();
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the view to the gate that action sites read at send time
+  useEffect(() => {
+    publishConnectionView(monitorId, view);
+  }, [monitorId, view]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a monitor that is gone no longer says anything about the connection
+  useEffect(() => () => withdrawConnectionView(monitorId), [monitorId]);
+
+  return { view, facts };
 }

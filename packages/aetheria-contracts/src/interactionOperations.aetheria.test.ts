@@ -287,3 +287,21 @@ describe("the XC-18 RPC declarations", () => {
     }
   });
 });
+
+describe("the snapshot's additive `retiredRoots` (M10 review 1, follow-up 4a)", () => {
+  const decode = decoder(InteractionsSnapshotResult);
+  const base = { rootSessionId: "root-live", version: 3, interactions: [] };
+
+  it("an older reply without it still decodes; with it, the replaced roots are named by id", () => {
+    expect(() => decode({ ok: true, value: base })).not.toThrow();
+    expect(() =>
+      decode({ ok: true, value: { ...base, retiredRoots: ["root-old-1", "root-old-2"] } }),
+    ).not.toThrow();
+  });
+
+  it("refuses a replaced root that is not an id, and any other extra field", () => {
+    expect(() => decode({ ok: true, value: { ...base, retiredRoots: [""] } })).toThrow();
+    expect(() => decode({ ok: true, value: { ...base, retiredRoots: [7] } })).toThrow();
+    expect(() => decode({ ok: true, value: { ...base, replaced: ["root-old"] } })).toThrow();
+  });
+});

@@ -8,6 +8,7 @@ import { expect, it, vi } from "vite-plus/test";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { act, render } from "../../../test/render";
+import { accessEndedView, connectedView, showConnection } from "../connection/testing";
 import type { SendResult } from "../core/outcome";
 import type { ChildrenCalls } from "./calls";
 
@@ -49,11 +50,9 @@ const listed = (label: string): SendResult<unknown> => ({
 function setup(replies: Array<SendResult<unknown>>) {
   mocks.generation = Atom.make(1);
   const list = vi.fn(async () => replies.shift() ?? LOST);
-  const calls: ChildrenCalls = {
-    list,
-    interrupt: async () => LOST,
-    close: async () => LOST,
-  };
+  const interrupt = vi.fn(async (): Promise<SendResult<unknown>> => LOST);
+  const close = vi.fn(async (): Promise<SendResult<unknown>> => LOST);
+  const calls: ChildrenCalls = { list, interrupt, close };
   let seen!: ReturnType<typeof useChildren>;
   function Probe() {
     const children = useChildren({ environmentId: ENV, rootThreadId: ROOT, calls });
@@ -64,6 +63,11 @@ function setup(replies: Array<SendResult<unknown>>) {
   }
   return {
     list,
+    interrupt,
+    close,
+    get hook() {
+      return seen;
+    },
     Probe: () => (
       <RegistryContext.Provider value={appAtomRegistry}>
         <Probe />
@@ -93,6 +97,29 @@ it("reads the children again when a new session comes up after a read whose repl
   await state.newSession(2);
   await vi.waitFor(() => expect(state.view.tag).toBe("read"));
   expect(state.list).toHaveBeenCalledTimes(2);
+});
+
+const ROW = {
+  childId: "child-a",
+  name: "Researcher",
+  state: "running",
+  mode: "continuable",
+} as unknown as Parameters<ReturnType<typeof useChildren>["stop"]>[0];
+
+it("a Stop while the connection does not allow actions sends nothing and says so; connected, it sends once (review finding 2)", async () => {
+  const state = setup([listed("Researcher"), listed("Researcher"), listed("Researcher")]);
+  const hide = showConnection(accessEndedView);
+  await using _screen = await render(<state.Probe />, { router: false });
+  await vi.waitFor(() => expect(state.view.tag).toBe("read"));
+  await act(async () => state.hook.stop(ROW));
+  await vi.waitFor(() => expect(state.hook.notice?.outcome.kind).toBe("unavailable"));
+  expect(state.interrupt).not.toHaveBeenCalled();
+  expect(state.close).not.toHaveBeenCalled();
+  hide();
+  const hideAgain = showConnection(connectedView);
+  await act(async () => state.hook.stop(ROW));
+  await vi.waitFor(() => expect(state.interrupt).toHaveBeenCalledTimes(1));
+  hideAgain();
 });
 
 it("reads once per new session and never on its own (d)", async () => {

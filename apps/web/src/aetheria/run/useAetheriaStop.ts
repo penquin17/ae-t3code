@@ -9,8 +9,9 @@ import { useRef, useState } from "react";
 import { randomUUID } from "~/lib/utils";
 import { toastManager } from "../../components/ui/toast";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { gateOnConnection } from "../connection/gate";
+import { aetheriaSendResult } from "../connection/sendResult";
 import { createActionRunner, type ActionOutcome, type OutcomeStep } from "../core/outcome";
-import { sendResultFromCommand } from "../sessions/commandResult";
 import type { OutcomeNotice } from "../sessions/outcomeText";
 import { childStopSend } from "./childStop";
 import { aetheriaChildren } from "./stopCommands";
@@ -51,7 +52,7 @@ export function useAetheriaStop() {
   const treeStep = (target: StopTarget): OutcomeStep<CancelTreeValue> => ({
     label: "Stop",
     send: async () => {
-      const sent = sendResultFromCommand(
+      const sent = aetheriaSendResult(
         await cancelTree({
           environmentId: target.environmentId,
           input: { rootThreadId: target.threadId },
@@ -71,11 +72,11 @@ export function useAetheriaStop() {
       return childStopSend(
         {
           list: async () =>
-            sendResultFromCommand(
+            aetheriaSendResult(
               await list({ environmentId, input: { rootThreadId: target.rootThreadId } }),
             ),
-          interrupt: async () => sendResultFromCommand(await interrupt({ environmentId, input })),
-          close: async () => sendResultFromCommand(await close({ environmentId, input })),
+          interrupt: async () => aetheriaSendResult(await interrupt({ environmentId, input })),
+          close: async () => aetheriaSendResult(await close({ environmentId, input })),
         },
         { rootThreadId: target.rootThreadId, childThreadId: target.threadId },
       );
@@ -83,9 +84,10 @@ export function useAetheriaStop() {
   });
 
   const runStop = async (target: StopTarget, key: string): Promise<StopResult> => {
+    // Sent only while the connection allows actions, judged when it is sent; a blocked Stop says nothing was sent and is not queued.
     const run = target.isSubagent
-      ? await runner.run(key, childStep(target))
-      : await runner.run(key, treeStep(target));
+      ? await runner.run(key, gateOnConnection(childStep(target)))
+      : await runner.run(key, gateOnConnection(treeStep(target)));
     const outcome = target.isSubagent
       ? run.outcome
       : stopOutcomeFromAccepted(run.outcome as ActionOutcome<CancelTreeValue>);

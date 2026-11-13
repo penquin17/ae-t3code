@@ -1,10 +1,10 @@
-// The terminal words that need no T3 edit (M10 Plan step 16, D13). T3's terminal drawer is a chat-view component: it needs the conversation's right-panel surface, project and composer state, so it
-// cannot be mounted from an Aetheria route without editing T3. The Plan's fallback is recorded here as a visible statement, and the authority label is shown where terminals are mentioned.
+// The terminal words of the Aetheria build (M10 Plan steps 15–16, D13). T3's own terminal drawer in the chat view is THE terminal surface: there is no Aetheria terminal page. The drawer carries
+// the authority label (integration point IP-61, TerminalAuthorityLabel), and the Deliverables page says where the terminal is.
 
-/** Who a terminal runs as (D13). */
+/** Who a terminal runs as (D13): shown in the drawer, before a person types anything. */
 export const TERMINAL_AUTHORITY =
-  "Commands in a terminal run as the Backend user, outside the agent's permissions.";
+  "Commands run as the Backend user, outside the agent's permissions.";
 
-/** Where the terminal is, since this build does not mount it. */
-export const TERMINAL_NOT_MOUNTED =
-  "Terminal page not mounted; T3's own drawer remains the terminal surface.";
+/** Where the terminal is: T3's drawer in a session's chat view, opened by its header button. */
+export const TERMINAL_WHERE =
+  "The terminal is in the chat view of a session: open the session and use Toggle terminal drawer.";

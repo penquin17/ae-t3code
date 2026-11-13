@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { connectedView, notConnectedView, showConnection } from "../connection/testing";
 import { createControlActions, type ActionReport, type SnapshotRead } from "./actions";
 import type {
   ControlTransport,
@@ -142,13 +143,12 @@ describe("an accepted reply is confirmed only by the Backend's own projection", 
     expect(outcomeOf(report)).toMatchObject({ kind: "unknown" });
   });
 
-  it("answer: confirmed without a refresh when the re-read fails, and says why", async () => {
+  it("answer: unknown when the re-read fails, and the reason names the step and the read failure", async () => {
     const { actions } = setup({ answer: ok(answered) }, { tag: "failed", reason: "read refused" });
     const report = await actions.answer({ interactionId: "i-1", revision: REV, answers: [] });
     expect(outcomeOf(report)).toMatchObject({
-      kind: "confirmed",
-      refreshed: false,
-      message: "read refused",
+      kind: "unknown",
+      reason: expect.stringMatching(/"Answer" was accepted.*reading.*back failed \(read refused\)/),
     });
   });
 
@@ -303,5 +303,51 @@ describe("a second action on the same target while one is in flight sends nothin
     release(ok(answered));
     expect((await first).sent).toBe(true);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("a send while the connection does not allow actions is blocked and never sent (review finding 2)", () => {
+  const subject = { type: "tool", id: "t", revision: REV };
+  const SENDS = {
+    answer: (a: ReturnType<typeof setup>["actions"]) =>
+      a.answer({ interactionId: "i-1", revision: REV, answers: [] }),
+    cancel: (a: ReturnType<typeof setup>["actions"]) =>
+      a.cancel({ interactionId: "i-1", revision: REV }),
+    hold: (a: ReturnType<typeof setup>["actions"]) =>
+      a.hold({ interactionId: "i-1", revision: REV }),
+    close: (a: ReturnType<typeof setup>["actions"]) =>
+      a.close({ interactionId: "i-1", revision: REV }),
+    planDecide: (a: ReturnType<typeof setup>["actions"]) =>
+      a.planDecide({ interactionId: "i-1", revision: REV, decision: "approve" } as never),
+    planModeSet: (a: ReturnType<typeof setup>["actions"]) =>
+      a.planModeSet({ sessionId: ROOT, active: true } as never),
+    grant: (a: ReturnType<typeof setup>["actions"]) => a.grant({ subject, scope: "once" } as never),
+  } as const;
+  const ALL = Object.keys(SENDS) as Array<keyof typeof SENDS>;
+  let hide = () => {};
+  afterEach(() => hide());
+
+  it.each(ALL)(
+    "%s sends nothing, is unavailable in the gate's words, and re-reads nothing",
+    async (name) => {
+      hide = showConnection(notConnectedView);
+      const h = setup({}, shows(answered));
+      const report = await SENDS[name](h.actions);
+      expect(h.calls).toEqual([]);
+      expect(h.readSnapshot).not.toHaveBeenCalled();
+      expect(outcomeOf(report)).toMatchObject({ kind: "unavailable" });
+      expect((outcomeOf(report) as { reason: string }).reason).toMatch(/nothing was sent/i);
+    },
+  );
+
+  it("is sent once the connection allows actions, and the blocked one is not sent later", async () => {
+    hide = showConnection(notConnectedView);
+    const h = setup({ answer: ok(answered) }, shows(answered));
+    await SENDS.answer(h.actions);
+    hide = showConnection(connectedView);
+    expect(h.calls).toEqual([]);
+    const report = await SENDS.answer(h.actions);
+    expect(h.calls).toHaveLength(1);
+    expect(outcomeOf(report)).toMatchObject({ kind: "confirmed" });
   });
 });

@@ -164,7 +164,7 @@ describe("the deliverables route", () => {
     expect(callsTo("aetheria.deliverables.offeredPaths")[0]?.input).toEqual({ rootThreadId: root });
     await expect.poll(() => text()).toContain("/work/src/app.ts");
     expect(text()).toContain("Edited files: per session, not per turn; shell writes not tracked.");
-    expect(text()).toContain("Terminal page not mounted");
+    expect(text()).toContain("The terminal is in the chat view of a session");
     expect(app.router.state.location.pathname).toBe(
       `/aetheria/deliverables/${ENVIRONMENT_ID}/${root}`,
     );

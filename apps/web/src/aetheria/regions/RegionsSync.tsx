@@ -1,7 +1,9 @@
-// Mounted once by the shell (step 24): reports the page's registered regions to the Backend for as long as it is mounted (D17, XC-19). It renders nothing. Unmounting stops the sending and nothing else: the
+// Mounted once by the shell (step 24): reports the page's registered regions to the Backend for as long as it is mounted (D17, XC-19). It renders no visible UI; it renders the always-mounted connection monitor,
+// so the connection gate has a view even when no status line is on screen. Unmounting stops the sending and nothing else: the
 // Backend drops the client when the connection closes, and a page that just unmounted this component sends no cancel and no unregister.
 import { useEffect, useRef } from "react";
 
+import { ConnectionMonitor } from "../connection/ConnectionMonitor";
 import { useT3RegionsTransport } from "./commands";
 import { useRegionRegistry } from "./useRegion";
 import { createRegionSync, type RegionsTransport } from "./sync";
@@ -31,5 +33,5 @@ export function RegionsSync(props: { readonly transport?: RegionsTransport }) {
     sync.start();
     return () => sync.stop();
   }, [registry]);
-  return null;
+  return <ConnectionMonitor />;
 }

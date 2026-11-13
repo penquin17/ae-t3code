@@ -177,9 +177,12 @@ export function applyEvent(facts: ConnectionFacts, event: ConnectionEvent): Conn
     : next;
 }
 
-/** The Backend's per-call device check answers `<METHOD>_DEVICE_REVOKED` for a revoked, missing or expired session; it does not say which. */
+/**
+ * The Backend's per-call device check answers `<METHOD>_DEVICE_REVOKED` for a revoked, missing or expired session; it does not say which. The download route says the same with DOWNLOAD_UNAUTHENTICATED
+ * ("does not accept this device's credential: expired, revoked or unknown"); DOWNLOAD_BEARER_REQUIRED says this client sent none, which is not the device's access ending.
+ */
 export function isDeviceEndedCode(code: string): boolean {
-  return /^[A-Z][A-Z0-9]*_DEVICE_REVOKED$/.test(code);
+  return /^[A-Z][A-Z0-9]*_DEVICE_REVOKED$/.test(code) || code === "DOWNLOAD_UNAUTHENTICATED";
 }
 
 const NO_MODULES =

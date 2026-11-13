@@ -29,6 +29,8 @@ export interface InteractionCardProps {
   readonly record: InteractionRecord;
   readonly actions: ControlActions;
   readonly drafts: DraftStore;
+  /** The record was asked by a session this thread has since replaced: said on the card, nothing else changes. */
+  readonly earlierSession?: boolean;
 }
 
 const KIND_LABEL = {
@@ -61,7 +63,12 @@ function SettledContent({ record }: { readonly record: InteractionRecord }) {
   );
 }
 
-export function InteractionCard({ record, actions, drafts }: InteractionCardProps) {
+export function InteractionCard({
+  record,
+  actions,
+  drafts,
+  earlierSession = false,
+}: InteractionCardProps) {
   const headingId = useId();
   const sectionRef = useRef<HTMLElement>(null);
   const [report, setReport] = useState<ActionReport<unknown> | null>(null);
@@ -108,6 +115,11 @@ export function InteractionCard({ record, actions, drafts }: InteractionCardProp
       <div className="flex flex-col gap-0.5">
         <Heading id={headingId}>{KIND_LABEL[record.kind]}</Heading>
         <p className={`${mutedClass} break-all`}>{record.interactionId}</p>
+        {earlierSession ? (
+          <p className={mutedClass} data-earlier-session>
+            From an earlier session of this thread
+          </p>
+        ) : null}
       </div>
       <RecordStatus record={record} />
       {isOpen(record) ? (

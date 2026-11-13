@@ -6,7 +6,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { sendResultFromCommand } from "../sessions/commandResult";
+import { aetheriaSendResult } from "../connection/sendResult";
 import type { ReportReply, ReportsTransport } from "./reports";
 
 const aetheriaChildrenReport = createEnvironmentRpcCommand(connectionAtomRuntime, {
@@ -18,7 +18,7 @@ export function useT3ReportsTransport(environmentId: EnvironmentId): ReportsTran
   const report = useAtomCommand(aetheriaChildrenReport, { reportFailure: false });
   return {
     read: async ({ rootThreadId, target }): Promise<ReportReply> => {
-      const sent = sendResultFromCommand(
+      const sent = aetheriaSendResult(
         await report({ environmentId, input: { rootThreadId, childThreadId: target } }),
       );
       if (sent.tag === "accepted") return sent.value as ReportReply;

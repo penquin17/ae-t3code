@@ -70,6 +70,15 @@ const OTHER: DeliverablesCaller = {
   kind: "main",
 };
 
+/** A session its thread has replaced, and the live session of that thread now. */
+const RETIRED: Readonly<Record<string, string>> = { "pi-old": "pi-a" };
+const OLD_ROOT: DeliverablesCaller = { sessionId: "pi-old", rootSessionId: "pi-old", kind: "main" };
+const UNBOUND: DeliverablesCaller = {
+  sessionId: "pi-gone",
+  rootSessionId: "pi-gone",
+  kind: "main",
+};
+
 interface WorldOptions {
   readonly denied?: ReadonlyArray<string>;
   readonly edits?: (workspace: string) => EditsRead;
@@ -160,6 +169,28 @@ function world(options: WorldOptions = {}) {
         return folder === undefined
           ? undefined
           : { threadId: `t-${sessionId.slice(3)}`, sessionId, workingFolder: folder };
+      },
+      // A live session is its thread's binding; a replaced one (`RETIRED`) is the same thread's CURRENT binding, whose folder is the thread's now.
+      aliasOfSession: (sessionId: string) => {
+        calls.push(`aliasOfSession:${sessionId}`);
+        const folder = folderOf[sessionId];
+        if (folder !== undefined)
+          return {
+            retired: false,
+            binding: { threadId: `t-${sessionId.slice(3)}`, sessionId, workingFolder: folder },
+          };
+        const live = RETIRED[sessionId];
+        return live === undefined
+          ? undefined
+          : {
+              retired: true,
+              binding: {
+                threadId: `t-${live.slice(3)}`,
+                sessionId: live,
+                workingFolder: folderOf[live],
+              },
+              retiredSession: { sessionId },
+            };
       },
     },
     identityKind: (sessionId: string) => (sessionId === "pi-kid" ? "child" : "not-child"),
@@ -517,6 +548,26 @@ describe("which declaration a connection may reach", () => {
           ok(yield* get(url(kid.id, "?semantics=as-delivered"), bearer(token)), "kid file");
           // The access rule was asked about the declaring session under its root.
           expect(w.calls).toContain("canAccess:pi-kid:pi-a");
+        }),
+      );
+    },
+  );
+
+  it.live(
+    "a replaced root's declaration is served read-only from the thread's folder, current and as delivered; a root no thread ever held is still 404 (review 1, follow-up 4c)",
+    () => {
+      const w = world();
+      return withRoute(w, undefined, ({ get, issue, bearer }) =>
+        Effect.gen(function* () {
+          const old = yield* Effect.promise(() => w.declare(OLD_ROOT, "old.txt", "from before"));
+          const stray = yield* Effect.promise(() => w.declare(UNBOUND, "s.txt", "stray"));
+          const { token } = yield* issue([FS_READ]);
+          ok(yield* get(url(old.id), bearer(token)), "from before");
+          ok(yield* get(url(old.id, "?semantics=as-delivered"), bearer(token)), "from before");
+          // The access rule was asked about the replaced root as its own root; the folder is the one the thread's binding names now.
+          expect(w.calls).toContain("canAccess:pi-old:pi-old");
+          expect(w.calls).toContain("aliasOfSession:pi-old");
+          refused(yield* get(url(stray.id), bearer(token)), "DOWNLOAD_NOT_FOUND");
         }),
       );
     },

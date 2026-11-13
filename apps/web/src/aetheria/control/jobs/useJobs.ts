@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
+import { gateOnConnection } from "../../connection/gate";
 import { createActionRunner, type ActionOutcome, type SendResult } from "../../core/outcome";
 import {
   applyOutput,
@@ -75,20 +76,24 @@ export function useJobs(input: {
     key: string,
     row: { readonly jobId: string; readonly label: string },
   ): Promise<void> {
-    const run = await runner.run<KillValue>(key, {
-      label: "Kill",
-      send: async (): Promise<SendResult<KillValue>> => {
-        try {
-          return killSendFromReply(
-            await transport.kill({ environmentId, rootThreadId: forRoot, jobId: row.jobId }),
-          );
-        } catch {
-          // A call that threw never told us what the Backend did: it is a lost reply, not a refusal.
-          return { tag: "lost" };
-        }
-      },
-      confirm: async (accepted) => killConfirm(await list.refresh(), accepted.jobId),
-    });
+    // Sent only while the connection allows actions, judged when it is sent; a blocked kill is never queued.
+    const run = await runner.run<KillValue>(
+      key,
+      gateOnConnection<KillValue>({
+        label: "Kill",
+        send: async (): Promise<SendResult<KillValue>> => {
+          try {
+            return killSendFromReply(
+              await transport.kill({ environmentId, rootThreadId: forRoot, jobId: row.jobId }),
+            );
+          } catch {
+            // A call that threw never told us what the Backend did: it is a lost reply, not a refusal.
+            return { tag: "lost" };
+          }
+        },
+        confirm: async (accepted) => killConfirm(await list.refresh(), accepted.jobId),
+      }),
+    );
     if (run.outcome.kind === "unknown") void list.refresh();
     // The page may have moved to another root while the Kill was away: its notice belongs to the root it was sent for.
     if (root.current !== forRoot || !run.current) return;

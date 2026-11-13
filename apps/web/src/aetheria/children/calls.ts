@@ -5,7 +5,7 @@ import { createContext } from "react";
 
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { SendResult } from "../core/outcome";
-import { sendResultFromCommand } from "../sessions/commandResult";
+import { aetheriaSendResult } from "../connection/sendResult";
 import { aetheriaChildren } from "../run/stopCommands";
 
 export interface ChildrenCalls {
@@ -34,12 +34,12 @@ export function useT3ChildrenCalls(): ChildrenCalls {
   const close = useAtomCommand(aetheriaChildren.close, { reportFailure: false });
   return {
     list: async ({ environmentId, rootThreadId }) =>
-      sendResultFromCommand(await list({ environmentId, input: { rootThreadId } })),
+      aetheriaSendResult(await list({ environmentId, input: { rootThreadId } })),
     interrupt: async ({ environmentId, rootThreadId, childThreadId }) =>
-      sendResultFromCommand(
+      aetheriaSendResult(
         await interrupt({ environmentId, input: { rootThreadId, childThreadId } }),
       ),
     close: async ({ environmentId, rootThreadId, childThreadId }) =>
-      sendResultFromCommand(await close({ environmentId, input: { rootThreadId, childThreadId } })),
+      aetheriaSendResult(await close({ environmentId, input: { rootThreadId, childThreadId } })),
   };
 }

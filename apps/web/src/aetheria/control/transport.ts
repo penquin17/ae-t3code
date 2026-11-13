@@ -10,7 +10,7 @@ import * as Cause from "effect/Cause";
 import * as Stream from "effect/Stream";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
-import { sendResultFromCommand } from "../sessions/commandResult";
+import { aetheriaSendResult } from "../connection/sendResult";
 import type { InteractionsChange, TransportResult } from "./types";
 
 export const aetheriaControl = {
@@ -96,11 +96,11 @@ export const interactionChanges = (environmentId: string, rootSessionId: string)
     input: { rootSessionId } as never,
   });
 
-type Settled = Parameters<typeof sendResultFromCommand>[0];
+type Settled = Parameters<typeof aetheriaSendResult>[0];
 
-/** A settled T3 command as a transport result. */
+/** A settled T3 command as a transport result; the refusal code in a Backend reply is reported to the connection on the way. */
 export function transportResultOf(result: Settled): TransportResult {
-  const sent = sendResultFromCommand(result);
+  const sent = aetheriaSendResult(result);
   if (sent.tag === "accepted") return { tag: "reply", reply: sent.value };
   if (sent.tag === "lost") return { tag: "lost" };
   return { tag: "failed", message: sent.tag === "refused" ? sent.message : sent.reason };

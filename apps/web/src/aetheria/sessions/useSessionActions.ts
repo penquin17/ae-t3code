@@ -9,16 +9,64 @@ import { useState } from "react";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { newThreadId, randomUUID } from "~/lib/utils";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readThreadShell, waitForThreadShell } from "../../state/entities";
-import { threadEnvironment } from "../../state/threads";
+import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { waitForAtomValue } from "../../state/waitForAtomValue";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import { createActionRunner, type OutcomeStep, type RunResult } from "../core/outcome";
-import { sendResultFromCommand } from "./commandResult";
+import {
+  createActionRunner,
+  type OutcomeStep,
+  type RunResult,
+  type SendResult,
+} from "../core/outcome";
+import { gateOnConnection } from "../connection/gate";
+import { aetheriaSendResult } from "../connection/sendResult";
 import { forkThenRename } from "./forkSequence";
+import {
+  confirmShell,
+  shellArchived,
+  shellPinned,
+  shellTitled,
+  type ShellMatch,
+  type WaitForShell,
+} from "./projectionConfirm";
 
 type ThreadRef = NonNullable<ReturnType<typeof parseScopedThreadKey>>;
+
+/** How long a session action waits for T3's projection to show its result before it is unknown. */
+const PROJECTION_WAIT_MS = 5_000;
+
+const waitForShell =
+  (ref: ThreadRef): WaitForShell =>
+  (matches) =>
+    waitForAtomValue({
+      registry: appAtomRegistry,
+      atom: environmentThreadShells.threadShellAtom(ref),
+      predicate: matches,
+      timeoutMs: PROJECTION_WAIT_MS,
+    });
+
+/**
+ * A step on one existing thread: sent once, then confirmed only when T3's projection of that thread
+ * matches. A thread the projection does not hold is unavailable before anything is sent, because an
+ * absent thread could never be told apart from a result.
+ */
+const projectionStep = (
+  ref: ThreadRef,
+  label: string,
+  send: () => Promise<SendResult<unknown>>,
+  matches: ShellMatch,
+): OutcomeStep<unknown> => ({
+  label,
+  send: async () =>
+    readThreadShell(ref) === null
+      ? { tag: "unavailable", reason: "this session is not in the backend's list" }
+      : send(),
+  confirm: () => confirmShell(waitForShell(ref), matches),
+});
 
 export interface SessionActions {
   open(sessionId: string): void;
@@ -64,7 +112,7 @@ export function useSessionActions(): SessionActions {
         send: async () => ({ tag: "unavailable", reason: "the session is not a T3 thread" }),
       });
     }
-    return runner.run(sessionId, build(ref));
+    return runner.run(sessionId, gateOnConnection(build(ref)));
   };
 
   const forkStep = (ref: ThreadRef): OutcomeStep<ThreadRef> => ({
@@ -76,7 +124,7 @@ export function useSessionActions(): SessionActions {
         return { tag: "unavailable", reason: "this session has no run to fork from yet" };
       }
       const targetThreadId = newThreadId();
-      const sent = sendResultFromCommand(
+      const sent = aetheriaSendResult(
         await forkFromRun({
           environmentId: ref.environmentId,
           input: {
@@ -95,16 +143,19 @@ export function useSessionActions(): SessionActions {
       (await waitForThreadShell(target)) ? { tag: "shows" } : { tag: "absent" },
   });
 
-  const renameStep = (ref: ThreadRef, title: string): OutcomeStep<unknown> => ({
-    label: "Rename",
-    send: async () =>
-      sendResultFromCommand(
-        await updateMetadata({
-          environmentId: ref.environmentId,
-          input: { threadId: ref.threadId, title },
-        }),
-      ),
-  });
+  const renameStep = (ref: ThreadRef, title: string): OutcomeStep<unknown> =>
+    projectionStep(
+      ref,
+      "Rename",
+      async () =>
+        aetheriaSendResult(
+          await updateMetadata({
+            environmentId: ref.environmentId,
+            input: { threadId: ref.threadId, title },
+          }),
+        ),
+      shellTitled(title),
+    );
 
   return {
     open,
@@ -118,40 +169,52 @@ export function useSessionActions(): SessionActions {
           },
         ]);
       }
-      return forkThenRename(runner, sessionId, forkStep(ref), (target) =>
-        renameStep(target, title),
+      return forkThenRename(runner, sessionId, gateOnConnection(forkStep(ref)), (target) =>
+        gateOnConnection(renameStep(target, title)),
       );
     },
     pin: (sessionId, pinned) =>
-      onThread(sessionId, pinned ? "Pin" : "Unpin", (ref) => ({
-        label: pinned ? "Pin" : "Unpin",
-        send: async () => sendResultFromCommand(await (pinned ? pinThread(ref) : unpinThread(ref))),
-      })),
+      onThread(sessionId, pinned ? "Pin" : "Unpin", (ref) =>
+        projectionStep(
+          ref,
+          pinned ? "Pin" : "Unpin",
+          async () => aetheriaSendResult(await (pinned ? pinThread(ref) : unpinThread(ref))),
+          shellPinned(pinned),
+        ),
+      ),
     archive: (sessionId) =>
-      onThread(sessionId, "Archive", (ref) => ({
-        label: "Archive",
-        send: async () => sendResultFromCommand(await archiveThread(ref)),
-      })),
+      onThread(sessionId, "Archive", (ref) =>
+        projectionStep(
+          ref,
+          "Archive",
+          async () => aetheriaSendResult(await archiveThread(ref)),
+          shellArchived,
+        ),
+      ),
     rename: (sessionId, title) => onThread(sessionId, "Rename", (ref) => renameStep(ref, title)),
     fork: (sessionId) => onThread(sessionId, "Fork", forkStep),
     startSession: (workspaceId) =>
-      runner.run(workspaceId, {
-        label: "New session",
-        send: async () => {
-          const projectRef = parseScopedProjectKey(workspaceId);
-          if (projectRef === null) {
-            return { tag: "unavailable", reason: "this list entry is not a T3 project" };
-          }
-          try {
-            return { tag: "accepted", value: await startNewThread(projectRef) };
-          } catch (error) {
-            return {
-              tag: "refused",
-              code: "NEW_SESSION_FAILED",
-              message: error instanceof Error ? error.message : "The new session could not start.",
-            };
-          }
-        },
-      }),
+      runner.run(
+        workspaceId,
+        gateOnConnection({
+          label: "New session",
+          send: async () => {
+            const projectRef = parseScopedProjectKey(workspaceId);
+            if (projectRef === null) {
+              return { tag: "unavailable", reason: "this list entry is not a T3 project" };
+            }
+            try {
+              return { tag: "accepted", value: await startNewThread(projectRef) };
+            } catch (error) {
+              return {
+                tag: "refused",
+                code: "NEW_SESSION_FAILED",
+                message:
+                  error instanceof Error ? error.message : "The new session could not start.",
+              };
+            }
+          },
+        }),
+      ),
   };
 }

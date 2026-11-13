@@ -28,12 +28,6 @@ export function outcomeText(label: string, outcome: ActionOutcome<unknown>): Out
   switch (outcome.kind) {
     case "confirmed":
       if (outcome.refreshed) return { tone: "ok", text: `${label} done.` };
-      if (outcome.message !== undefined) {
-        return {
-          tone: "ok",
-          text: `${label} saved, but the list couldn't refresh (${outcome.message}).`,
-        };
-      }
       return {
         tone: "ok",
         text: `${label} sent; the list will show it when the backend reports it.`,
