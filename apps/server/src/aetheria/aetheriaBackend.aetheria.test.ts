@@ -30,6 +30,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { AetheriaBackendComposition } from "./backendComposition.ts";
 import * as Live from "./aetheriaBackend.ts";
+import { getSharedRegionRegistry } from "./regionsState.ts";
 
 const THREAD = "mcp:6f1c2d3e-0a4b-4c5d-8e9f-a1b2c3d4e5f6";
 const SESSION = "0197d3c0-1111-7000-8000-000000000001";
@@ -324,6 +325,47 @@ describe("the Backend layer", () => {
             }),
           ),
         );
+      }),
+  );
+
+  it.live(
+    "the shared region registry answers for as long as the Backend runs, survives a refused second build, and drains only when the Backend's scope closes (XC-7)",
+    () =>
+      Effect.gen(function* () {
+        const root = makeRoot();
+        const provided = Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials("cred-1")));
+        const principal = { subject: "alice", deviceSessionId: "device-1" };
+        const report = (
+          connection: ReturnType<ReturnType<typeof getSharedRegionRegistry>["openConnection"]>,
+          sequence: number,
+        ) => connection.report({ clientId: "client-alice-000000001", sequence, regions: [] });
+        let kept: ReturnType<ReturnType<typeof getSharedRegionRegistry>["openConnection"]>;
+        yield* Effect.scoped(
+          Layer.build(Live.makeLayer(root).pipe(provided)).pipe(
+            Effect.flatMap(() =>
+              Effect.gen(function* () {
+                // after startup, and again later, a connection opened on the shared registry is answered
+                kept = getSharedRegionRegistry().openConnection(principal);
+                expect(report(kept, 1)).toMatchObject({ ok: true });
+                yield* Effect.sleep("30 millis");
+                expect(report(kept, 2)).toMatchObject({ ok: true });
+                // a second build over the same state root is refused and must not drain the first Backend's registry
+                const second = yield* Effect.exit(
+                  Layer.build(Live.makeLayer(root).pipe(provided)).pipe(Effect.scoped),
+                );
+                expect(second._tag).toBe("Failure");
+                expect(report(kept, 3)).toMatchObject({ ok: true });
+                expect(getSharedRegionRegistry().stats()).toEqual({ connections: 1, clients: 1 });
+              }),
+            ),
+          ),
+        );
+        // the Backend's scope closed: its registry drained once, a handle that was kept is refused, and the next caller gets a fresh one
+        expect(report(kept!, 4)).toMatchObject({ ok: false, code: "REGIONS_UNAVAILABLE" });
+        expect(getSharedRegionRegistry().stats()).toEqual({ connections: 0, clients: 0 });
+        expect(report(getSharedRegionRegistry().openConnection(principal), 1)).toMatchObject({
+          ok: true,
+        });
       }),
   );
 

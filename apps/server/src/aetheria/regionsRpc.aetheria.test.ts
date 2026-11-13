@@ -21,6 +21,7 @@ import {
   type RegionDescriptor,
 } from "@t3tools/aetheria-contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -28,7 +29,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type * as Scope from "effect/Scope";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as RpcTest from "effect/rpc/RpcTest";
 import * as NodeFS from "node:fs";
@@ -39,8 +40,18 @@ import * as RpcAuthorization from "../auth/RpcAuthorization.ts";
 import { RPC_REQUIRED_SCOPES, requiredScopeForRpcMethod } from "../auth/RpcAuthorization.ts";
 import { AuthSessionRepository } from "../persistence/AuthSessions.ts";
 import { connectionActor } from "./humanControlRpc.ts";
-import { observeViewing, openRegionConnection, regionsRead, regionsReport } from "./regionsRpc.ts";
-import { createRegionRegistry, type RegionRegistry } from "./regionsState.ts";
+import {
+  observeViewing,
+  openRegionConnection,
+  openRegionConnectionIn,
+  regionsRead,
+  regionsReport,
+} from "./regionsRpc.ts";
+import {
+  createRegionRegistry,
+  type RegionConnection,
+  type RegionRegistry,
+} from "./regionsState.ts";
 
 const M = AETHERIA_WS_METHODS;
 type Session = { sessionId: string; scopes: ReadonlyArray<string> };
@@ -408,6 +419,73 @@ describe("the connection's lifetime", () => {
   );
 });
 
+/**
+ * M10 slice-2 defect (`regions-round-trip`, native run m10-slice2-g): every report and read answered REGIONS_UNAVAILABLE "the region registry is not running". Root cause: ws.ts builds each connection's handlers
+ * with `Effect.provide(layerWsRpc(...))` on an effect that RETURNS the handlers while the RPC server is forked in the request's own scope. `Effect.provide(layer)` builds the layer in a scope of its own and closes it
+ * when that effect completes (effect/internal/layer.ts `provideLayer` is `scopedWith`), i.e. right after the build and before the first call. A handle opened with `acquireRelease` inside that layer was therefore
+ * closed at once. These cases use that exact shape: a layer opens the handle, an effect returns it out of `Effect.provide`, and the call is made afterwards.
+ */
+describe("the connection handle lives as long as the connection, not as long as the handlers' layer build (M10 slice-2 defect)", () => {
+  const Handle = Context.Service<RegionConnection>("test/RegionConnectionHandle");
+  /** The handle as the handlers receive it: built by a layer, returned out of `Effect.provide`, used after, in the request's scope. */
+  const afterBuild = (
+    layerOf: (requestScope: Scope.Scope) => Layer.Layer<RegionConnection>,
+  ): Effect.Effect<RegionConnection, never, Scope.Scope> =>
+    Effect.gen(function* () {
+      const requestScope = yield* Scope.Scope;
+      return yield* Effect.service(Handle).pipe(Effect.provide(layerOf(requestScope)));
+    });
+
+  it.effect(
+    "a handle opened in the layer's own scope is closed once the layer is built (the defect, pinned)",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const registry = registryOf();
+          const actor = yield* actorOf();
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* afterBuild(() =>
+                Layer.effect(Handle)(openRegionConnection(actor, SUBJECT, registry)),
+              );
+              const result = yield* regionsReport(connection, actor, payload(1, "shell") as never);
+              expect(result).toMatchObject({ ok: false, code: "REGIONS_UNAVAILABLE" });
+            }),
+          );
+        }),
+      ),
+  );
+
+  it.effect(
+    "a handle bound to the request's scope answers after the build and is dropped when that scope closes",
+    () =>
+      withDevice(
+        Effect.gen(function* () {
+          const registry = registryOf();
+          const actor = yield* actorOf();
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* afterBuild((requestScope) =>
+                Layer.effect(Handle)(
+                  openRegionConnectionIn(requestScope, actor, SUBJECT, registry),
+                ),
+              );
+              const reported = decodeReport(
+                yield* regionsReport(connection, actor, payload(1, "shell") as never),
+              );
+              expect(reported.ok).toBe(true);
+              const read = decodeRead(yield* regionsRead(connection, actor, {} as never));
+              expect(read).toMatchObject({ ok: true, value: { client: { clientId: CLIENT } } });
+              expect(registry.stats()).toEqual({ connections: 1, clients: 1 });
+            }),
+          );
+          // the request's scope closed (the socket ended): the client is gone with the connection
+          expect(registry.stats()).toEqual({ connections: 0, clients: 0 });
+        }),
+      ),
+  );
+});
+
 describe("the viewed thread is observed from the connection's own subscription", () => {
   const viewingOf = (registry: RegionRegistry) =>
     registry.clientsFor({ subject: SUBJECT })[0]?.viewing;
@@ -515,9 +593,15 @@ describe("the seams are marked and wired in the T3 files (IP-58, IP-59, IP-60)",
         `${handler}(aetheriaRegionConnection, aetheriaActor, input)`,
       );
     }
+    // the handle is released with the REQUEST's scope: the layer's own scope closes right after the handlers are built (M10 slice-2 defect)
     expect(text).toMatch(
-      /AetheriaRegions\.openRegionConnection\(\s*aetheriaActor,\s*currentSession\.subject,?\s*\)/,
+      /AetheriaRegions\.openRegionConnectionIn\(\s*connectionScope,\s*aetheriaActor,\s*currentSession\.subject,?\s*\)/,
     );
+    expect(text).toMatch(/connectionScope = requestScope \?\? \(yield\* Scope\.Scope\)/);
+    expect(text).toMatch(
+      /const requestScope = yield\* Scope\.Scope;[\s\S]{0,200}RpcServer\.make\(/,
+    );
+    expect(text).toMatch(/readSettingsClient\(url\.value\),\s*requestScope,\s*\)/);
     const sub = text.indexOf("[ORCHESTRATION_V2_WS_METHODS.subscribeThread]");
     expect(sub).toBeGreaterThan(-1);
     expect(text.slice(sub, sub + 600)).toMatch(

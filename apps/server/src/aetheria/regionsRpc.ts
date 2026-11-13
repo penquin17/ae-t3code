@@ -16,6 +16,7 @@ import type {
 } from "@t3tools/aetheria-contracts";
 import type { ClientActor } from "@t3tools/aetheria-server";
 import * as Effect from "effect/Effect";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { standingOf } from "./humanControlRpc.ts";
@@ -37,7 +38,8 @@ const failure = (code: RegionsCode, detail: string): Failure => ({ ok: false, co
 
 /**
  * The connection's handle on the region state, bound to the authenticated principal: the subject T3 authenticated and the device session the actor was built from. Its finalizer drops the connection's client when the
- * connection ends (disconnect, or T3 closing it), so nothing stale answers a later query.
+ * scope it runs in closes, so nothing stale answers a later query. That scope must be the connection's: inside T3's per-connection handler layer use `openRegionConnectionIn`, because that layer's own scope closes
+ * as soon as the handlers are built (see below).
  */
 export const openRegionConnection = (
   actor: ClientActor,
@@ -47,6 +49,29 @@ export const openRegionConnection = (
   Effect.acquireRelease(
     Effect.sync(() => registry.openConnection({ subject, deviceSessionId: actor.clientSessionId })),
     (connection) => Effect.sync(() => connection.close()),
+  );
+
+/**
+ * The same handle, released when `connectionScope` closes instead of the scope the effect runs in. ws.ts builds each connection's handlers with `Effect.provide(layer)` on an effect that returns them while the
+ * RPC server is forked in the request's scope; `Effect.provide` closes the layer's scope when that effect completes, which is right after the build. The handle therefore belongs to the request's scope, the one
+ * that lasts as long as the socket: a handle released with the layer's scope was closed before its first call and every report answered REGIONS_UNAVAILABLE (M10 slice-2 `regions-round-trip`). The registry is
+ * taken when the connection opens, so a connection always reaches the live one and the Backend's drain closes it with the rest.
+ */
+export const openRegionConnectionIn = (
+  connectionScope: Scope.Scope,
+  actor: ClientActor,
+  subject: string,
+  registry: RegionRegistry = getSharedRegionRegistry(),
+) =>
+  Effect.sync(() =>
+    registry.openConnection({ subject, deviceSessionId: actor.clientSessionId }),
+  ).pipe(
+    Effect.tap((connection) =>
+      Scope.addFinalizer(
+        connectionScope,
+        Effect.sync(() => connection.close()),
+      ),
+    ),
   );
 
 /** Every call: the device session first, then the scope, then the work. A work that throws is `unavailable`: a report replaces a set, so nothing it did can be half-applied. */

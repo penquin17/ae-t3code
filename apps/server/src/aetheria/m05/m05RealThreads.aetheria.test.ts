@@ -123,6 +123,8 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
   const started: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
   const interrupted: string[] = [];
   const interruptCalls: { thread: string; turn: string }[] = [];
+  /** While `gate.holding` is true, `startTurn` is accepted (recorded in `started`) but its first `provider_turn.updated` is withheld, so T3 has not projected the provider turn: the window R2-F1 is about. */
+  const gate = { holding: false, held: [] as ProviderAdapter.ProviderAdapterV2TurnInput[] };
   const sessionOf = new Map<string, string>();
   const turnEvent = (
     turn: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -214,7 +216,13 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
           resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
           startTurn: (turn) =>
             Effect.sync(() => void started.push(turn)).pipe(
-              Effect.andThen(turnEvent(turn, "running")),
+              Effect.andThen(
+                Effect.suspend(() =>
+                  gate.holding
+                    ? Effect.sync(() => void gate.held.push(turn))
+                    : turnEvent(turn, "running"),
+                ),
+              ),
             ),
           steerTurn: () => Effect.void,
           interruptTurn: (request) =>
@@ -252,7 +260,13 @@ const scriptedProvider = Effect.fn("m05.scriptedProvider")(function* (name: stri
       if (turn === undefined) return yield* Effect.die(new Error(`no turn started on ${threadId}`));
       yield* turnEvent(turn, "completed");
     });
-  return { cwd, started, interrupted, interruptCalls, sessionOf, adapter, finish };
+  /** Stops holding and delivers the withheld first events, as a provider whose event reaches T3 late would. */
+  const release = Effect.suspend(() => {
+    gate.holding = false;
+    const held = gate.held.splice(0);
+    return Effect.forEach(held, (turn) => turnEvent(turn, "running"), { discard: true });
+  });
+  return { cwd, started, interrupted, interruptCalls, sessionOf, adapter, finish, gate, release };
 });
 
 type Script = Effect.Success<ReturnType<typeof scriptedProvider>>;
@@ -888,6 +902,71 @@ it.live(
         );
         // The root's own run was stopped by the same real thread.stop.
         assert.equal((yield* w.runOf(parent.threadId))?.status, "interrupted");
+        yield* Effect.promise(() => svc.stop());
+      }),
+    ),
+  300_000,
+);
+
+// ====================================================================================================================================== case 1b (R2-F1)
+it.live(
+  "case 1b (independent review 2, finding 1): Stop straight after spawn, while T3 has accepted the provider start but not yet projected either provider turn, still interrupts both children's provider turns",
+  () =>
+    world("cancel-tree-early", (w) =>
+      Effect.gen(function* () {
+        const svc = yield* Effect.promise(() => w.boot());
+        const parent = yield* w.mainThread(svc, "thread:m05-cancel-early", 1);
+        // The provider accepts each start but its first `provider_turn.updated` is withheld: T3's projection holds NO provider turn for either child, the window in which an interrupt
+        // used to settle the run "interrupted before its provider turn started" while the provider turn kept running. No readiness wait (`untilTurnsProjected`) is used on purpose.
+        w.script.gate.holding = true;
+        const first = String(
+          value(yield* Effect.promise(() => svc.call(parent, "children.spawn", spawnArgs())))
+            .childId,
+        );
+        const second = String(
+          value(yield* Effect.promise(() => svc.call(parent, "children.spawn", spawnArgs())))
+            .childId,
+        );
+        yield* w.until("both children's starts to reach the provider", () =>
+          [first, second].every((id) => w.script.started.some((t) => String(t.threadId) === id)),
+        );
+        for (const id of [first, second]) {
+          const projection = yield* w.orchestrator.getThreadProjection(ThreadId.make(id));
+          assert.equal(
+            projection.providerTurns.length,
+            0,
+            `${id} has no projected provider turn yet (the window under test)`,
+          );
+        }
+        const direct = svc.service.orchestration()?.direct();
+        assert.isDefined(direct);
+        const result = yield* Effect.promise(() =>
+          (
+            direct as unknown as {
+              cancelTree: (input: unknown) => Promise<{
+                ok: boolean;
+                value?: { rows: Array<{ childId: string; action: string }> };
+              }>;
+            }
+          ).cancelTree({ caller: { user: true }, args: { rootThreadId: parent.threadId } }),
+        );
+        assert.isTrue(result.ok, JSON.stringify(result));
+        yield* w.worker.drain();
+        // The provider's first events now reach T3, late, as they would from a real provider.
+        yield* w.script.release;
+        yield* w.until("both children's provider turns to be interrupted at the provider", () =>
+          [first, second].every((id) => w.script.interruptCalls.some((c) => c.thread === id)),
+        );
+        yield* w.worker.drain();
+        for (const id of [first, second]) {
+          const startedTurn = w.script.started.find((t) => String(t.threadId) === id);
+          assert.deepEqual(
+            w.script.interruptCalls.filter((c) => c.thread === id),
+            [{ thread: id, turn: `provider-turn:${startedTurn?.attemptId}` }],
+            `exactly one provider interrupt, for the started turn, on ${id}`,
+          );
+          assert.equal((yield* w.runOf(id))?.status, "interrupted");
+        }
         yield* Effect.promise(() => svc.stop());
       }),
     ),

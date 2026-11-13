@@ -1426,6 +1426,12 @@ export const layer: Layer.Layer<
                 const nativeChildTurn =
                   event.type === "provider_turn.updated" &&
                   event.providerTurn.providerThreadId !== input.providerThread.id;
+                // AETHERIA-IP:IP-62 begin
+                const firstRootTurnEvent =
+                  event.type === "provider_turn.updated" &&
+                  !nativeChildTurn &&
+                  firstRootProviderTurnId === undefined;
+                // AETHERIA-IP:IP-62 end
                 if (event.type === "provider_turn.updated" && !nativeChildTurn) {
                   firstRootProviderTurnId ??= event.providerTurn.id;
                 }
@@ -1477,6 +1483,38 @@ export const layer: Layer.Layer<
                 ) {
                   yield* Ref.set(providerThreadOwnerLost, true);
                 }
+                // AETHERIA-IP:IP-62 begin a Stop that settled this run before its provider turn was projected could not name the turn, so the provider turn it left running is
+                // interrupted here, by the id the provider has just reported. Only the attempt's first root turn qualifies, and only once the run is no longer current; a later or
+                // continuation root turn, or a current run, is untouched. After the ingest write, so a Stop committing during the ingest is covered as well.
+                if (
+                  firstRootTurnEvent &&
+                  event.type === "provider_turn.updated" &&
+                  !isTerminalProviderTurnStatus(event.providerTurn.status) &&
+                  input.shouldFinalizeRun !== undefined
+                ) {
+                  const runStillCurrent = yield* input
+                    .shouldFinalizeRun()
+                    .pipe(Effect.catchCause(() => Effect.succeed(true)));
+                  if (!runStillCurrent) {
+                    yield* input.session
+                      .interruptTurn({
+                        providerThread: yield* Ref.get(latestProviderThread),
+                        providerTurnId: event.providerTurn.id,
+                        requestRuntimeRestart: true,
+                      })
+                      .pipe(
+                        Effect.catchCauseIf(
+                          (cause) => !Cause.hasInterruptsOnly(cause),
+                          (cause) =>
+                            Effect.logWarning(
+                              "orchestration V2 failed to interrupt a provider turn that started after Stop",
+                              { runId: input.run.id, cause },
+                            ),
+                        ),
+                      );
+                  }
+                }
+                // AETHERIA-IP:IP-62 end
               } else if (
                 event.type === "turn_item.updated" &&
                 (event.turnItem.type === "assistant_message" ||

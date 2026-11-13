@@ -36,6 +36,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
@@ -1369,6 +1370,8 @@ export const layerWsRpc = (
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
   reportProfiles: ServerBrowser.ProfileReporter,
   settingsClient: { readonly secretReferences: boolean },
+  // AETHERIA-IP:IP-60 the scope that lasts as long as the socket (the request's); defaults to the layer's own, which `Effect.provide` closes right after the build
+  requestScope?: Scope.Scope,
 ) =>
   Layer.effectContext(
     Effect.gen(function* () {
@@ -1489,8 +1492,11 @@ export const layerWsRpc = (
       const aetheriaBackend = yield* Effect.serviceOption(AetheriaBackend);
       // AETHERIA-IP:IP-22 the connection's actor (session id, granted scopes, authentication time); never read from a payload
       const aetheriaActor = yield* AetheriaHumanControl.connectionActor(currentSession);
+      const connectionScope = requestScope ?? (yield* Scope.Scope);
       // AETHERIA-IP:IP-60 the connection's handle on the region registry, bound to the authenticated principal; its finalizer drops the connection's client on disconnect
-      const aetheriaRegionConnection = yield* AetheriaRegions.openRegionConnection(
+      // It belongs to the request's scope (`connectionScope`), not to this layer's: `Effect.provide` closes the layer's scope as soon as the handlers are built
+      const aetheriaRegionConnection = yield* AetheriaRegions.openRegionConnectionIn(
+        connectionScope,
         aetheriaActor,
         currentSession.subject,
       );
@@ -3566,6 +3572,8 @@ export const layer = Layer.unwrap(
         const clientAnalyticsProps = readClientAnalyticsProps(request);
         yield* analytics.recordOwners(readClientOwners(request), "client");
         const reportProfiles = yield* serverBrowser.profileReporter;
+        // AETHERIA-IP:IP-60 the scope the RPC server is forked into below: it lasts as long as the socket, which the handlers' layer scope does not
+        const requestScope = yield* Scope.Scope;
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
@@ -3601,6 +3609,7 @@ export const layer = Layer.unwrap(
               serverBrowser,
               reportProfiles,
               readSettingsClient(url.value),
+              requestScope,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Handler-context reporters see only request defects, not server-wide defects.
