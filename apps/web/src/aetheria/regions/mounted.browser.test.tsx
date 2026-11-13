@@ -30,7 +30,7 @@ import { createActionRunner } from "../core/outcome";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useTerminalUiStateStore } from "~/terminalUiStateStore";
 import { mountRoute, prepare, THREAD_PATH } from "../harness";
-import { DECLARED_REGION_IDS, getAppRegionRegistry, REGION_DECLARATIONS } from "./index";
+import { getAppRegionRegistry, manifestJson, REGION_DECLARATIONS } from "./index";
 
 const THREAD_COUNT = 40;
 installFakeEnvironment([
@@ -428,7 +428,11 @@ describe("the manifest against the page", () => {
       await using _screen = app.screen;
       for (const id of mountedIds()) union.add(id);
     }
-    expect([...union].toSorted()).toEqual([...DECLARED_REGION_IDS].toSorted());
+    // The manifest is the build's own: the text `emitManifest.mjs` writes to region-manifest.json beside the client (emitManifest.test.ts shows the script writes exactly this), read back as the file is read.
+    const manifest = JSON.parse(manifestJson(REGION_DECLARATIONS)) as {
+      regions: Array<{ id: string }>;
+    };
+    expect([...union].toSorted()).toEqual(manifest.regions.map((region) => region.id));
     // Every registered descriptor is the declared one, field for field.
     const declared = new Map(REGION_DECLARATIONS.map((d) => [d.id, d] as const));
     const app = await openRoute(controlPath(nextThread()), "control.interactions");

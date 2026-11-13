@@ -295,3 +295,102 @@ describe("stopping", () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+// A new connection to the Backend starts with no client of ours (the Backend drops the client when the old connection closes), and an unchanged page sends nothing by itself. `resend` is how the page
+// says "the connection is new": one whole-set report, on the same client id with a sequence that still rises, so the Backend's same-device takeover of a client it has not dropped yet accepts it.
+describe("a new connection", () => {
+  it("sends the whole set once more, on the same client id with a rising sequence, though nothing on the page changed", async () => {
+    const { calls, registry, sync } = setup(async (_p, n) => held(n));
+    registry.register(shell, () => ({ props: {}, state: {} }));
+    sync.start();
+    await tick(50);
+    expect(sync.status().state).toBe("idle");
+    sync.resend();
+    await tick(50);
+    expect(calls.map((c) => [c.clientId, c.sequence])).toEqual([
+      [CLIENT, 1],
+      [CLIENT, 2],
+    ]);
+    expect(calls[1]!.regions).toEqual([{ descriptor: shell, visible: true }]);
+    await tick(10_000);
+    expect(calls).toHaveLength(2);
+    expect(sync.status()).toEqual({ state: "idle", ackedSequence: 2 });
+    sync.stop();
+  });
+
+  it("sends one report for several signals close together", async () => {
+    const { calls, sync } = setup(async (_p, n) => held(n));
+    sync.start();
+    await tick(50);
+    sync.resend();
+    sync.resend();
+    await tick(50);
+    expect(calls.map((c) => c.sequence)).toEqual([1, 2]);
+    sync.stop();
+  });
+
+  it("gives up on a call the old connection never answered, and a late reply to it changes nothing", async () => {
+    const answers: Array<(reply: RegionsReply) => void> = [];
+    const { calls, sync } = setup((_p, n) =>
+      n === 1
+        ? new Promise<RegionsReply>((resolve) => answers.push(resolve))
+        : Promise.resolve(held(n)),
+    );
+    sync.start();
+    await tick(50);
+    expect(sync.status().state).toBe("syncing");
+    sync.resend();
+    await tick(50);
+    expect(calls.map((c) => c.sequence)).toEqual([1, 2]);
+    expect(sync.status()).toEqual({ state: "idle", ackedSequence: 2 });
+    answers[0]!(held(1));
+    await tick(0);
+    expect(sync.status()).toEqual({ state: "idle", ackedSequence: 2 });
+    sync.stop();
+  });
+
+  it("starts over after a failure or a refusal, since the new connection may be allowed what the old one was not", async () => {
+    let refuse = true;
+    const { calls, sync } = setup(async (_p, n) =>
+      refuse ? { ok: false, code: "REGIONS_NOT_AUTHORIZED" } : held(n),
+    );
+    sync.start();
+    await tick(50);
+    expect(sync.status()).toMatchObject({ state: "refused", lastCode: "REGIONS_NOT_AUTHORIZED" });
+    refuse = false;
+    sync.resend();
+    await tick(50);
+    expect(calls.map((c) => c.sequence)).toEqual([1, 2]);
+    expect(sync.status()).toEqual({ state: "idle", ackedSequence: 2 });
+    sync.stop();
+  });
+
+  it("cuts a wait for a retry short: the new connection is tried now", async () => {
+    let fail = true;
+    const { calls, sync } = setup(async (_p, n) =>
+      fail ? { ok: false, code: "REGIONS_UNAVAILABLE" } : held(n),
+    );
+    sync.start();
+    await tick(50);
+    expect(sync.status().state).toBe("waiting");
+    fail = false;
+    sync.resend();
+    await tick(50);
+    expect(calls.map((c) => c.sequence)).toEqual([1, 2]);
+    expect(sync.status()).toEqual({ state: "idle", ackedSequence: 2 });
+    sync.stop();
+  });
+
+  it("sends nothing before start or after stop", async () => {
+    const { calls, sync } = setup(async (_p, n) => held(n));
+    sync.resend();
+    await tick(500);
+    expect(calls).toHaveLength(0);
+    sync.start();
+    await tick(50);
+    sync.stop();
+    sync.resend();
+    await tick(500);
+    expect(calls).toHaveLength(1);
+  });
+});

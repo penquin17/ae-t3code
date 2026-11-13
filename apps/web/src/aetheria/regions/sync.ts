@@ -33,6 +33,12 @@ export interface RegionSyncDeps {
 
 export interface RegionSync {
   start(): void;
+  /**
+   * Says the connection is new. The Backend drops a client when its connection closes, and a page that did not change sends nothing, so the new connection would never hear of it: this sends the whole set once
+   * more, on the same client id and a sequence that still rises (the Backend lets the same device take over a client it has not dropped yet, and takes any sequence for one it has). A call the old connection never
+   * answered is given up, a wait for a retry is cut short, and a failure or refusal starts over. Does nothing before `start` and after `stop`.
+   */
+  resend(): void;
   stop(): void;
   status(): SyncStatus;
 }
@@ -165,6 +171,17 @@ export function createRegionSync(deps: RegionSyncDeps): RegionSync {
         dirty = true;
         request();
       });
+      dirty = true;
+      request();
+    },
+    resend() {
+      if (!started) return;
+      settled();
+      clearTimeout(backoff);
+      backoff = undefined;
+      attempts = 0;
+      lastCode = undefined;
+      if (state === "refused" || state === "failed") state = "idle";
       dirty = true;
       request();
     },
