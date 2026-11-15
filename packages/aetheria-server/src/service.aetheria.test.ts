@@ -316,6 +316,63 @@ describe("the state-root owner lock (user decision F1, step 29)", () => {
   });
 });
 
+// Review 9, F1. A start that failed after the orchestration module began boot keeps the owner lock unless its rolled-back cleanup is positively clean: work that did not end may still write.
+// Boundary: the real Backend service (owner lock, ordered start, the runtime's rollback of a failed start) with the orchestration service replaced by a scripted one whose start fails and whose
+// drain reports what the test names. It shows what the Backend does with that report; that the real factory reports its unended boot cleanup is orchestrationFactory.aetheria.test.ts's.
+describe("a failed start keeps the owner lock unless its cleanup is clean (review 9, F1)", () => {
+  const lockOf = (root: string): string => NodePath.join(root, OWNER_LOCK_FILE);
+  const failingBoot = (stillLive: readonly string[]) => {
+    const stateRoot = rootOf();
+    const made = createAetheriaBackendService({
+      stateRoot,
+      credentialOf: () => undefined,
+      projectRootOf: (folder) => folder,
+      childThreads: {} as never,
+      orchestrationFactory: () => ({
+        start: async () => ({ ok: false, code: "BOOT_RECONCILIATION_FAILED" }),
+        handle: async () => ({ ok: false, code: "ORCHESTRATION_UNAVAILABLE" }) as never,
+        drain: async () => ({ stopped: [], stillLive }),
+        direct: () => undefined,
+      }),
+    });
+    if (made.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(made.faults)}`);
+    return { stateRoot, service: made.service };
+  };
+  const successor = (stateRoot: string) => {
+    const next = createAetheriaBackendService({
+      stateRoot,
+      credentialOf: () => undefined,
+      projectRootOf: (folder) => folder,
+    });
+    if (next.outcome !== "prepared") throw new Error("must prepare");
+    return next.service;
+  };
+
+  it("keeps the lock when the failed boot's cleanup did not end, and refuses a successor over the same root", async () => {
+    const w = failingBoot(["wakes"]);
+    const result = await w.service.start();
+    expect(result.outcome).toBe("failed");
+    expect(w.service.status().disposal).toMatchObject({ ok: false, stillLive: 1 });
+    expect(NodeFS.existsSync(lockOf(w.stateRoot))).toBe(true);
+    expect(await successor(w.stateRoot).start()).toMatchObject({
+      outcome: "refused",
+      faults: [{ code: "state-root-owned" }],
+    });
+    // The process is still the owner: an unclean dispose keeps the lock too.
+    expect((await w.service.dispose("teardown")).ok).toBe(false);
+    expect(NodeFS.existsSync(lockOf(w.stateRoot))).toBe(true);
+  });
+
+  it("releases the lock when the failed boot's cleanup is clean, so a successor can take the root", async () => {
+    const w = failingBoot([]);
+    expect((await w.service.start()).outcome).toBe("failed");
+    expect(NodeFS.existsSync(lockOf(w.stateRoot))).toBe(false);
+    const next = successor(w.stateRoot);
+    expect((await next.start()).outcome).toBe("started");
+    await next.dispose("done");
+  });
+});
+
 // M09 Plan step 4: the providers module is selected explicitly through the service; production is the default and a fixture is refused there.
 describe("the providers module in the assembly", () => {
   const ROUTE = { provider: "anthropic", model: "claude-sonnet-x" };

@@ -506,7 +506,9 @@ export function createAetheriaBackendService(
         const result = await backend.start();
         // Sessions this Backend cannot show to be live are closed before any operation is answered for them (a failed board is retried at first use).
         if (result.outcome === "started") await board.reconcileAtStart();
-        else held.release();
+        // A start that did not complete releases the lock only when nothing can still be writing: refused before any module was called, or rolled back with a clean disposal report. A
+        // rollback that left work live (or could not tell) keeps the lock, as an unclean dispose does, so a successor waits for the proven-dead takeover (review 9, F1).
+        else if (result.outcome === "refused" || result.disposal.ok) held.release();
         return result;
       })();
       return started;

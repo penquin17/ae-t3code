@@ -226,6 +226,17 @@ export function createOrchestrationFactory(
       admit: <T>(name: string, call: () => Promise<T>): Promise<T> | undefined =>
         draining || running === undefined ? undefined : track(name, call()),
     };
+    /**
+     * Review 9, F1: a boot refused while its own cleanup (the wake drain, the children stop) did not end in time. That work may still write, so the stores stay open and this record
+     * outlives `start`: the next `drain` names the owners in `stillLive`, re-attempts each join under its bound, and closes the stores only once every one ended.
+     */
+    let failedBoot:
+      | {
+          readonly unended: string[];
+          readonly joins: Readonly<Record<string, () => Promise<unknown> | undefined>>;
+          readonly close: () => void;
+        }
+      | undefined;
     /** The last lineage listing boot read, to subscribe the roots of the children it found. */
     let bootThreads: readonly ChildLineageThread[] = [];
 
@@ -276,6 +287,13 @@ export function createOrchestrationFactory(
 
     const start = async (): ReturnType<OrchestrationService["start"]> => {
       if (running !== undefined) return { ok: true };
+      // A failed boot whose cleanup is still live holds the stores open; a new start over them would race that work.
+      if (failedBoot !== undefined)
+        return {
+          ok: false,
+          code: "ORCHESTRATION_UNAVAILABLE",
+          detail: "an earlier failed start is still cleaning up; drain before starting again",
+        };
       const opened = openOrchestrationStore(nodeStoreDeps(), { stateRoot: deps.stateRoot });
       if (!opened.ok) return { ok: false, code: opened.code, detail: opened.reason };
       const { store } = opened;
@@ -575,13 +593,21 @@ export function createOrchestrationFactory(
             return false;
           }
         };
-        const ended = [await ends(() => wakes.drain())];
-        ended.push(await ends(() => children.stop()));
-        // Work that did not end in time may still be writing: the stores stay open (as in the drain) and boot stays refused.
-        if (ended.every(Boolean)) {
+        const unended: string[] = [];
+        if (!(await ends(() => wakes.drain()))) unended.push("wakes");
+        if (!(await ends(() => children.stop()))) unended.push("children");
+        const closeStores = (): void => {
           jobs.close();
           store.close();
-        }
+        };
+        // Work that did not end in time may still be writing: the stores stay open (as in the drain) and boot stays refused. The drain is told, so the Backend keeps its owner lock.
+        if (unended.length === 0) closeStores();
+        else
+          failedBoot = {
+            unended,
+            joins: { wakes: () => wakes.drain(), children: () => children.stop() },
+            close: closeStores,
+          };
         return { ok: false, code: "BOOT_RECONCILIATION_FAILED", detail: message(error) };
       }
       // Step 19a: terminal job output is swept at boot and then once per interval (unaccepted parameters). The sweep walks the registry's records only: an adopted, terminal, collected job older
@@ -872,6 +898,27 @@ export function createOrchestrationFactory(
         if (joined.length === 0 && settled !== "timeout") {
           state.jobs.close();
           state.store.close();
+        }
+      }
+      // A refused boot's cleanup that had not ended is still this service's live work: try each join again, and name the ones that still do not end.
+      const refused = failedBoot;
+      if (refused !== undefined) {
+        const remaining: string[] = [];
+        for (const name of refused.unended) {
+          const join = refused.joins[name];
+          let ended = false;
+          try {
+            ended = join !== undefined && (await endsWithinBound(join));
+          } catch {
+            // A stop that throws is not an ended stop.
+          }
+          if (!ended) remaining.push(name);
+        }
+        refused.unended.splice(0, refused.unended.length, ...remaining);
+        stillLive.push(...remaining);
+        if (remaining.length === 0) {
+          refused.close();
+          failedBoot = undefined;
         }
       }
       return { stopped: [], stillLive };

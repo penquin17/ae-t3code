@@ -2225,7 +2225,9 @@ describe("drain", () => {
   // Boundary: the factory's own boot over the real archive services and a real job record left pending by an earlier boot; the only fault is the root watch (`ChildService.watch`) throwing
   // AFTER boot scheduled the pending completion wake. It shows the failed boot ends the wake and the registry listener before it stops the children and closes the stores, in the drain's
   // order, and that a wake that will not end in time keeps both stores open and boot refused. It does NOT show the Backend's retry of a refused boot.
-  async function failedBootOver(stalledWakes: boolean) {
+  async function failedBootOver(stalledWakes: boolean, later?: "stalled" | "recovered") {
+    // R9-F1: `later` runs the factory's drain after the refusal; "recovered" lets the stalled wake end first.
+    let stalledNow = stalledWakes;
     const w = world();
     w.fake.activity.set(CALLER_THREAD, "idle");
     const first = await started(w, callerOk, {
@@ -2297,7 +2299,7 @@ describe("drain", () => {
             },
             drain() {
               order.push("wakes.drain");
-              return stalledWakes ? NEVER() : wakes.drain();
+              return stalledNow ? NEVER() : wakes.drain();
             },
           };
         },
@@ -2335,7 +2337,17 @@ describe("drain", () => {
       const timers = vi.getTimerCount();
       await vi.advanceTimersByTimeAsync(600_000);
       const toOwner = second.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD).length;
-      return { beforeBound, result, order, timers, toOwner };
+      let drained: Awaited<ReturnType<typeof service.drain>> | undefined;
+      const closedBeforeDrain = order.filter((entry) => entry.startsWith("close:"));
+      // A second start while the failed boot's cleanup is still live is refused, opening nothing.
+      const restart = later === "stalled" ? await service.start() : undefined;
+      if (later !== undefined) {
+        stalledNow = later === "stalled";
+        void service.drain().then((r) => (drained = r));
+        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      return { beforeBound, result, order, timers, toOwner, drained, closedBeforeDrain, restart };
     } finally {
       vi.useRealTimers();
       vi.doUnmock("./library.ts");
@@ -2366,6 +2378,33 @@ describe("drain", () => {
     expect(order).toContain("registry.unsubscribe");
     expect(order).toContain("wakes.drain");
     expect(order.some((entry) => entry.startsWith("close:"))).toBe(false);
+  });
+
+  // Review 9, F1. The refused boot never became `running`, but its cleanup that did not end is still live work: the registration's later drain must name it (the Backend keeps its owner lock
+  // for a non-empty `stillLive`), and may re-attempt the bounded join. Boundary: the factory's start then drain over the real archive services; the Backend's lock is service.aetheria.test.ts's.
+  it("a drain after a boot refused with a wake drain that never settled names the wakes in stillLive and keeps both stores open", async () => {
+    const { result, drained, order, restart } = await failedBootOver(true, "stalled");
+    expect(result).toMatchObject({ ok: false, code: "BOOT_RECONCILIATION_FAILED" });
+    expect(restart).toMatchObject({ ok: false, code: "ORCHESTRATION_UNAVAILABLE" });
+    expect(drained).toEqual({ stopped: [], stillLive: ["wakes"] });
+    expect(order.some((entry) => entry.startsWith("close:"))).toBe(false);
+  });
+
+  it("a drain after such a boot re-attempts the join and, once it ends, reports clean and closes both stores", async () => {
+    const { result, drained, order, closedBeforeDrain } = await failedBootOver(true, "recovered");
+    expect(result).toMatchObject({ ok: false, code: "BOOT_RECONCILIATION_FAILED" });
+    expect(closedBeforeDrain).toEqual([]);
+    expect(drained).toEqual({ stopped: [], stillLive: [] });
+    expect(order.filter((entry) => entry.startsWith("close:")).sort()).toEqual([
+      "close:jobs",
+      "close:orchestration",
+    ]);
+  });
+
+  it("a drain after a boot whose cleanup ended reports clean (the stores were already closed by the boot)", async () => {
+    const { drained, order } = await failedBootOver(false, "recovered");
+    expect(drained).toEqual({ stopped: [], stillLive: [] });
+    expect(order.filter((entry) => entry.startsWith("close:"))).toHaveLength(2);
   });
 
   // M05 drain hardening. Each of the three joins below calls into T3/M09 work (outbox deliveries, result reads, availability consults) that can hang; one stuck promise must not
