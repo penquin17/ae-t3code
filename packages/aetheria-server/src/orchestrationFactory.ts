@@ -170,6 +170,7 @@ interface Running {
   /** The direct Backend API: the children service's own calls plus the user's job and outbox reads. */
   readonly direct: OrchestrationDirectApi;
   readonly watchers: Map<string, { unsubscribe(): void }>;
+  readonly unsubscribeJobCompletionListener: () => void;
   readonly notifyLost: (jobId: string, boot: boolean) => Promise<void>;
   /** Step 19a: the terminal-output retention sweeps, started once boot has succeeded and stopped first at drain. */
   readonly sweeps: { runner?: ReturnType<typeof startRetentionSweeps> };
@@ -395,7 +396,7 @@ export function createOrchestrationFactory(
         },
       });
       // A notice queued for an owner (an adopted job's exit) schedules its one coalesced delivery.
-      registry.onChange((job) => {
+      const unsubscribeJobCompletionListener = registry.onChange((job) => {
         for (const entry of job.outbox)
           if (
             entry.kind === "job-completion" &&
@@ -447,6 +448,7 @@ export function createOrchestrationFactory(
         children,
         direct: Object.freeze({ ...children, ...userJobs, ...userOutbox }),
         watchers,
+        unsubscribeJobCompletionListener,
         notifyLost,
         sweeps: {},
       };
@@ -800,6 +802,7 @@ export function createOrchestrationFactory(
         state.watchers.clear();
         // The sweep first: it writes job records, so it must end before the stores close.
         await state.sweeps.runner?.stop();
+        state.unsubscribeJobCompletionListener();
         await state.wakes.drain();
         // Review 2, F3: the restart-notice retries end here (timers cancelled, the one in flight joined), so nothing delivers or writes a child record once the stores close.
         await state.children.stop();

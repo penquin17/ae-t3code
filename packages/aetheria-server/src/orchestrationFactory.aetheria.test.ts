@@ -1933,6 +1933,61 @@ describe("drain", () => {
     await next.service.drain();
   });
 
+  // PENDING THE RE-STAMP: this factory test loads its fork's installed orchestration archive.
+  it("unsubscribes the job-completion listener before draining wakes", async () => {
+    const w = world();
+    const order: string[] = [];
+    let listenerIndex = 0;
+    vi.resetModules();
+    vi.doMock("./library.ts", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./library.ts")>();
+      return {
+        ...actual,
+        createJobRegistry: (...args: Parameters<typeof actual.createJobRegistry>) => {
+          const registry = actual.createJobRegistry(...args);
+          return {
+            ...registry,
+            onChange(listener: Parameters<typeof registry.onChange>[0]) {
+              const index = listenerIndex++;
+              const unsubscribe = registry.onChange(listener);
+              return () => {
+                order.push(`registry.unsubscribe:${index}`);
+                unsubscribe();
+              };
+            },
+          };
+        },
+        createJobWakes: (...args: Parameters<typeof actual.createJobWakes>) => {
+          const wakes = actual.createJobWakes(...args);
+          return {
+            ...wakes,
+            async drain() {
+              order.push("wakes.drain");
+              await wakes.drain();
+            },
+          };
+        },
+      };
+    });
+    let dispose: (() => Promise<unknown>) | undefined;
+    try {
+      const { createOrchestrationFactory: isolatedFactory } =
+        await import("./orchestrationFactory.ts");
+      const service = isolatedFactory({ callerContext: callerOk })(w.deps);
+      dispose = () => service.drain();
+      expect(await service.start()).toEqual({ ok: true });
+      await service.drain();
+      expect(order).toEqual(["registry.unsubscribe:0", "wakes.drain"]);
+    } finally {
+      try {
+        await dispose?.();
+      } finally {
+        vi.doUnmock("./library.ts");
+        vi.resetModules();
+      }
+    }
+  });
+
   // Step 20: disposal with managed jobs in flight. The helpers are local: the job-output describe's own are not in scope here.
   const RUN_D = "0197d3c0-aaaa-4000-8000-00000000d15d";
   const hostD = () => ({
