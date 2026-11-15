@@ -14,6 +14,7 @@ import { GoalsProvider } from "./goals/GoalsProvider";
 import { JobsPanel } from "./jobs/JobsPanel";
 import { cardClass, mutedClass } from "./parts";
 import { UsagePanel } from "./usage/UsagePanel";
+import { WorkflowsProvider } from "./workflows/WorkflowsProvider";
 
 /** The panels that follow the root's interactions; the goal card reads the page's goal view when it has one, and says so when it has none. */
 function Panels({
@@ -67,8 +68,10 @@ export function ControlPage({
             environmentId={environmentId}
             rootSessionId={binding.value}
           >
-            <ControlPanel environmentId={environmentId} rootSessionId={binding.value} />
-            <Panels environmentId={environmentId} threadId={threadId} />
+            <WorkflowsProvider environmentId={environmentId} rootSessionId={binding.value}>
+              <ControlPanel environmentId={environmentId} rootSessionId={binding.value} />
+              <Panels environmentId={environmentId} threadId={threadId} />
+            </WorkflowsProvider>
           </GoalsProvider>
         ) : (
           <>

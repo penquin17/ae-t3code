@@ -145,7 +145,7 @@ export const REGION = {
     "control.goals",
     "panel",
     "control",
-    "The goal for this session and its one-click Re-arm",
+    "The goal for this session, its one-click Re-arm, and the session's workflow runs with a Cancel for each running run",
     { tokens: CARDS },
   ),
   deliverables: region(

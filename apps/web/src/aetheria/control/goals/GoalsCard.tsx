@@ -1,5 +1,6 @@
 // The goal card (M07 Plan step 18, D24, C8, XC-23): the Backend's goal for this root as the last read shows it, with the person's one-click Re-arm. It holds no copy of backend state beyond the last read, which it
-// marks stale when the connection ends; nothing here arms a goal except the Re-arm the Backend accepted and a read-back showed. It replaces M10's static "not built yet" statement.
+// marks stale when the connection ends; nothing here arms a goal except the Re-arm the Backend accepted and a read-back showed. It replaces M10's static "not built yet" statement. The root's workflow runs
+// and their Cancel (`../workflows/`, M07 Plan step 29) are shown at its foot, where the static "runs are not shown yet" line was.
 import { useId, useRef } from "react";
 
 import { Alert, AlertDescription } from "../../../components/ui/alert";
@@ -7,6 +8,7 @@ import { REGION } from "../../regions/declarations";
 import { RefusalNotice } from "../../refusals/RefusalNotice";
 import { useRegion } from "../../regions/useRegion";
 import { Heading, RawText, cardClass, mutedClass } from "../parts";
+import { WorkflowRuns } from "../workflows/WorkflowRuns";
 import { useGoalsHandle } from "./GoalsProvider";
 import { RearmButton, RearmStatus } from "./RearmButton";
 import type { GoalView } from "./reply";
@@ -130,7 +132,7 @@ function GoalsCardBody({ handle }: { readonly handle: GoalsHandle }) {
         <GoalBody goal={goal} handle={handle} offerRearm={view.status === "live"} />
       )}
       <RearmStatus handle={handle} />
-      <p className={mutedClass}>Workflow runs are not shown on this page yet.</p>
+      <WorkflowRuns />
     </section>
   );
 }

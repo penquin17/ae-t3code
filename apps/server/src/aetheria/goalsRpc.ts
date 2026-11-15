@@ -20,7 +20,8 @@
 // record. The stream polls the service at `GOAL_POLL_MS`, re-checks the device session, the scope and the root access at every poll, and ends when any of them fails, when the service is replaced (a restart) or when the
 // Backend drains. A client that wants no gap subscribes first and then reads the snapshot: the baseline is taken at subscription, and any change after it arrives as a higher version.
 //
-// Workflow runs. The workflow Backend has not landed (M07 sub-phase 5), so both workflow methods run the same checks and then answer `WORKFLOWS_UNAVAILABLE`, naming that; the codec is final.
+// Workflow runs (M07 steps 26, 28 and 29). Both workflow methods run the same checks, then call the Backend's run service (`workflows()`): `runs` lists the root's runs (an unreadable record is counted, never dropped);
+// `cancel` is scoped to the ONE run named under a root the connection may reach, and a run of another root reads as absent. A cancel that did not finish every step is `WORKFLOWS_OUTCOME_UNKNOWN`.
 import {
   GoalChangeEvent,
   GoalClearResult,
@@ -50,7 +51,10 @@ import * as Stream from "effect/Stream";
 import { standingOf } from "./humanControlRpc.ts";
 import { OPERATE_SCOPE, READ_SCOPE, type GateScope } from "./rootGate.ts";
 
-type Service = Pick<AetheriaBackendService, "interactions" | "identityKind" | "goals">;
+type Service = Pick<
+  AetheriaBackendService,
+  "interactions" | "identityKind" | "goals" | "workflows"
+>;
 export type Backend = Option.Option<Service>;
 type GoalService = NonNullable<ReturnType<AetheriaBackendService["goals"]>>;
 
@@ -467,11 +471,35 @@ export const goalChanges = (
     ),
   );
 
-// ---------------------------------------------------------------------------------------------- workflow runs (the workflow Backend has not landed)
+// ---------------------------------------------------------------------------------------------- workflow runs (the Backend's run service over the one ledger and M05)
 
-const WORKFLOWS_NOT_CONNECTED =
-  "the workflow runs are not connected yet (M07 sub-phase 5); the contract is final";
+type RunService = NonNullable<ReturnType<AetheriaBackendService["workflows"]>>;
+const runsTrackers = new WeakMap<RunService, Map<string, Tracker>>();
 
+/** The runs version, as for goals: per service instance and root, a counter that rises each time the list differs from the last one this process saw (starting from the process start time). */
+const observeRuns = (service: RunService, root: string, view: unknown): number => {
+  let roots = runsTrackers.get(service);
+  if (roots === undefined) {
+    roots = new Map();
+    runsTrackers.set(service, roots);
+  }
+  const fingerprint = JSON.stringify(view);
+  const seen = roots.get(root);
+  if (seen === undefined) {
+    roots.set(root, { fingerprint, version: VERSION_BASE });
+    return VERSION_BASE;
+  }
+  if (seen.fingerprint !== fingerprint) {
+    seen.fingerprint = fingerprint;
+    seen.version += 1;
+  }
+  return seen.version;
+};
+
+const runsOf = (opened: Opened): RunService | undefined => opened.service.workflows();
+const WORKFLOWS_NOT_RUNNING = "the workflow module is not running";
+
+/** The root's runs, newest first. A record that cannot be read is counted in `unreadable`, never dropped; a service that is not running is unavailable, never an empty list. */
 export const workflowRuns = (
   backend: Backend,
   actor: ClientActor,
@@ -483,10 +511,30 @@ export const workflowRuns = (
     READ_SCOPE,
     payload.rootSessionId,
     WORKFLOW_CODES,
-    async () => fail("WORKFLOWS_UNAVAILABLE", `${WORKFLOWS_NOT_CONNECTED}; nothing was read`),
+    async (opened): Promise<WorkflowRunsResult | Failure<"WORKFLOWS_UNAVAILABLE">> => {
+      const runs = runsOf(opened);
+      if (runs === undefined)
+        return fail("WORKFLOWS_UNAVAILABLE", `${WORKFLOWS_NOT_RUNNING}; nothing was read`);
+      const listed = runs.list(opened.root);
+      if (!listed.ok)
+        return fail("WORKFLOWS_UNAVAILABLE", `${listed.detail ?? listed.code}; nothing was read`);
+      return asRuns({
+        ok: true,
+        value: {
+          runs: listed.runs,
+          version: observeRuns(runs, opened.root, listed),
+          ...(listed.unreadable > 0 ? { unreadable: listed.unreadable } : {}),
+        },
+      });
+    },
     () => fail("WORKFLOWS_UNAVAILABLE", "the workflow read failed; nothing was read"),
   ).pipe(Effect.map((reply) => asRuns(reply)));
 
+/**
+ * One run's cancel, for exactly the run the person named under the root the connection may reach. The Backend asks, kills that run's job and closes that run's children; it does not write the terminal
+ * fact, the run's own controller does, so a successful reply is a run that is `running` with `cancelRequested` or already ended. Any step that did not finish is `WORKFLOWS_OUTCOME_UNKNOWN`: the cancel
+ * was asked for but is not complete, so the client reads the runs and does not resend (a repeat is safe and retries exactly the unfinished steps).
+ */
 export const workflowCancel = (
   backend: Backend,
   actor: ClientActor,
@@ -498,6 +546,29 @@ export const workflowCancel = (
     OPERATE_SCOPE,
     payload.rootSessionId,
     WORKFLOW_CODES,
-    async () => fail("WORKFLOWS_UNAVAILABLE", `${WORKFLOWS_NOT_CONNECTED}; nothing was done`),
+    async (opened): Promise<WorkflowCancelResult | Failure<string>> => {
+      const runs = runsOf(opened);
+      if (runs === undefined)
+        return fail("WORKFLOWS_UNAVAILABLE", `${WORKFLOWS_NOT_RUNNING}; nothing was done`);
+      const answered = await runs.cancel(opened.root, payload.runId);
+      if (!answered.ok) {
+        if (answered.code === "RUN_UNKNOWN")
+          return fail("WORKFLOWS_NOT_FOUND", "not available to this connection");
+        if (answered.code === "WORKFLOWS_UNAVAILABLE")
+          return fail("WORKFLOWS_UNAVAILABLE", `${WORKFLOWS_NOT_RUNNING}; nothing was done`);
+        return fail(
+          "WORKFLOWS_OUTCOME_UNKNOWN",
+          `${answered.detail ?? answered.code}; the cancel may have been recorded, so read the runs`,
+        );
+      }
+      const list = runs.list(opened.root);
+      if (list.ok) observeRuns(runs, opened.root, list);
+      if (answered.unresolved.length > 0)
+        return fail(
+          "WORKFLOWS_OUTCOME_UNKNOWN",
+          `the cancel was asked for but not finished: ${answered.unresolved.map((u) => `${u.what} ${u.id} (${u.code})`).join(", ")}; read the runs`,
+        );
+      return asCancel({ ok: true, value: { run: answered.run } });
+    },
     () => fail("WORKFLOWS_OUTCOME_UNKNOWN", "the cancel failed; read the runs and do not resend"),
   ).pipe(Effect.map((reply) => asCancel(reply)));

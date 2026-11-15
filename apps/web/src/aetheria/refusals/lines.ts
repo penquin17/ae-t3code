@@ -317,6 +317,48 @@ export const LINES: DisplayLines = {
     en: "The Backend could not read route availability and usage just now. Nothing shown is a guess: what was not read is not shown as 0.",
     zh: "后端目前无法读取线路可用性和用量。显示的内容都不是猜测：未读到的部分不会显示为 0。",
   },
+  // M07, the goal strip's own codes (zh lines are unreviewed, as the others)
+  GOALS_NOT_AUTHORIZED: {
+    en: "This device is not allowed to do that to goals: reading a goal needs read access, and changing one needs operate access.",
+    zh: "此设备无权对目标执行该操作：查看目标需要读取权限，更改目标需要操作权限。",
+  },
+  GOALS_DEVICE_REVOKED: {
+    en: "This device's access was revoked or has expired, so the Backend refused the request. Pair or sign in again to continue.",
+    zh: "此设备的访问权限已被撤销或已过期，后端拒绝了这项请求。请重新配对或登录后继续。",
+  },
+  GOALS_NOT_FOUND: {
+    en: "That session is not available to this device, so no goal was read or changed for it.",
+    zh: "此设备无法获取该会话，所以没有为它读取或更改目标。",
+  },
+  GOALS_UNAVAILABLE: {
+    en: "The Backend could not take the goal request just now, and it did nothing. A read shows nothing it did not read.",
+    zh: "后端目前无法受理这项目标请求，也没有做任何操作。读取不会显示未读到的内容。",
+  },
+  GOALS_OUTCOME_UNKNOWN: {
+    en: "It is not known whether the goal request took effect. It was not sent again; read the goal as it is now.",
+    zh: "不清楚这项目标请求是否已生效。它没有被重新发送，请查看目标的当前状态。",
+  },
+  // M07, the workflow runs' own codes
+  WORKFLOWS_NOT_AUTHORIZED: {
+    en: "This device is not allowed to do that to workflow runs: reading runs needs read access, and a cancel needs operate access.",
+    zh: "此设备无权对工作流运行执行该操作：查看运行需要读取权限，取消运行需要操作权限。",
+  },
+  WORKFLOWS_DEVICE_REVOKED: {
+    en: "This device's access was revoked or has expired, so the Backend refused the request. Pair or sign in again to continue.",
+    zh: "此设备的访问权限已被撤销或已过期，后端拒绝了这项请求。请重新配对或登录后继续。",
+  },
+  WORKFLOWS_NOT_FOUND: {
+    en: "That workflow run, or the session it belongs to, is not available to this device.",
+    zh: "此设备无法获取该工作流运行，或它所属的会话。",
+  },
+  WORKFLOWS_UNAVAILABLE: {
+    en: "The Backend could not read or cancel workflow runs just now, and it did nothing. A read shows nothing it did not read.",
+    zh: "后端目前无法读取或取消工作流运行，也没有做任何操作。读取不会显示未读到的内容。",
+  },
+  WORKFLOWS_OUTCOME_UNKNOWN: {
+    en: "It is not known whether the cancel took effect: the run may already be stopping or ended. It was not sent again; read the run list for the run's state.",
+    zh: "不清楚取消是否已生效：该运行可能正在停止或已经结束。它没有被重新发送，请查看运行列表中该运行的状态。",
+  },
   // M05, passed through the jobs handler
   JOB_NOT_FOUND: {
     en: "No such job under this session: it may never have existed, or it belongs to another session.",

@@ -41,7 +41,7 @@
     "@aetheria/goals": {
       "archive": "artifacts/aetheria-goals-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:b3fc3f45da0de3d698259234fb1321498e31f9da9a4820e5abd64e92b6f0c9a0"
+      "stamp": "sha256:f8fe9900d601e7fa67a68b5aabe4e2802f29787830644bb2f68ad70aedf2be98"
     },
     "@aetheria/inspect": {
       "archive": "artifacts/aetheria-inspect-0.1.0.tgz",
@@ -66,7 +66,7 @@
     "@aetheria/workflows": {
       "archive": "artifacts/aetheria-workflows-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:a1e0230864fb8583a693d854f9fdf9e011c23cdd9d728783b8a900ef444e4292"
+      "stamp": "sha256:63fb40c9d14f65f34c3e78ca3f1878684d0f35b093f762f5e01662a9e624173f"
     }
   }
 }

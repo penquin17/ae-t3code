@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off - The Backend service is plain async code outside any Effect runtime; its default clock is the host's wall time.
 // AETHERIA — the assembled Backend service: it owns the assembly only; adapter.ts owns validation, lifecycle and the XC-7 report, apps/server owns the Effect wiring.
 // Parts that must agree (status and digest, XC-6 identity port, operation table, `ingest`, `noteFeed`) are built here once.
 // Fail closed: not started, failed or drained answers unavailable, and a piece that cannot be built throws at construction.
@@ -33,6 +34,8 @@ import {
 } from "./goals/ports.ts";
 import { createGoalsBackendRegistration } from "./goals/registration.ts";
 import { createWorkflowAuthorizer } from "./goals/workflowAuthorize.ts";
+import type { WorkflowRuns } from "./workflows/entry.ts";
+import { createWorkflowRunsPorts } from "./workflows/ports.ts";
 import { createWorkflowsBackendRegistration } from "./workflows/registration.ts";
 import type { ClientQueries } from "./inspect/clients.ts";
 import { createInspectAccess } from "./inspect/inspectAccess.ts";
@@ -252,6 +255,11 @@ export interface AetheriaBackendService {
    * finds it undefined answers unavailable, never "no goal".
    */
   goals(): GoalService | undefined;
+  /**
+   * The workflow run service (M07 steps 26 and 28: the runs view, a person's run-scoped cancel and the boot reconcile), over the one ledger and M05's direct jobs and children. Undefined before start, after
+   * drain and when managed work is not configured; a caller then answers unavailable, never "no runs".
+   */
+  workflows(): WorkflowRuns | undefined;
   /**
    * T3's recovery guard (M07 DV2, N1): is a goal round in flight for the thread's session? `none` only when the goal journal says so (or the module is unconfigured, so none can exist); a thread
    * the index does not bind answers `none` only when no root has a round in flight; before start, after a failed start and for an unreadable journal or index record it answers `unknown`, which
@@ -497,6 +505,18 @@ export function createAetheriaBackendService(
     assertHeld: () => {
       if (!holdingOwnerLock) throw new Error("the Backend owner lock is not held");
     },
+    // The run service's jobs and children are M05's direct user acts, looked up at each call (not running is unavailable). Without the orchestration factory there is no M05 to ask, so no run service.
+    ...(orchestrationFactory === undefined || childThreads === undefined
+      ? {}
+      : {
+          ports: createWorkflowRunsPorts({
+            direct: () => orchestrationRegistration.service()?.direct(),
+            threadOfSession,
+          }),
+        }),
+    ...(options.now === undefined
+      ? {}
+      : { now: () => new Date(options.now?.() ?? Date.now()).toISOString() }),
   });
   // M10 step 7: the ONE session-group store under the state root's aetheria-ui folder; the client RPC handlers reach it through `groups()`.
   const groupsRegistration = createGroupsBackendRegistration({
@@ -720,6 +740,7 @@ export function createAetheriaBackendService(
     groups: () => groupsRegistration.groups(),
     deliverables: () => deliverablesRegistration.deliverables(),
     goals: () => goalsRegistration.service(),
+    workflows: () => workflowsRegistration.runs(),
     goalRoundOfThread: (threadId) => {
       try {
         const found = index.lookup(threadId);

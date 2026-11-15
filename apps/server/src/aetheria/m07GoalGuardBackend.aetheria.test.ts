@@ -8,7 +8,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { describe, expect, it } from "@effect/vitest";
+import { afterAll, describe, expect, it } from "@effect/vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
@@ -34,11 +34,16 @@ import * as GoalRoundGuard from "./goalRoundGuard.ts";
 
 const THREAD = "mcp:6f1c2d3e-0a4b-4c5d-8e9f-a1b2c3d4e5f6";
 
+/** Every state root this file made: each is under the system temp folder and is removed once the file's tests are done. */
+const roots: string[] = [];
 const makeRoot = () => {
-  const base = NodePath.join(NodeOS.homedir(), ".aetheria", "candidate-envs");
-  NodeFS.mkdirSync(base, { recursive: true, mode: 0o700 });
-  return NodeFS.mkdtempSync(NodePath.join(base, "m07-guard-layer-"));
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "m07-guard-layer-"));
+  roots.push(root);
+  return root;
 };
+afterAll(() => {
+  for (const root of roots.splice(0)) NodeFS.rmSync(root, { recursive: true, force: true });
+});
 
 const layerSink = Layer.mock(EventSink.EventSinkV2)({
   latestSequence: () => Effect.succeed(0),

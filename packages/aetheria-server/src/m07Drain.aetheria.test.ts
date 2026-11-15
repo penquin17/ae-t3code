@@ -1,0 +1,334 @@
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off
+/* oxlint-disable t3code/no-low-value-comments -- The header states what this test shows and what it does not. */
+// AETHERIA M07 Plan steps 26, 28 and 29 (D18, D19; C5's Backend part) — the Backend's drain and restart of the workflows module, through its REAL registration over the INSTALLED `@aetheria/workflows`
+// archive's real ledger and run service, writing real files in a temporary state root, and the module's REAL run ports (`createWorkflowRunsPorts`) over a SCRIPTED M05 direct API (the jobs and children
+// it lists, kills and closes, each call recorded). SCRIPTED: M05 itself, M03's authorizer and the owner lock. It shows: a second cancel of one run joins the first (one piece of work, one kill, one
+// close per child); the drain joins a cancel still in flight, says how many it joined, and only then lets the ledger go — after it every call answers unavailable and nothing is accepted; a drain does
+// not call a running run cancelled or live: it writes no terminal fact and reports nothing as `stillLive` (the Backend owns no process of the run), and the next start marks it `lost` ONCE and closes
+// its children, a pending member found by its label included and one that never started closed as such; a close that fails at that start is a recorded debt that the NEXT start retries; a cancel
+// for a run of another root (or one that does not exist) is `RUN_UNKNOWN` — which the client RPC answers as NOT_FOUND — marks nothing and stops nothing; a root with no bound thread leaves its job and
+// children unresolved, never "none". It does NOT show the client RPC handlers or their scopes (a read-only connection cannot cancel: apps/server `m07GoalsRpc.aetheria.test.ts`, which imports
+// from this package — this package cannot import it back), M05's real kill and close (tests/goals-workflows/workflows/real-child.test.mjs), the Agent's terminal record, or a native restart.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
+import type { Xc6OperationContext } from "@t3tools/aetheria-contracts";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+
+import type { OrchestrationDirectApi } from "./orchestration.ts";
+import { createWorkflowsBackendRegistration } from "./workflows/registration.ts";
+import { createWorkflowRunsPorts } from "./workflows/ports.ts";
+
+const { mkdtempSync, rmSync } = NodeFS;
+const { tmpdir } = NodeOS;
+const { join } = NodePath;
+
+const roots: string[] = [];
+const stateRoot = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "m07-drain-"));
+  roots.push(dir);
+  return dir;
+};
+afterEach(() => {
+  for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+const MAIN = "s-main";
+const OTHER = "s-other";
+const MODULE = { id: "workflows-backend" };
+const NOW = "2026-11-16T10:00:02.000Z";
+const CAPS = {
+  maxConcurrentAgents: 4,
+  maxTotalAgents: 10,
+  maxItemsPerCall: 20,
+  syncTimeoutMs: 400,
+};
+
+const context = (sessionId: string, args: Record<string, unknown>): Xc6OperationContext => ({
+  caller: { threadId: "thread-1", providerSessionId: "runtime-1", providerInstanceId: "pi" },
+  sessionId,
+  kind: "main",
+  rootSessionId: sessionId,
+  args,
+});
+// The cancel under test is held by a gate the test owns, so draining the microtask queue is enough to let everything that can proceed do so; no clock is involved.
+const tick = async () => {
+  for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
+};
+
+interface World {
+  jobs: { jobId: string; label: string; state: string }[];
+  children: { childId: string; label?: string }[];
+  calls: { op: string; id: string }[];
+  /** A close the test makes fail (by child id), and gates it can hold shut. */
+  failClose: Set<string>;
+  killGate: Promise<void> | undefined;
+  threads: Map<string, string>;
+}
+
+const world = (): World => ({
+  jobs: [{ jobId: "job-1", label: "# workflow run-1 demo", state: "running" }],
+  children: [],
+  calls: [],
+  failClose: new Set(),
+  killGate: undefined,
+  threads: new Map([[MAIN, "thread-main"]]),
+});
+
+/** M05's direct API as the run ports call it: the user's acts, scripted. */
+const scriptedDirect = (w: World): OrchestrationDirectApi =>
+  ({
+    listJobs: async () => ({ ok: true, value: { jobs: w.jobs, unreadable: 0 } }),
+    killJob: async (input: { args: { jobId: string } }) => {
+      w.calls.push({ op: "kill", id: input.args.jobId });
+      if (w.killGate !== undefined) await w.killGate;
+      return { ok: true, value: { state: "killed" } };
+    },
+    listChildren: async () => ({ ok: true, value: { rows: w.children, diagnostics: [] } }),
+    closeChild: async (input: { args: { target: string } }) => {
+      w.calls.push({ op: "close", id: input.args.target });
+      return w.failClose.has(input.args.target)
+        ? { ok: false, code: "CHILD_CLOSE_UNCONFIRMED" }
+        : { ok: true, value: { closed: true, killedJobs: [] } };
+    },
+  }) as unknown as OrchestrationDirectApi;
+
+const mounted = async (dir: string, w: World, start = true) => {
+  const registration = createWorkflowsBackendRegistration({
+    stateRoot: dir,
+    authorize: async () => ({ ok: true }),
+    ports: createWorkflowRunsPorts({
+      direct: () => scriptedDirect(w),
+      threadOfSession: (sessionId) => w.threads.get(sessionId),
+    }),
+    now: () => NOW,
+  });
+  if (start) await registration.activation.start(MODULE);
+  const call = async (name: string, ctx: Xc6OperationContext) => {
+    const operation = registration.operations?.[name];
+    if (operation === undefined) throw new Error(`no operation ${name}`);
+    return operation(ctx);
+  };
+  const runs = () => {
+    const service = registration.runs();
+    if (service === undefined) throw new Error("the run service is not running");
+    return service;
+  };
+  const members = (runId = "run-1") => {
+    const read = registration.ledger()?.read(runId);
+    return read?.ok === true && read.value !== null ? read.value.members : [];
+  };
+  const run = (runId = "run-1") => {
+    const read = registration.ledger()?.read(runId);
+    return read?.ok === true && read.value !== null ? read.value.run : undefined;
+  };
+  return { registration, call, runs, members, run };
+};
+
+/** A run the controller has started: run-1 for MAIN with child-1 started, a second member pending whose child id was never written, and a third pending one. */
+const seedRun = async (m: Awaited<ReturnType<typeof mounted>>, seqs: number[] = [1]) => {
+  await m.call(
+    "workflows.run-start",
+    context(MAIN, {
+      runId: "run-1",
+      rootSessionId: MAIN,
+      ownerSessionId: MAIN,
+      name: "demo",
+      caps: CAPS,
+      startedAt: "2026-11-16T10:00:00.000Z",
+    }),
+  );
+  for (const seq of seqs) {
+    await m.call(
+      "workflows.member",
+      context(MAIN, { runId: "run-1", seq, childId: null, state: "pending" }),
+    );
+    if (seq === 1)
+      await m.call(
+        "workflows.member",
+        context(MAIN, { runId: "run-1", seq, childId: "child-1", state: "started" }),
+      );
+  }
+};
+
+describe("the Backend's drain and restart of the workflows module", () => {
+  it("a second cancel of one run joins the first: one kill, one close; the drain joins it too, reports it, and only then do calls become unavailable", async () => {
+    const dir = stateRoot();
+    const w = world();
+    let release: () => void = () => {};
+    w.killGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const m = await mounted(dir, w);
+    await seedRun(m);
+    const runs = m.runs();
+    const first = runs.cancel(MAIN, "run-1");
+    const second = runs.cancel(MAIN, "run-1");
+    expect(second).toBe(first);
+    await tick();
+
+    let drained = false;
+    const draining = (async () => {
+      const report = (await m.registration.activation.drain("test")) as {
+        stillLive: string[];
+        stopped: string[];
+      };
+      drained = true;
+      return report;
+    })();
+    await tick();
+    expect(drained, "the drain waits for the cancel in flight").toBe(false);
+    expect(
+      await runs.cancel(MAIN, "run-1"),
+      "once draining, a new cancel is refused, not joined",
+    ).toMatchObject({ ok: false, code: "WORKFLOWS_UNAVAILABLE" });
+
+    release();
+    const answer = await first;
+    expect(answer).toMatchObject({ ok: true, unresolved: [] });
+    const report = await draining;
+    expect(report.stopped).toContain("backend-workflows.ledger");
+    expect(report.stopped).toContain("backend-workflows.cancels:1");
+    expect(report.stillLive).toEqual([]);
+    expect(w.calls).toEqual([
+      { op: "kill", id: "job-1" },
+      { op: "close", id: "child-1" },
+    ]);
+    expect(m.registration.ledger()).toBeUndefined();
+    expect(m.registration.runs()).toBeUndefined();
+    expect(runs.list(MAIN)).toMatchObject({ ok: false, code: "WORKFLOWS_UNAVAILABLE" });
+    expect(
+      await m.call(
+        "workflows.member",
+        context(MAIN, { runId: "run-1", seq: 9, childId: null, state: "pending" }),
+      ),
+    ).toEqual({ status: "unavailable", code: "WORKFLOWS_UNAVAILABLE" });
+  });
+
+  it("a drain leaves a running run running and reports nothing as live; the next start marks it lost once, closes every open child — a pending one found by its label, one that never started as such — and a third start finds nothing", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.children = [
+      { childId: "child-2", label: "wf:run-1:2" },
+      { childId: "child-x", label: "other" },
+    ];
+    const first = await mounted(dir, w);
+    await seedRun(first, [1, 2, 3]);
+    const drained = (await first.registration.activation.drain("test")) as {
+      stillLive: string[];
+      released: string[];
+    };
+    expect(drained.stillLive).toEqual([]);
+
+    const second = await mounted(dir, w);
+    expect(second.run()?.state, "the drain wrote no terminal fact; the start marks it").toBe(
+      "lost",
+    );
+    const report = second.registration.reconcileReport();
+    expect(report).toMatchObject({ lost: ["run-1"], closed: 3, unresolved: [], unreadable: [] });
+    expect(
+      w.calls
+        .filter((c) => c.op === "close")
+        .map((c) => c.id)
+        .sort(),
+    ).toEqual(["child-1", "child-2"]);
+    expect(second.members().map((member) => [member.seq, member.state, member.cause])).toEqual([
+      [1, "closed", "lost-run"],
+      [2, "closed", "lost-run"],
+      [3, "closed", "never-started"],
+    ]);
+    expect(
+      w.calls.some((c) => c.op === "kill"),
+      "boot does not touch jobs: M05's own boot owns the process group",
+    ).toBe(false);
+    expect(second.runs().list(MAIN)).toMatchObject({
+      ok: true,
+      runs: [{ runId: "run-1", state: "lost" }],
+    });
+
+    await second.registration.activation.drain("test");
+    const third = await mounted(dir, w);
+    expect(third.registration.reconcileReport()).toMatchObject({
+      lost: [],
+      closed: 0,
+      unresolved: [],
+    });
+    expect(w.calls.filter((c) => c.op === "close")).toHaveLength(2);
+  });
+
+  it("a close that fails at the restart is a recorded debt, never a clean claim, and the next start retries exactly that child", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.failClose.add("child-1");
+    const first = await mounted(dir, w);
+    await seedRun(first);
+    await first.registration.activation.drain("test");
+
+    const second = await mounted(dir, w);
+    const report = second.registration.reconcileReport();
+    expect(report?.lost).toEqual(["run-1"]);
+    expect(report?.unresolved.map((u) => [u.what, u.id, u.code])).toEqual([
+      ["child", "child-1", "CHILD_CLOSE_UNCONFIRMED"],
+    ]);
+    expect(second.members()[0]).toMatchObject({ state: "failed", cause: "close-failed" });
+    await second.registration.activation.drain("test");
+
+    w.failClose.clear();
+    w.calls.length = 0;
+    const third = await mounted(dir, w);
+    expect(third.registration.reconcileReport()).toMatchObject({
+      lost: [],
+      closed: 1,
+      unresolved: [],
+    });
+    expect(w.calls).toEqual([{ op: "close", id: "child-1" }]);
+    expect(third.members()[0]).toMatchObject({ state: "closed" });
+  });
+
+  it("a cancel for another root's run, or for a run that does not exist, is RUN_UNKNOWN: it marks nothing and kills and closes nothing", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.threads.set(OTHER, "thread-other");
+    const m = await mounted(dir, w);
+    await seedRun(m);
+    const runs = m.runs();
+    expect(await runs.cancel(OTHER, "run-1")).toEqual({ ok: false, code: "RUN_UNKNOWN" });
+    expect(await runs.cancel(MAIN, "run-nope")).toEqual({ ok: false, code: "RUN_UNKNOWN" });
+    expect(
+      m.run()?.cancelRequestedAt,
+      "a foreign cancel does not even mark the run",
+    ).toBeUndefined();
+    expect(w.calls).toEqual([]);
+    expect(runs.list(OTHER)).toMatchObject({ ok: true, runs: [] });
+    expect(runs.list(MAIN)).toMatchObject({
+      ok: true,
+      runs: [{ runId: "run-1", state: "running" }],
+    });
+    const own = await runs.cancel(MAIN, "run-1");
+    expect(own).toMatchObject({
+      ok: true,
+      run: { runId: "run-1", state: "running", cancelRequested: true },
+    });
+  });
+
+  it("a root with no bound thread cannot be listed or stopped: its job and children stay unresolved, never read as none", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.threads.clear();
+    const m = await mounted(dir, w);
+    await seedRun(m);
+    const answer = await m.runs().cancel(MAIN, "run-1");
+    expect(answer).toMatchObject({ ok: true });
+    if (!answer.ok) throw new Error("unreachable");
+    expect(answer.unresolved.map((u) => [u.what, u.code]).sort()).toEqual([
+      ["child", "ORCHESTRATION_UNAVAILABLE"],
+      ["job", "ORCHESTRATION_UNAVAILABLE"],
+    ]);
+    expect(
+      m.run()?.cancelRequestedAt,
+      "the ask is recorded, so no new member is admitted",
+    ).toBeDefined();
+    expect(w.calls).toEqual([]);
+  });
+});

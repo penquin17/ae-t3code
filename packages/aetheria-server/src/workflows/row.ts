@@ -28,13 +28,13 @@ export function workflowsBackendModuleRow(
     },
     contract: {
       consumer:
-        "The Agent host's workflow controller, through the three XC-6 operations workflows.run-start, workflows.member and workflows.run-end, for a main session whose M03 identity authorizes the workflow tool. No client reads it before M07 step 29.",
+        "The Agent host's workflow controller, through the three XC-6 operations workflows.run-start, workflows.member and workflows.run-end, for a main session whose M03 identity authorizes the workflow tool; and M10's runs view and run-scoped cancel (aetheria.workflow.runs and aetheria.workflow.cancel), through the Backend's run service over this ledger and M05's jobs and children.",
       success:
         "A run's record is written under the state root only through the three operations: a run start publishes the run for the verified caller, a member fact is written before the child it names is started and again with its child id, and a run end is the one terminal fact; an identical repeat changes nothing; the module drains once.",
       failure:
         "An argument outside the strict contract, including any session, root or owner field that names another caller, is refused before the ledger is read; a run that is not the caller's answers as one that does not exist; a conflicting or stale fact, a late member of a finished run, and a record that cannot be read or decodes badly are refused and left exactly as they were, never repaired and never read as empty; a module that is not running answers unavailable.",
       uncertainty:
-        "A member written before its child whose id never arrived is a diagnostic, not an empty ledger, because the child may or may not exist. The reconcile of runs left running by a stopped Backend is not built before M07 step 28. The ledger holds run facts only; no child state is copied from M05. Checked on macOS only; Linux is not run.",
+        "A member written before its child whose id never arrived is a diagnostic, not an empty ledger, because the child may or may not exist. At boot a run left running by a stopped Backend becomes lost and is never resumed, and its children are closed; a child that cannot be closed or listed stays a named debt that the next boot retries. A person's cancel asks, stops that run's job and closes that run's children, but the terminal fact is written by the run's own controller, so a run whose Agent is gone stays running until the next boot marks it lost. The ledger holds run facts only; no child state is copied from M05. Checked on macOS only; Linux is not run.",
       stateOwner: "backend-workflows-state",
     },
   };

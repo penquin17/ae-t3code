@@ -7,10 +7,15 @@
 // own `grant` or `approve`), M05's admission and settles, T3's receipt and the notices. It shows: the checks run in order on every call (device session, scope, root identity and access) before the service is touched; a
 // refused call changes nothing (no card, no state change, no admission); a proposal writes one card and arms nothing; a person's own complete and block run the same card (DV6); pause and clear need no origin; re-arm
 // verifies the whole expectation at the commit, consumes the origin once, arms once and admits no turn by itself; a stale reference gets the current view; a throwing, `unavailable` or non-conforming service answer to an
-// action is an unknown outcome, never "nothing changed"; the version rises with each change; the stream re-checks the connection at every poll and ends when any check fails; the workflow methods run the same checks and
-// answer unavailable. It does NOT show T3's real session store (the `standingOf` chain), the real WebSocket decode (the contract test shows the strict wire option), the real thread index or M03 identity files, or the web.
+// action is an unknown outcome, never "nothing changed"; the version rises with each change; the stream re-checks the connection at every poll and ends when any check fails; the workflow methods run the same checks, then
+// call the run service (the archive's REAL ledger and run service through the REAL workflows registration, over a scripted M05 direct API): not running is unavailable, a run of another root is not found, an unfinished
+// cancel is an unknown outcome, and a read-scope connection cannot cancel. It does NOT show T3's real session store (the `standingOf` chain), the real WebSocket decode (the contract test shows the strict wire option), the real thread index or M03 identity files, or the web.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
-import type { GoalView } from "@t3tools/aetheria-contracts";
+import type { GoalView, Xc6OperationContext } from "@t3tools/aetheria-contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -27,6 +32,9 @@ import {
   runtimeOf,
   world,
 } from "../../../../packages/aetheria-server/src/goals/testkit.ts";
+import type { OrchestrationDirectApi } from "../../../../packages/aetheria-server/src/orchestration.ts";
+import { createWorkflowRunsPorts } from "../../../../packages/aetheria-server/src/workflows/ports.ts";
+import { createWorkflowsBackendRegistration } from "../../../../packages/aetheria-server/src/workflows/registration.ts";
 import { AuthSessionRepository } from "../persistence/AuthSessions.ts";
 import {
   goalChanges,
@@ -80,6 +88,8 @@ interface Options {
   readonly noBackend?: boolean;
   /** A stand-in for the goal service (the fault cases); absent: the real one. */
   readonly goals?: unknown;
+  /** The workflow run service the Backend hands out; absent: `workflows()` answers undefined (the module is not running). */
+  readonly workflows?: unknown;
   readonly blockedAfter?: number;
 }
 
@@ -109,6 +119,7 @@ const setup = async (options: Options = {}) => {
         },
         interactions: () => (options.noInteractions ? undefined : interactions),
         goals: () => (options.noGoals ? undefined : (options.goals ?? runtime.service)),
+        workflows: () => options.workflows,
       });
   return { w, runtime, device, calls, backend: backend as never };
 };
@@ -876,26 +887,129 @@ describe("the change stream: a root and a version, re-checked at every poll", ()
   );
 });
 
-describe("the workflow methods: the same checks, then unavailable until the workflow Backend lands", () => {
+// The REAL workflows registration (the installed archive's ledger and run service, in a temporary state root) over M05's direct API scripted as the drain test scripts it; its `runs()` is the service `workflows()` hands out.
+const OTHER_ROOT = "s-other";
+const RUN_MODULE = { id: "workflows-backend" };
+const RUN_NOW = "2026-11-16T10:00:02.000Z";
+const RUN_CAPS = {
+  maxConcurrentAgents: 4,
+  maxTotalAgents: 10,
+  maxItemsPerCall: 20,
+  syncTimeoutMs: 400,
+};
+
+const mountedRoots: string[] = [];
+const mountedRegistrations: Array<ReturnType<typeof createWorkflowsBackendRegistration>> = [];
+afterEach(async () => {
+  for (const registration of mountedRegistrations.splice(0))
+    await registration.activation.drain("test");
+  for (const dir of mountedRoots.splice(0)) NodeFS.rmSync(dir, { recursive: true, force: true });
+});
+
+interface RunWorld {
+  readonly calls: Array<{ op: string; id: string }>;
+  /** A child close the test makes fail (by child id), so a cancel does not finish every step. */
+  readonly failClose: Set<string>;
+}
+
+const runContext = (sessionId: string, args: Record<string, unknown>): Xc6OperationContext => ({
+  caller: { threadId: "thread-1", providerSessionId: "runtime-1", providerInstanceId: "pi" },
+  sessionId,
+  kind: "main",
+  rootSessionId: sessionId,
+  args,
+});
+
+/** A started registration with one running run per root, each with one started child; returns its run service and the calls M05 saw. */
+const liveRuns = async () => {
+  const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "m07-rpc-runs-"));
+  mountedRoots.push(dir);
+  const w: RunWorld = { calls: [], failClose: new Set() };
+  const direct = {
+    listJobs: async () => ({
+      ok: true,
+      value: {
+        jobs: [{ jobId: "job-1", label: "# workflow run-1 demo", state: "running" }],
+        unreadable: 0,
+      },
+    }),
+    killJob: async (input: { args: { jobId: string } }) => {
+      w.calls.push({ op: "kill", id: input.args.jobId });
+      return { ok: true, value: { state: "killed" } };
+    },
+    listChildren: async () => ({
+      ok: true,
+      value: { rows: [{ childId: "child-1" }, { childId: "child-2" }], diagnostics: [] },
+    }),
+    closeChild: async (input: { args: { target: string } }) => {
+      w.calls.push({ op: "close", id: input.args.target });
+      return w.failClose.has(input.args.target)
+        ? { ok: false, code: "CHILD_CLOSE_UNCONFIRMED" }
+        : { ok: true, value: { closed: true, killedJobs: [] } };
+    },
+  } as unknown as OrchestrationDirectApi;
+  const registration = createWorkflowsBackendRegistration({
+    stateRoot: dir,
+    authorize: async () => ({ ok: true }),
+    ports: createWorkflowRunsPorts({
+      direct: () => direct,
+      threadOfSession: (sessionId) => `thread-of-${sessionId}`,
+    }),
+    now: () => RUN_NOW,
+  });
+  mountedRegistrations.push(registration);
+  await registration.activation.start(RUN_MODULE);
+  const call = async (name: string, ctx: Xc6OperationContext) => {
+    const operation = registration.operations?.[name];
+    if (operation === undefined) throw new Error(`no operation ${name}`);
+    return operation(ctx);
+  };
+  /** The controller's records for one run of one root: started, one member started with its child. */
+  const seed = async (root: string, runId: string, childId: string) => {
+    await call(
+      "workflows.run-start",
+      runContext(root, {
+        runId,
+        rootSessionId: root,
+        ownerSessionId: root,
+        name: "demo",
+        caps: RUN_CAPS,
+        startedAt: "2026-11-16T10:00:00.000Z",
+      }),
+    );
+    await call(
+      "workflows.member",
+      runContext(root, { runId, seq: 1, childId: null, state: "pending" }),
+    );
+    await call("workflows.member", runContext(root, { runId, seq: 1, childId, state: "started" }));
+  };
+  const service = registration.runs();
+  if (service === undefined) throw new Error("the run service is not running");
+  return { w, service, seed };
+};
+
+describe("the workflow methods: the same checks, then the live run service", () => {
   it.effect(
-    "runs and cancel answer WORKFLOWS_UNAVAILABLE after the gate and say nothing was read or done",
+    "a run service that is not running (workflows() is undefined) is unavailable after the gate: nothing was read, nothing was done",
     () =>
       Effect.gen(function* () {
         const s = yield* Effect.promise(() => setup());
         const actor = yield* withDevice(s, actorOf());
-        const runs = badOf(
-          yield* withDevice(s, workflowRuns(s.backend, actor, { rootSessionId: MAIN })),
-          "WORKFLOWS_UNAVAILABLE",
-        );
-        expect(runs.detail).toContain("nothing was read");
-        const cancel = badOf(
-          yield* withDevice(
-            s,
-            workflowCancel(s.backend, actor, { rootSessionId: MAIN, runId: "run-1" }),
-          ),
-          "WORKFLOWS_UNAVAILABLE",
-        );
-        expect(cancel.detail).toContain("nothing was done");
+        expect(
+          badOf(
+            yield* withDevice(s, workflowRuns(s.backend, actor, { rootSessionId: MAIN })),
+            "WORKFLOWS_UNAVAILABLE",
+          ).detail,
+        ).toContain("nothing was read");
+        expect(
+          badOf(
+            yield* withDevice(
+              s,
+              workflowCancel(s.backend, actor, { rootSessionId: MAIN, runId: "run-1" }),
+            ),
+            "WORKFLOWS_UNAVAILABLE",
+          ).detail,
+        ).toContain("nothing was done");
         s.device.state = "revoked";
         badOf(
           yield* withDevice(
@@ -905,5 +1019,122 @@ describe("the workflow methods: the same checks, then unavailable until the work
           "WORKFLOWS_DEVICE_REVOKED",
         );
       }),
+  );
+
+  it.effect("runs lists the caller's root's runs only, as the runs view, with a version", () =>
+    Effect.gen(function* () {
+      const live = yield* Effect.promise(() => liveRuns());
+      yield* Effect.promise(async () => {
+        await live.seed(MAIN, "run-1", "child-1");
+        await live.seed(OTHER_ROOT, "run-2", "child-2");
+      });
+      const s = yield* Effect.promise(() => setup({ workflows: live.service }));
+      const actor = yield* withDevice(s, actorOf());
+      const reply = okOf(
+        yield* withDevice(s, workflowRuns(s.backend, actor, { rootSessionId: MAIN })),
+      );
+      expect(reply.value.runs).toHaveLength(1);
+      expect(reply.value.runs[0]).toMatchObject({ runId: "run-1", name: "demo", state: "running" });
+      expect(reply.value.version).toEqual(expect.any(Number));
+      expect(reply.value.unreadable).toBeUndefined();
+      expect(live.w.calls).toEqual([]);
+    }),
+  );
+
+  it.effect(
+    "cancel of another root's run is WORKFLOWS_NOT_FOUND (RUN_UNKNOWN): it stops and closes nothing",
+    () =>
+      Effect.gen(function* () {
+        const live = yield* Effect.promise(() => liveRuns());
+        yield* Effect.promise(() => live.seed(OTHER_ROOT, "run-2", "child-2"));
+        const s = yield* Effect.promise(() => setup({ workflows: live.service }));
+        const actor = yield* withDevice(s, actorOf());
+        badOf(
+          yield* withDevice(
+            s,
+            workflowCancel(s.backend, actor, { rootSessionId: MAIN, runId: "run-2" }),
+          ),
+          "WORKFLOWS_NOT_FOUND",
+        );
+        expect(live.w.calls).toEqual([]);
+        expect(live.service.list(OTHER_ROOT)).toMatchObject({
+          ok: true,
+          runs: [{ runId: "run-2", state: "running" }],
+        });
+      }),
+  );
+
+  it.effect(
+    "a cancel that did not finish every step is WORKFLOWS_OUTCOME_UNKNOWN and names what is left",
+    () =>
+      Effect.gen(function* () {
+        const live = yield* Effect.promise(() => liveRuns());
+        yield* Effect.promise(() => live.seed(MAIN, "run-1", "child-1"));
+        live.w.failClose.add("child-1");
+        const s = yield* Effect.promise(() => setup({ workflows: live.service }));
+        const actor = yield* withDevice(s, actorOf());
+        const bad = badOf(
+          yield* withDevice(
+            s,
+            workflowCancel(s.backend, actor, { rootSessionId: MAIN, runId: "run-1" }),
+          ),
+          "WORKFLOWS_OUTCOME_UNKNOWN",
+        );
+        expect(bad.detail).toContain("child-1");
+        expect(bad.detail).toContain("read the runs");
+      }),
+  );
+
+  it.effect(
+    "the read-scope actor is refused by workflowCancel and nothing is stopped; the operate scope cancels exactly the named run",
+    () =>
+      Effect.gen(function* () {
+        const live = yield* Effect.promise(() => liveRuns());
+        yield* Effect.promise(() => live.seed(MAIN, "run-1", "child-1"));
+        const s = yield* Effect.promise(() => setup({ workflows: live.service }));
+        const readOnly = yield* withDevice(s, actorOf(READ_ONLY));
+        const operateOnly = yield* withDevice(s, actorOf(OPERATE_ONLY));
+        badOf(
+          yield* withDevice(
+            s,
+            workflowCancel(s.backend, readOnly, { rootSessionId: MAIN, runId: "run-1" }),
+          ),
+          "WORKFLOWS_NOT_AUTHORIZED",
+        );
+        expect(live.w.calls).toEqual([]);
+        const done = okOf(
+          yield* withDevice(
+            s,
+            workflowCancel(s.backend, operateOnly, { rootSessionId: MAIN, runId: "run-1" }),
+          ),
+        );
+        expect(done.value.run).toMatchObject({ runId: "run-1" });
+        expect(live.w.calls).toEqual([
+          { op: "kill", id: "job-1" },
+          { op: "close", id: "child-1" },
+        ]);
+      }),
+  );
+
+  it.effect("a revoked device is refused before the live run service is touched", () =>
+    Effect.gen(function* () {
+      const live = yield* Effect.promise(() => liveRuns());
+      yield* Effect.promise(() => live.seed(MAIN, "run-1", "child-1"));
+      const s = yield* Effect.promise(() => setup({ workflows: live.service }));
+      const actor = yield* withDevice(s, actorOf());
+      s.device.state = "revoked";
+      badOf(
+        yield* withDevice(s, workflowRuns(s.backend, actor, { rootSessionId: MAIN })),
+        "WORKFLOWS_DEVICE_REVOKED",
+      );
+      badOf(
+        yield* withDevice(
+          s,
+          workflowCancel(s.backend, actor, { rootSessionId: MAIN, runId: "run-1" }),
+        ),
+        "WORKFLOWS_DEVICE_REVOKED",
+      );
+      expect(live.w.calls).toEqual([]);
+    }),
   );
 });

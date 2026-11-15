@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off - The run service's default clock is the host's wall time; this module is plain async code outside any Effect runtime.
 /* oxlint-disable t3code/no-low-value-comments -- The header states the authority boundary of the run-record operations and the one state this file owns. */
 // AETHERIA M07 Plan step 22 — the Backend `workflows-backend` registration: ONE workflow ledger under `<stateRoot>/workflows/`, served through exactly the three strict, data-only XC-6 operations
 // `workflows.run-start`, `workflows.member` and `workflows.run-end` (the archive's names and codecs). The module starts no script, no child and no process: the Agent host's controller does, and M05 keeps
@@ -12,9 +13,13 @@ import type { BackendRegistration } from "../adapter.ts";
 import {
   WORKFLOW_OPERATIONS,
   createWorkflowOperations,
+  createWorkflowRuns,
   openWorkflowLedger,
+  type ReconcileReport,
+  type RunsPorts,
   type WorkflowLedger,
   type WorkflowRunAuthorization,
+  type WorkflowRuns,
 } from "./entry.ts";
 import { WORKFLOWS_BACKEND_ENTRY } from "./row.ts";
 
@@ -32,17 +37,30 @@ export interface WorkflowsRegistrationOptions {
     | undefined;
   /** Throws unless the Backend's owner lock is held; the ledger asks before every write. Absent: no owner check (a test seam). */
   readonly assertHeld?: (() => void) | undefined;
+  /**
+   * M05's jobs and children as the run service needs them (ports.ts). Absent: no run service exists, so the runs view and cancel answer unavailable and the boot reconcile cannot run (a configured
+   * state root with no ports is reported as unreconciled, never as clean).
+   */
+  readonly ports?: RunsPorts | undefined;
+  /** The clock for `cancelRequestedAt` and `lost`. Default: the system clock. */
+  readonly now?: (() => string) | undefined;
 }
 
 export type WorkflowsBackendRegistration = BackendRegistration & {
   /** The running ledger, or undefined before start and after drain (a caller then answers unavailable, never "no run"). */
   readonly ledger: () => WorkflowLedger | undefined;
+  /** The running run service (list, cancel), or undefined before start, after drain, and when no ports were supplied. */
+  readonly runs: () => WorkflowRuns | undefined;
+  /** What the last boot reconcile found; undefined before start or when it could not run. A report with `unresolved` or `unreadable` entries is a debt, never "clean". */
+  readonly reconcileReport: () => ReconcileReport | undefined;
 };
 
 export function createWorkflowsBackendRegistration(
   options: WorkflowsRegistrationOptions,
 ): WorkflowsBackendRegistration {
   let running: WorkflowLedger | undefined;
+  let service: WorkflowRuns | undefined;
+  let lastReport: ReconcileReport | undefined;
 
   const operations = createWorkflowOperations({
     ledger: () => running,
@@ -77,14 +95,38 @@ export function createWorkflowsBackendRegistration(
         const started = ledger.start();
         if (started.status !== "ok")
           throw new Error(`the workflow ledger did not start: ${started.detail}`);
+        if (options.ports !== undefined) {
+          const runs = createWorkflowRuns({
+            ledger: () => ledger,
+            ports: options.ports,
+            now: options.now ?? (() => new Date().toISOString()),
+          });
+          // Before any update or start is accepted: a run left `running` by a stopped Backend becomes `lost` and its children are closed. A failure here is a recorded debt, never a refusal to
+          // start the module and never a clean claim.
+          try {
+            lastReport = await runs.reconcile();
+          } catch {
+            lastReport = undefined;
+          }
+          service = runs;
+        }
         running = ledger;
       },
       drain: async () => {
         const stopped = running === undefined ? [] : ["backend-workflows.ledger"];
+        // Admission first: nothing new is accepted, then every cancel in flight is joined, and only then does the ledger go.
         running = undefined;
+        const draining = service;
+        service = undefined;
+        if (draining !== undefined) {
+          const joined = await draining.drain();
+          if (joined > 0) stopped.push(`backend-workflows.cancels:${joined}`);
+        }
         return { released: [], stopped, transferred: [], stillLive: [] };
       },
     },
     ledger: () => running,
+    runs: () => service,
+    reconcileReport: () => lastReport,
   };
 }

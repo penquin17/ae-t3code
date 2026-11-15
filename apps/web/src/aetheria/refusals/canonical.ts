@@ -1,15 +1,17 @@
 // The canonical refusal codes the display table must cover (D14, A3), READ from the real tables, never transcribed: M04's and M03's rows and the T3 decline from the packed awareness archive's
-// `./permissions` subpath (the same archive bytes the Backend consumes, IP-28), and M06's fourteen interaction codes, M10's children and group codes and M05's passed-through codes from
+// `./permissions` subpath (the same archive bytes the Backend consumes, IP-28), and M06's fourteen interaction codes, M10's children and group codes, M07's goal and workflow codes and M05's passed-through codes from
 // `@t3tools/aetheria-contracts` (the jobs and usage codes among them). A code added to any of those tables is canonical here at once, so the drift test fails until it has an English and a Chinese line.
 import { NON_CODE_REFUSALS, REFUSAL_TABLE } from "@aetheria/awareness/permissions";
 import {
   CHILDREN_CONTROL_CODE_CLASSES,
   CHILDREN_PASSTHROUGH_CODES,
+  GOALS_CODE_CLASSES,
   GROUPS_CODE_CLASSES,
   INTERACTION_CODE_CLASSES,
   JOBS_CONTROL_CODE_CLASSES,
   JOBS_PASSTHROUGH_CODES,
   USAGE_CODE_CLASSES,
+  WORKFLOWS_CODE_CLASSES,
 } from "@t3tools/aetheria-contracts";
 
 /**
@@ -26,7 +28,7 @@ export type CanonicalClass =
   | "failure"
   | "passthrough";
 
-export type CanonicalOwner = "M04" | "M03" | "M06" | "M10" | "M05" | "T3";
+export type CanonicalOwner = "M04" | "M03" | "M06" | "M10" | "M07" | "M05" | "T3";
 
 export interface CanonicalCode {
   readonly code: string;
@@ -60,6 +62,9 @@ export const CANONICAL_CODES: readonly CanonicalCode[] = [
   // M10: the jobs controls' own codes, then the usage read's
   ...classed(JOBS_CONTROL_CODE_CLASSES, "M10"),
   ...classed(USAGE_CODE_CLASSES, "M10"),
+  // M07: the goal strip's own codes, then the workflow runs'
+  ...classed(GOALS_CODE_CLASSES, "M07"),
+  ...classed(WORKFLOWS_CODE_CLASSES, "M07"),
   // M05: passed through the children handler unchanged
   ...CHILDREN_PASSTHROUGH_CODES.map((code): CanonicalCode => ({
     code,

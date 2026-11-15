@@ -158,6 +158,8 @@ export const WorkflowRunView = Schema.Struct({
   startedAt: Schema.String,
   endedAt: Schema.optionalKey(Schema.String),
   cause: Schema.optionalKey(Schema.String),
+  /** True while a cancel has been asked for and the run has not yet written its one terminal fact: the run is still `running`, and its children and job are being stopped. */
+  cancelRequested: Schema.optionalKey(Schema.Literal(true)),
 });
 export type WorkflowRunView = typeof WorkflowRunView.Type;
 
@@ -203,7 +205,12 @@ export const GoalRearmResult = goalReply(Schema.Struct({ goal: GoalView }));
 export type GoalRearmResult = typeof GoalRearmResult.Type;
 
 export const WorkflowRunsResult = workflowReply(
-  Schema.Struct({ runs: Schema.Array(WorkflowRunView), version: Version }),
+  Schema.Struct({
+    runs: Schema.Array(WorkflowRunView),
+    version: Version,
+    /** How many run records could not be read: they may belong to this root, so the list is not claimed complete while this is above zero. */
+    unreadable: Schema.optionalKey(Nat),
+  }),
 );
 export type WorkflowRunsResult = typeof WorkflowRunsResult.Type;
 export const WorkflowCancelResult = workflowReply(Schema.Struct({ run: WorkflowRunView }));

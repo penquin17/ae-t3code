@@ -8,7 +8,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { describe, expect, it } from "@effect/vitest";
+import { afterAll, describe, expect, it } from "@effect/vitest";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -23,11 +23,16 @@ import * as Live from "./aetheriaBackend.ts";
 import { GoalCommandHook } from "./goalCommandHook.ts";
 import * as GoalRoundGuard from "./goalRoundGuard.ts";
 
+/** Every state root this file made: each is under the system temp folder and is removed once the file's tests are done. */
+const roots: string[] = [];
 const makeRoot = () => {
-  const base = NodePath.join(NodeOS.homedir(), ".aetheria", "candidate-envs");
-  NodeFS.mkdirSync(base, { recursive: true, mode: 0o700 });
-  return NodeFS.mkdtempSync(NodePath.join(base, "m07-goal-hook-layer-"));
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "m07-goal-hook-layer-"));
+  roots.push(root);
+  return root;
 };
+afterAll(() => {
+  for (const root of roots.splice(0)) NodeFS.rmSync(root, { recursive: true, force: true });
+});
 
 const layerSupplies = Layer.mergeAll(
   Layer.mock(EventSink.EventSinkV2)({
