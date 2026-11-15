@@ -26,6 +26,7 @@ import {
 } from "./humanControl.ts";
 import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
+import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import {
   PROVIDERS_BACKEND_ENTRY,
@@ -70,6 +71,7 @@ function prepare(
       createOrchestrationBackendRegistration({}),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
+      createInspectBackendRegistration(),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);
@@ -127,6 +129,7 @@ describe("the providers module's descriptor", () => {
       "aetheria:orchestration-backend",
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
+      "aetheria:inspect-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(PROVIDERS_BACKEND_ENTRY).toBe("aetheria:providers-backend");
@@ -158,6 +161,7 @@ describe("the providers module's descriptor", () => {
       "orchestration-backend",
       "groups-backend",
       "deliverables-backend",
+      "inspect-backend",
     ]);
     expect(m.compositions[0]?.modules).toEqual([
       "agent-awareness-backend",
@@ -166,6 +170,7 @@ describe("the providers module's descriptor", () => {
       "orchestration-backend",
       "groups-backend",
       "deliverables-backend",
+      "inspect-backend",
     ]);
     expect(m.compositions[0]?.id).toBe(BACKEND_COMPOSITION_ID);
   });
@@ -293,6 +298,7 @@ describe("production mode over the real archive", () => {
     const report = await backend.dispose("test");
     expect(report).toMatchObject({ ok: true, stillLive: [], failed: [], unobserved: [] });
     expect(report.order).toEqual([
+      "inspect-backend",
       "deliverables-backend",
       "groups-backend",
       "orchestration-backend",

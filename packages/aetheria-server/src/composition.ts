@@ -23,6 +23,11 @@ import {
   humanControlBackendModuleRow,
 } from "./humanControlRow.ts";
 import {
+  INSPECT_BACKEND_ENTRY,
+  INSPECT_BACKEND_ID,
+  inspectBackendModuleRow,
+} from "./inspect/inspectRow.ts";
+import {
   ORCHESTRATION_BACKEND_ENTRY,
   ORCHESTRATION_BACKEND_ID,
   orchestrationBackendModuleRow,
@@ -43,6 +48,7 @@ export const BACKEND_ENTRY_ALLOWLIST: readonly string[] = Object.freeze([
   ORCHESTRATION_BACKEND_ENTRY,
   GROUPS_BACKEND_ENTRY,
   DELIVERABLES_BACKEND_ENTRY,
+  INSPECT_BACKEND_ENTRY,
 ]);
 
 /**
@@ -59,6 +65,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
       orchestrationBackendModuleRow(),
       groupsBackendModuleRow(),
       deliverablesBackendModuleRow(),
+      inspectBackendModuleRow(),
     ],
     compositions: [
       {
@@ -76,6 +83,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
           ORCHESTRATION_BACKEND_ID,
           GROUPS_BACKEND_ID,
           DELIVERABLES_BACKEND_ID,
+          INSPECT_BACKEND_ID,
         ],
       },
     ],

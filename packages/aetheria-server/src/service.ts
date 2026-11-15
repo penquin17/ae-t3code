@@ -22,6 +22,7 @@ import {
   type DeliverablesService,
 } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration, type GroupsService } from "./groups/groups.ts";
+import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import {
   createHumanControlBackendRegistration,
   type HumanControlService,
@@ -460,6 +461,7 @@ export function createAetheriaBackendService(
       orchestrationRegistration,
       groupsRegistration,
       deliverablesRegistration,
+      createInspectBackendRegistration(),
     ],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });

@@ -5,6 +5,7 @@ export * from "./childrenControlOperations.ts";
 export * from "./compositionStatus.ts";
 export * from "./deliverablesOperations.ts";
 export * from "./groupsOperations.ts";
+export * from "./inspectOperations.ts";
 export * from "./interactionOperations.ts";
 export * from "./jobsOperations.ts";
 export * from "./lifecycleSnapshot.ts";

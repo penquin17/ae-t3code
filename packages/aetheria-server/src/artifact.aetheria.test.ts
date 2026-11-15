@@ -176,6 +176,7 @@ describe("the Backend agent-awareness module", () => {
       "aetheria:orchestration-backend",
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
+      "aetheria:inspect-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(agentAwarenessBackendModuleRow()).toMatchObject({

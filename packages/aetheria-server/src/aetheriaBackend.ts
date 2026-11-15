@@ -6,6 +6,7 @@ import { BACKEND_COMPOSITION_ID, BACKEND_ENTRY_ALLOWLIST, backendManifest } from
 import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createHumanControlBackendRegistration } from "./humanControl.ts";
+import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import { createProvidersBackendRegistration } from "./providers.ts";
 
@@ -32,6 +33,7 @@ export function prepareAetheriaBackend(options: AetheriaBackendOptions = {}): Pr
       createOrchestrationBackendRegistration({}),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
+      createInspectBackendRegistration(),
     ],
     ...(options.facts === undefined ? {} : { facts: options.facts }),
   });

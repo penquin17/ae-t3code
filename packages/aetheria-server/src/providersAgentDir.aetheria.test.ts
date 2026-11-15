@@ -21,6 +21,7 @@ import {
 import { createHumanControlBackendRegistration } from "./humanControl.ts";
 import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
+import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import { createProvidersBackendRegistration, type ProvidersMode } from "./providers.ts";
 
@@ -73,6 +74,7 @@ function prepare(providers: ProvidersMode) {
       createOrchestrationBackendRegistration({}),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
+      createInspectBackendRegistration(),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);
