@@ -1478,8 +1478,27 @@ describe("the direct Backend API (step 14)", () => {
     expect(events).toMatchObject([
       { sessionId: MAIN, settleSeq: 1, runId: "run-1", outcome: "completed" },
     ]);
+    // Review 6, F1. PENDING THE RE-STAMP: the watch `subscribeSettled` opened lives in the archive's `ChildService`, whose `stop()` (new in the archive) now releases it. The subscription
+    // stays live until the drain; after it the scripted port holds none, and an event a stream delivers late does no work (no listener call, no further port call).
+    expect(w.fake.subscriptions.size).toBeGreaterThan(0);
+    const late = [...w.fake.subscriptions].map(
+      (entry) => (entry as { handler: (event: ChildTurnCompletedEvent) => void }).handler,
+    );
     await service.drain();
     expect(service.direct()).toBeUndefined();
+    expect(w.fake.subscriptions.size).toBe(0);
+    const callsAfterDrain = w.fake.calls.length;
+    for (const handler of late) {
+      handler({
+        threadId: CALLER_THREAD,
+        turnId: "run-late",
+        outcome: "completed",
+        settledAt: "2026-11-12T10:05:00.000Z",
+      });
+    }
+    expect(events).toHaveLength(1);
+    expect(w.fake.calls).toHaveLength(callsAfterDrain);
+    expect(w.fake.subscriptions.size).toBe(0);
   });
 });
 
