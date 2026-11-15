@@ -21,6 +21,7 @@ import { ORCHESTRATION_PINNED_ARTIFACT } from "./artifact.ts";
 import { createIdentityStore, openOrchestrationStore, nodeStoreDeps } from "./library.ts";
 import {
   createOrchestrationBackendRegistration,
+  type OrchestrationDirectApi,
   type OrchestrationOutcome,
   type OrchestrationServiceDeps,
 } from "./orchestration.ts";
@@ -1499,6 +1500,122 @@ describe("the direct Backend API (step 14)", () => {
     expect(events).toHaveLength(1);
     expect(w.fake.calls).toHaveLength(callsAfterDrain);
     expect(w.fake.subscriptions.size).toBe(0);
+  });
+
+  // M05 review 8, F1. Boundary: the factory's own admission fence and in-flight accounting over the real archive services, with T3's lineage listing (the first read a user's `cancelTree`
+  // makes) held by a gate the test owns. Shows what a drain does about a direct call that is admitted and paused, and what a handle captured before the drain can still start. Does NOT show
+  // the Backend's owner lock (a non-empty `stillLive` keeps it: humanControlResume.aetheria.test.ts), and the archive's own stop is shown by the drain tests below.
+  const USER = { user: true } as const;
+  const cancelRoot = (direct: OrchestrationDirectApi) =>
+    direct.cancelTree({ caller: USER, args: { rootThreadId: ROOT_THREAD } });
+  /** Holds the next lineage listing until `release`; `entered` resolves once a read is paused in it, and `reads` counts every listing asked for. */
+  function gateLineage(w: World) {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const pausedRead = new Promise<void>((resolve) => (entered = resolve));
+    const counts = { reads: 0 };
+    const lineage = w.deps.lineage as { listChildThreads: () => Promise<unknown> };
+    lineage.listChildThreads = async () => {
+      counts.reads += 1;
+      entered();
+      await gate;
+      return { ok: true, threads: w.lineage.threads };
+    };
+    return { release, pausedRead, counts };
+  }
+
+  it("a drain waits for an admitted direct call paused in T3's lineage read, so it never reports clean while the call can still reach T3", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w);
+    const direct = service.direct()!;
+    const gate = gateLineage(w);
+    const cancelled = cancelRoot(direct);
+    await gate.pausedRead;
+    let drained: Awaited<ReturnType<typeof service.drain>> | undefined;
+    const draining = service.drain().then((report) => (drained = report));
+    // Enough turns of the microtask queue for a drain with nothing to wait for to have finished (the red run reported clean within them).
+    for (let turn = 0; turn < 100; turn += 1) await Promise.resolve();
+    // The call is paused and the drain is not clean: it has not reported, and T3 has not been asked to close the root.
+    expect(drained).toBeUndefined();
+    expect(w.fake.closed).toEqual([]);
+    gate.release();
+    expect(ok(await cancelled)).toMatchObject({ rootThreadId: ROOT_THREAD, rootStopped: true });
+    await draining;
+    // The admitted call finished first; only then did the drain report, and it was clean.
+    expect(drained).toEqual({ stopped: [], stillLive: [] });
+    expect(w.fake.closed).toEqual([ROOT_THREAD]);
+  });
+
+  it("a drain whose admitted direct call never ends names it in stillLive at the bound, as it does a channel operation", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w);
+    const direct = service.direct()!;
+    const gate = gateLineage(w);
+    const cancelled = cancelRoot(direct);
+    await gate.pausedRead;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let drained: Awaited<ReturnType<typeof service.drain>> | undefined;
+      void service.drain().then((report) => (drained = report));
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(drained).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(drained?.stopped).toEqual([]);
+      expect(drained?.stillLive).toEqual([expect.stringContaining("cancelTree")]);
+    } finally {
+      vi.useRealTimers();
+      gate.release();
+      await cancelled;
+    }
+  });
+
+  it("a handle captured before the drain admits no new work after it: every asynchronous member is refused and reaches no T3 call", async () => {
+    const w = world();
+    writeMainRecord(w.stateRoot, MAIN);
+    const { service } = await started(w);
+    const direct = service.direct()!;
+    // Only counting here: the gate is open, so a call that got through would read lineage and close the root at once.
+    const gate = gateLineage(w);
+    gate.release();
+    await service.drain();
+    const callsAfterDrain = w.fake.calls.length;
+    const unavailable = { ok: false, code: "ORCHESTRATION_UNAVAILABLE" };
+    const turnUnavailable = { status: "unavailable" };
+    const request = {
+      caller: USER,
+      args: { rootThreadId: ROOT_THREAD, target: "x", scope: "children" },
+    };
+    const turn = {
+      authority: module,
+      sessionId: MAIN,
+      origin: { kind: "goal-round" },
+      content: "x",
+      key: "k",
+    };
+    expect(await cancelRoot(direct)).toMatchObject(unavailable);
+    expect(await direct.listChildren(request as never)).toMatchObject(unavailable);
+    expect(await direct.closeChild(request as never)).toMatchObject(unavailable);
+    expect(await direct.interruptChild(request as never)).toMatchObject(unavailable);
+    expect(await direct.readReport(request as never)).toMatchObject(unavailable);
+    expect(await direct.cancelParentTurn({ caller: who } as never)).toMatchObject(unavailable);
+    expect(await direct.listJobs(request as never)).toMatchObject(unavailable);
+    expect(await direct.readJobOutput(request as never)).toMatchObject(unavailable);
+    expect(await direct.killJob(request as never)).toMatchObject(unavailable);
+    expect(await direct.listOutbox(request as never)).toMatchObject(unavailable);
+    expect(await direct.admitTurn(turn)).toMatchObject(turnUnavailable);
+    expect(await direct.interruptTurn(turn)).toMatchObject(turnUnavailable);
+    // Not one of them read T3's lineage or called a port: nothing reached T3 after the drain.
+    expect(gate.counts.reads).toBe(0);
+    expect(w.fake.calls).toHaveLength(callsAfterDrain);
+    expect(w.fake.closed).toEqual([]);
+    // The refusal is the one a channel operation gets once the service no longer runs.
+    expect(await service.handle("children.list", who, { scope: "children" })).toMatchObject(
+      unavailable,
+    );
   });
 });
 

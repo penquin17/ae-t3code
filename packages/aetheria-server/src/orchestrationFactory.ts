@@ -25,6 +25,7 @@ import type {
   OrchestrationServiceDeps,
   OrchestrationServiceFactory,
 } from "./orchestration.ts";
+import { fenceDirectApi } from "./orchestrationDirect.ts";
 import {
   CHILD_WRITER,
   createChildIdentityWriter,
@@ -202,7 +203,29 @@ export function createOrchestrationFactory(
     /** Aborted when the service drains: it ends every pending wait (see `handle`). */
     const drainAbort = new AbortController();
     let attempts = 0;
-    const inflight = new Map<number, Promise<unknown>>();
+    /** The work a drain waits for: every admitted channel operation and every admitted direct call, by ticket, with the name `stillLive` gives it. */
+    const inflight = new Map<number, { readonly name: string; readonly work: Promise<unknown> }>();
+    /** Counts the tracked work already running. Registers `work` so a drain waits for it, and forgets it when it ends, however it ends. */
+    const track = <T>(name: string, work: Promise<T>): Promise<T> => {
+      attempts += 1;
+      const ticket = attempts;
+      inflight.set(ticket, {
+        name: name === "" ? `operation-${ticket}` : `${name}-${ticket}`,
+        work,
+      });
+      const forget = () => void inflight.delete(ticket);
+      void work.then(forget, forget);
+      return work;
+    };
+    /**
+     * The one admission fence, for the direct API as for `handle`: once the service drains (or is not running) nothing is admitted, and an admitted call is tracked from its first line, so
+     * a handle captured before the drain admits no new work after it.
+     */
+    const directAdmission = {
+      refusalDetail: "the orchestration service is not running",
+      admit: <T>(name: string, call: () => Promise<T>): Promise<T> | undefined =>
+        draining || running === undefined ? undefined : track(name, call()),
+    };
     /** The last lineage listing boot read, to subscribe the roots of the children it found. */
     let bootThreads: readonly ChildLineageThread[] = [];
 
@@ -463,7 +486,8 @@ export function createOrchestrationFactory(
         wakes,
         identity,
         children,
-        direct: Object.freeze({ ...children, ...userJobs, ...userOutbox }),
+        // Every asynchronous member goes through the same admission fence and in-flight accounting as a channel operation (review 8, F1).
+        direct: fenceDirectApi({ ...children, ...userJobs, ...userOutbox }, directAdmission),
         watchers,
         unsubscribeJobCompletionListener,
         notifyLost,
@@ -760,8 +784,6 @@ export function createOrchestrationFactory(
         return Promise.resolve(unavailable("the orchestration service is not running"));
       if (NOT_BUILT.has(operation))
         return Promise.resolve(unavailable(`${operation} is not built yet (Plan steps 11 to 20)`));
-      attempts += 1;
-      const ticket = attempts;
       // A wait (job output, report) also ends when the service drains, so a drain never waits out a long wait nor closes the stores under it. Work that is not a wait is never aborted by a drain.
       const waitSignal = (): AbortSignal =>
         handleOptions?.signal === undefined
@@ -804,10 +826,7 @@ export function createOrchestrationFactory(
           return unavailable(`${operation} failed: ${message(error)}`);
         }
       })();
-      inflight.set(ticket, work);
-      const forget = () => void inflight.delete(ticket);
-      void work.then(forget, forget);
-      return work;
+      return track("", work);
     };
 
     const drain: OrchestrationService["drain"] = async () => {
@@ -823,12 +842,11 @@ export function createOrchestrationFactory(
         (timer as { unref?: () => void }).unref?.();
       });
       const settled = await Promise.race([
-        Promise.allSettled(pending.map(([, work]) => work)).then(() => "settled" as const),
+        Promise.allSettled(pending.map(([, { work }]) => work)).then(() => "settled" as const),
         timeout,
       ]);
       clearTimeout(timer);
-      const stillLive =
-        settled === "timeout" ? pending.map(([ticket]) => `operation-${ticket}`) : [];
+      const stillLive = settled === "timeout" ? pending.map(([, { name }]) => name) : [];
       if (state !== undefined) {
         for (const watcher of state.watchers.values()) {
           try {
@@ -850,8 +868,8 @@ export function createOrchestrationFactory(
         // Review 2, F3: the restart-notice retries end here (timers cancelled, the one in flight joined), so nothing delivers or writes a child record once the stores close.
         await join("children", () => state.children.stop());
         stillLive.push(...joined);
-        // An owner that may still be writing keeps the stores open: they are never closed under live work, so the Backend sees an unclean drain and keeps its owner lock.
-        if (joined.length === 0) {
+        // An owner or operation that may still be writing keeps the stores open: they are never closed under live work, so the Backend sees an unclean drain and keeps its owner lock.
+        if (joined.length === 0 && settled !== "timeout") {
           state.jobs.close();
           state.store.close();
         }
@@ -859,7 +877,7 @@ export function createOrchestrationFactory(
       return { stopped: [], stillLive };
     };
 
-    // The direct API for trusted Backend modules (step 14): the running archive service, nothing wrapped, nothing registered as an XC-6 operation.
+    // The direct API for trusted Backend modules (step 14): the running archive service behind the admission fence and in-flight tracking (`fenceDirectApi`), so drain accounts for direct calls too.
     const direct: OrchestrationService["direct"] = () => (draining ? undefined : running?.direct);
 
     return { start, handle, drain, direct };

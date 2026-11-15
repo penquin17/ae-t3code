@@ -43,7 +43,7 @@
     "@aetheria/orchestration": {
       "archive": "artifacts/aetheria-orchestration-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:e6890113d3aca03e0cf11b5b0bf477381032428b401f2eb429634c427f3eb24b"
+      "stamp": "sha256:327d7c0c48e8bfb55ccc766b08ef938f56c5d2d0ba3f118b361e3940c0f3435e"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",
