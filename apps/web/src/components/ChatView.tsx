@@ -1329,6 +1329,8 @@ export default function ChatView(props: ChatViewProps) {
     setLocalServerErrorsByThreadKey,
     setLocalDraftErrorsByDraftId,
   });
+  // AETHERIA-IP:IP-43 one identity for the memoized ChatComposer: the compiler memoized setThreadError only while onInterrupt used it, and a new one each render re-rendered the composer on every ChatView render
+  const setThreadErrorStable = useStableCallback(setThreadError);
   const {
     pendingApprovals,
     pendingUserInputs,
@@ -3724,7 +3726,8 @@ export default function ChatView(props: ChatViewProps) {
                               handleInteractionModeChange={handleInteractionModeChangeStable}
                               focusComposer={focusComposerStable}
                               scheduleComposerFocus={scheduleComposerFocusStable}
-                              setThreadError={setThreadError}
+                              /* AETHERIA-IP:IP-43 the stable setter (see setThreadErrorStable) */
+                              setThreadError={setThreadErrorStable}
                               onExpandImage={onExpandTimelineImageStable}
                               onFileOpen={openFileAttachmentStable}
                               editingQueuedAttachments={queuedRunEdit.editingAttachments}

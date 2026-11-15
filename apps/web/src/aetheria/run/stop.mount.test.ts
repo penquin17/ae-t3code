@@ -14,8 +14,15 @@ const marker = (id: string) => ["AETHERIA-IP", id].join(":");
 const count = (text: string, token: string) => text.split(token).length - 1;
 
 describe("ChatView (IP-43)", () => {
-  it("carries the IP-43 marker in its three hunks, and only there", () => {
-    expect(count(chatView, marker("IP-43"))).toBe(3);
+  it("carries the IP-43 marker in its five hunks, and only there", () => {
+    expect(count(chatView, marker("IP-43"))).toBe(5);
+  });
+
+  // Swapping T3's Stop removed the only closure that used setThreadError, and the compiler then stopped
+  // memoizing it, so ChatComposer re-rendered on every ChatView render (app-git-status-updates-with-side-chat).
+  it("hands ChatComposer a setThreadError of one identity, not one the compiler happens to memoize", () => {
+    expect(chatView).toContain("const setThreadErrorStable = useStableCallback(setThreadError);");
+    expect(chatView).toMatch(/setThreadError=\{setThreadErrorStable\}\s+onExpandImage/);
   });
 
   it("the button and the thread.stop shortcut are the same function, and it is the Aetheria Stop", () => {
