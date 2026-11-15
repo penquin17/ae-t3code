@@ -26,6 +26,7 @@ import type {
   OrchestrationServiceFactory,
 } from "./orchestration.ts";
 import { fenceDirectApi } from "./orchestrationDirect.ts";
+import { createGoalNoticeDirect } from "./orchestrationGoalNotices.ts";
 import {
   CHILD_WRITER,
   createChildIdentityWriter,
@@ -505,7 +506,11 @@ export function createOrchestrationFactory(
         identity,
         children,
         // Every asynchronous member goes through the same admission fence and in-flight accounting as a channel operation (review 8, F1).
-        direct: fenceDirectApi({ ...children, ...userJobs, ...userOutbox }, directAdmission),
+        // M07 DV1: the goal-notice adapter (enqueue, deliver, state for that one kind) joins the same fence, so it is refused after stop and counted by drain.
+        direct: fenceDirectApi(
+          { ...children, ...userJobs, ...userOutbox, ...createGoalNoticeDirect(outbox) },
+          directAdmission,
+        ),
         watchers,
         unsubscribeJobCompletionListener,
         notifyLost,

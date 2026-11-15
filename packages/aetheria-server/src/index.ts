@@ -106,10 +106,40 @@ export {
   type PiSelectionSeam,
 } from "./routeSeam.ts";
 export {
+  GOALS_PINNED_ARTIFACT,
   INTERACTION_PINNED_ARTIFACT,
   PINNED_ARTIFACT,
   PROVIDERS_PINNED_ARTIFACT,
 } from "./artifact.ts";
+// M07 step 14: the goals module — its row, registration, factory over the real ports, and the workflow authorization port (DV3) the workflow tool of a later step calls.
+export {
+  GOALS_MODULE_NAME,
+  createGoalsRuntime,
+  type GoalRoundState,
+  type GoalsFactory,
+  type GoalsFactoryDeps,
+  type GoalsRuntime,
+} from "./goals/factory.ts";
+export { GOALS_BACKEND_ENTRY, GOALS_BACKEND_ID, goalsBackendModuleRow } from "./goals/goalsRow.ts";
+export {
+  createAdmissionPort,
+  createGoalRootResolver,
+  createInteractionPort,
+  createNoticePort,
+  createThreadReceiptPort,
+} from "./goals/ports.ts";
+export {
+  createGoalsBackendRegistration,
+  type GoalsBackendRegistration,
+  type GoalsRegistrationOptions,
+} from "./goals/registration.ts";
+export {
+  WORKFLOW_TOOL,
+  createWorkflowAuthorizer,
+  type WorkflowAuthorization,
+  type WorkflowAuthorizerOptions,
+  type WorkflowAuthorizerPort,
+} from "./goals/workflowAuthorize.ts";
 export {
   GROUPS_BACKEND_ENTRY,
   GROUPS_BACKEND_ID,
@@ -124,6 +154,19 @@ export {
   type GroupsRecord,
   type GroupsService,
 } from "./groups/groups.ts";
+// M11 steps 8–10: the inspection module's registration, its caller check and the read-only metadata port the app server supplies.
+export { createInspectAccess, type InspectAccessPort } from "./inspect/inspectAccess.ts";
+export {
+  createInspectBackendRegistration,
+  type InspectBackendOptions,
+  type InspectBackendRegistration,
+} from "./inspect/inspectRegistration.ts";
+export type {
+  BackendServicesMetadataPort,
+  DriverMetadata,
+  MetadataFacet,
+  RpcMetadata,
+} from "./inspect/metadataProviders.ts";
 export {
   DELIVERABLES_BACKEND_ENTRY,
   DELIVERABLES_BACKEND_ID,

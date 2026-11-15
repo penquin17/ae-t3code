@@ -1,13 +1,18 @@
-// AETHERIA M11 Plan step 7 — the Backend `inspect-backend` module as data: its ids and its manifest row. No runtime import, so the composition (composition.ts) and the outer digest tests load
-// it as data; the operations that serve it are a later step. The row names no artifact yet: the `@aetheria/inspect` stamp is added to this row and to the outer manifest row at once when that archive is packed.
+// AETHERIA M11 Plan step 7 — the Backend `inspect-backend` module as data: its ids and its manifest row. No runtime import of the pinned archive, so the composition (composition.ts) and the outer digest tests load
+// it as data; the operations that serve it are registered in inspectRegistration.ts. The row names the `@aetheria/inspect` archive this build carries (M11 DV5), in both copies at once.
+import { INSPECT_PINNED_ARTIFACT } from "../artifact.ts";
+
 export const INSPECT_BACKEND_ID = "inspect-backend";
 export const INSPECT_BACKEND_ENTRY = "aetheria:inspect-backend";
 
 /**
- * The manifest row (schema v1, raw) that selects this module on the Backend host. The outer manifest.yml carries the same row; the two copies must give the same digest.
+ * The manifest row (schema v1, raw) that selects this module on the Backend host. The outer manifest.yml carries the same row; the two copies must give the same digest. `stamp` defaults to the
+ * inspect archive this build carries, so a row copied from here is never stale.
  * It serves the Agent host's inspect tools over two XC-6 operations, inspect.list and inspect.query, and declares the deployment's one XC-4 value policy, `showValues`.
  */
-export function inspectBackendModuleRow(): Record<string, unknown> {
+export function inspectBackendModuleRow(
+  options: { readonly stamp?: string } = {},
+): Record<string, unknown> {
   return {
     id: INSPECT_BACKEND_ID,
     host: "backend",
@@ -24,6 +29,13 @@ export function inspectBackendModuleRow(): Record<string, unknown> {
       ],
     },
     owns: ["backend-inspect-state"],
+    compat: {
+      artifacts: {
+        [INSPECT_PINNED_ARTIFACT.package]: {
+          stamp: options.stamp ?? INSPECT_PINNED_ARTIFACT.stamp,
+        },
+      },
+    },
     config: {
       fields: { showValues: { type: "string-list", required: false, secret: false } },
       values: { showValues: [] },

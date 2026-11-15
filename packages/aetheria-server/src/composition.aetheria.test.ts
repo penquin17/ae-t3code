@@ -8,6 +8,7 @@ import { BACKEND_COMPOSITION_ID, backendManifest } from "./composition.ts";
 import { prepareAetheriaBackend } from "./aetheriaBackend.ts";
 import { AGENT_AWARENESS_BACKEND_ID, agentAwarenessBackendModuleRow } from "./agentAwareness.ts";
 import { deliverablesBackendModuleRow } from "./deliverables/deliverablesRow.ts";
+import { goalsBackendModuleRow } from "./goals/goalsRow.ts";
 import { groupsBackendModuleRow } from "./groups/groupsRow.ts";
 import { humanControlBackendModuleRow } from "./humanControlRow.ts";
 import { inspectBackendModuleRow } from "./inspect/inspectRow.ts";
@@ -25,7 +26,7 @@ const digestOf = (manifest: Manifest, stamp?: string) => {
 };
 
 describe("the Backend composition", () => {
-  it("is a root composition of its own selecting only the Backend modules: awareness, providers, human control, orchestration, groups, deliverables and inspect", () => {
+  it("is a root composition of its own selecting only the Backend modules: awareness, providers, human control, orchestration, goals, groups, deliverables and inspect", () => {
     const manifest = backendManifest();
     expect(manifest.compositions).toEqual([
       expect.objectContaining({
@@ -35,6 +36,7 @@ describe("the Backend composition", () => {
           "providers-backend",
           "human-control-backend",
           "orchestration-backend",
+          "goals-backend",
           "groups-backend",
           "deliverables-backend",
           "inspect-backend",
@@ -47,6 +49,7 @@ describe("the Backend composition", () => {
       providersBackendModuleRow(),
       humanControlBackendModuleRow(),
       orchestrationBackendModuleRow(),
+      goalsBackendModuleRow(),
       groupsBackendModuleRow(),
       deliverablesBackendModuleRow(),
       inspectBackendModuleRow(),

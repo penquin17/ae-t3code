@@ -21,8 +21,9 @@ import {
   agentAwarenessBackendModuleRow,
   createAgentAwarenessBackendRegistration,
 } from "./agentAwareness.ts";
-import { PINNED_ARTIFACT } from "./artifact.ts";
+import { INSPECT_PINNED_ARTIFACT, PINNED_ARTIFACT, PINNED_ARTIFACT_STAMPS } from "./artifact.ts";
 import { BACKEND_ENTRY_ALLOWLIST } from "./composition.ts";
+import { inspectBackendModuleRow } from "./inspect/inspectRow.ts";
 import {
   EVIDENCE_LIBRARY_EXPORTS,
   INTERACTION_LIBRARY_EXPORTS,
@@ -56,6 +57,8 @@ describe("the pinned archive", () => {
     expect(Object.keys(manifest.aetheriaArtifacts).sort()).toEqual([
       "@aetheria/awareness",
       "@aetheria/evidence",
+      "@aetheria/goals",
+      "@aetheria/inspect",
       "@aetheria/interaction",
       "@aetheria/orchestration",
       "@aetheria/providers",
@@ -174,6 +177,7 @@ describe("the Backend agent-awareness module", () => {
       "aetheria:providers-backend",
       "aetheria:human-control-backend",
       "aetheria:orchestration-backend",
+      "aetheria:goals-backend",
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
       "aetheria:inspect-backend",
@@ -244,5 +248,31 @@ describe("the Backend agent-awareness module", () => {
     expect(result.outcome === "refused" && result.faults.map((f) => f.code)).toEqual([
       "stale-stamp",
     ]);
+  });
+});
+
+describe("the inspect archive and its Backend row (M11 DV5)", () => {
+  const declared = manifest.aetheriaArtifacts["@aetheria/inspect"];
+
+  it("has the declared stamp as its independently computed SHA-256, and the Backend gives it to the validator", () => {
+    const archive = NodeFS.readFileSync(NodePath.join(pkgDir, declared.archive));
+    const computed = `sha256:${NodeCrypto.createHash("sha256").update(archive).digest("hex")}`;
+    expect(declared.stamp).toBe(computed);
+    expect(INSPECT_PINNED_ARTIFACT).toEqual({
+      package: "@aetheria/inspect",
+      version: "0.1.0",
+      stamp: computed,
+    });
+    expect(PINNED_ARTIFACT_STAMPS["@aetheria/inspect"]).toBe(computed);
+  });
+
+  it("names the archive this build carries, and a stamp override replaces only that stamp", () => {
+    expect(inspectBackendModuleRow()).toMatchObject({
+      compat: { artifacts: { "@aetheria/inspect": { stamp: INSPECT_PINNED_ARTIFACT.stamp } } },
+    });
+    const stale = `sha256:${"1".repeat(64)}`;
+    expect(inspectBackendModuleRow({ stamp: stale })).toMatchObject({
+      compat: { artifacts: { "@aetheria/inspect": { stamp: stale } } },
+    });
   });
 });

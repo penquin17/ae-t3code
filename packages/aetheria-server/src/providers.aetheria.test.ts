@@ -25,6 +25,7 @@ import {
   createHumanControlBackendRegistration,
 } from "./humanControl.ts";
 import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
+import { createGoalsBackendRegistration } from "./goals/registration.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
@@ -69,6 +70,7 @@ function prepare(
       }),
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
+      createGoalsBackendRegistration(),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       createInspectBackendRegistration(),
@@ -89,6 +91,8 @@ describe("the second pinned archive", () => {
     expect(Object.keys(manifest.aetheriaArtifacts).sort()).toEqual([
       "@aetheria/awareness",
       "@aetheria/evidence",
+      "@aetheria/goals",
+      "@aetheria/inspect",
       "@aetheria/interaction",
       "@aetheria/orchestration",
       "@aetheria/providers",
@@ -127,6 +131,7 @@ describe("the providers module's descriptor", () => {
       PROVIDERS_BACKEND_ENTRY,
       HUMAN_CONTROL_BACKEND_ENTRY,
       "aetheria:orchestration-backend",
+      "aetheria:goals-backend",
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
       "aetheria:inspect-backend",
@@ -159,6 +164,7 @@ describe("the providers module's descriptor", () => {
       "providers-backend",
       "human-control-backend",
       "orchestration-backend",
+      "goals-backend",
       "groups-backend",
       "deliverables-backend",
       "inspect-backend",
@@ -168,6 +174,7 @@ describe("the providers module's descriptor", () => {
       "providers-backend",
       "human-control-backend",
       "orchestration-backend",
+      "goals-backend",
       "groups-backend",
       "deliverables-backend",
       "inspect-backend",
@@ -301,6 +308,7 @@ describe("production mode over the real archive", () => {
       "inspect-backend",
       "deliverables-backend",
       "groups-backend",
+      "goals-backend",
       "orchestration-backend",
       "human-control-backend",
       "providers-backend",

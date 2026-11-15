@@ -15,6 +15,8 @@
   "dependencies": {
     "@aetheria/awareness": "file:./artifacts/aetheria-awareness-0.1.0.tgz",
     "@aetheria/evidence": "file:./artifacts/aetheria-evidence-0.1.0.tgz",
+    "@aetheria/goals": "file:./artifacts/aetheria-goals-0.1.0.tgz",
+    "@aetheria/inspect": "file:./artifacts/aetheria-inspect-0.1.0.tgz",
     "@aetheria/interaction": "file:./artifacts/aetheria-interaction-0.1.0.tgz",
     "@aetheria/orchestration": "file:./artifacts/aetheria-orchestration-0.1.0.tgz",
     "@aetheria/providers": "file:./artifacts/aetheria-providers-0.1.0.tgz",
@@ -35,6 +37,16 @@
       "version": "0.1.0",
       "stamp": "sha256:51dc3f8c18d66493bbe5e785a5bd020817d456ba1bc604da94c1bc1cf328edd8"
     },
+    "@aetheria/goals": {
+      "archive": "artifacts/aetheria-goals-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:017dcea73c92939897fdf35f2e28ec6bff3fa68e6bdb1d8732040388bec793d1"
+    },
+    "@aetheria/inspect": {
+      "archive": "artifacts/aetheria-inspect-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:26b41cd0c0120cda2b6017fedddfa29111152a2abd5c9dbeb5fe13d3cc2d23c0"
+    },
     "@aetheria/interaction": {
       "archive": "artifacts/aetheria-interaction-0.1.0.tgz",
       "version": "0.1.0",
@@ -43,7 +55,7 @@
     "@aetheria/orchestration": {
       "archive": "artifacts/aetheria-orchestration-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:327d7c0c48e8bfb55ccc766b08ef938f56c5d2d0ba3f118b361e3940c0f3435e"
+      "stamp": "sha256:58603b154496b737fcd4970a5886ac4ed54569fbe100df34f2b16edf30817f2b"
     },
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",

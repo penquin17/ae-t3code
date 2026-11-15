@@ -31,6 +31,7 @@ import {
 } from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "./adapter.ts";
+import type { GoalNoticeDirect } from "./orchestrationGoalNotices.ts";
 import type { ChildService, JobUserReads, OutboxUserRead } from "./library.ts";
 import type {
   ChildLineageReader,
@@ -98,6 +99,7 @@ export interface OrchestrationService {
 export type OrchestrationDirectApi = Pick<
   ChildService,
   | "admitTurn"
+  | "admissionState"
   | "interruptTurn"
   | "subscribeSettled"
   | "closeChild"
@@ -109,7 +111,8 @@ export type OrchestrationDirectApi = Pick<
   | "currentRoute"
 > &
   JobUserReads &
-  OutboxUserRead;
+  OutboxUserRead &
+  GoalNoticeDirect;
 
 /** What a service factory is given: the Backend's own seams, nothing else. The identity store, job registry and outbox are the service's, under `stateRoot`. */
 export interface OrchestrationServiceDeps {

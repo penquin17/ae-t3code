@@ -20,6 +20,7 @@ import {
 } from "./agentAwareness.ts";
 import { createHumanControlBackendRegistration } from "./humanControl.ts";
 import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
+import { createGoalsBackendRegistration } from "./goals/registration.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
@@ -72,6 +73,7 @@ function prepare(providers: ProvidersMode) {
       }),
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
+      createGoalsBackendRegistration(),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       createInspectBackendRegistration(),

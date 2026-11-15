@@ -12,6 +12,7 @@ import {
   DELIVERABLES_BACKEND_ID,
   deliverablesBackendModuleRow,
 } from "./deliverables/deliverablesRow.ts";
+import { GOALS_BACKEND_ENTRY, GOALS_BACKEND_ID, goalsBackendModuleRow } from "./goals/goalsRow.ts";
 import {
   GROUPS_BACKEND_ENTRY,
   GROUPS_BACKEND_ID,
@@ -46,6 +47,7 @@ export const BACKEND_ENTRY_ALLOWLIST: readonly string[] = Object.freeze([
   PROVIDERS_BACKEND_ENTRY,
   HUMAN_CONTROL_BACKEND_ENTRY,
   ORCHESTRATION_BACKEND_ENTRY,
+  GOALS_BACKEND_ENTRY,
   GROUPS_BACKEND_ENTRY,
   DELIVERABLES_BACKEND_ENTRY,
   INSPECT_BACKEND_ENTRY,
@@ -63,6 +65,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
       providersBackendModuleRow(),
       humanControlBackendModuleRow(),
       orchestrationBackendModuleRow(),
+      goalsBackendModuleRow(),
       groupsBackendModuleRow(),
       deliverablesBackendModuleRow(),
       inspectBackendModuleRow(),
@@ -81,6 +84,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
           PROVIDERS_BACKEND_ID,
           HUMAN_CONTROL_BACKEND_ID,
           ORCHESTRATION_BACKEND_ID,
+          GOALS_BACKEND_ID,
           GROUPS_BACKEND_ID,
           DELIVERABLES_BACKEND_ID,
           INSPECT_BACKEND_ID,

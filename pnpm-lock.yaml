@@ -1544,6 +1544,12 @@ importers:
       '@aetheria/evidence':
         specifier: file:./artifacts/aetheria-evidence-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz
+      '@aetheria/goals':
+        specifier: file:./artifacts/aetheria-goals-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-goals-0.1.0.tgz
+      '@aetheria/inspect':
+        specifier: file:./artifacts/aetheria-inspect-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-inspect-0.1.0.tgz
       '@aetheria/interaction':
         specifier: file:./artifacts/aetheria-interaction-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz
@@ -2598,13 +2604,23 @@ packages:
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
+  '@aetheria/goals@file:packages/aetheria-server/artifacts/aetheria-goals-0.1.0.tgz':
+    resolution: {integrity: sha512-3ScLIh2rXOsWxhbzZTCQc9i18sMyirBORBKT1vhTesTKO9TcrwYC7/WWhaNn/TTV12VAqsjTUHzqHWRNn+GbfQ==, tarball: file:packages/aetheria-server/artifacts/aetheria-goals-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@aetheria/inspect@file:packages/aetheria-server/artifacts/aetheria-inspect-0.1.0.tgz':
+    resolution: {integrity: sha512-s0LiHr5kYHNwHeo9vE0IcZq9givZS/2P4LK32WufKR78VPvMhD0inhnZzPKs2DA7gIct4FCk1z0RJr6yl4Il1A==, tarball: file:packages/aetheria-server/artifacts/aetheria-inspect-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
   '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz':
     resolution: {integrity: sha512-kqQHj/Wj6L2igAdwn94PtFj0yxA9rFv6LNu4deYPn4g5D/2LmLJ310C7S5ZwND0MYFRu8mnZcyrxmtou5AdMCA==, tarball: file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
   '@aetheria/orchestration@file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz':
-    resolution: {integrity: sha512-pLfk/baRAq8usz/XPxBtHJfqLhFI7Mu1UQzOzNfvjwGmqkPAxLeWZmF0dKsU9bZJ7Blln9oiK1kZbdLhQMwWRw==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
+    resolution: {integrity: sha512-w2auGwmzQoz+bkFuj4iXLQs7nmy/OUc+LEqCNuqDWQTVnt3oiSyKSDLBmH5w31KFd+I/kxqXTspSH5ATNTPRIQ==, tarball: file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
@@ -12625,6 +12641,10 @@ snapshots:
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz': {}
 
   '@aetheria/evidence@file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz': {}
+
+  '@aetheria/goals@file:packages/aetheria-server/artifacts/aetheria-goals-0.1.0.tgz': {}
+
+  '@aetheria/inspect@file:packages/aetheria-server/artifacts/aetheria-inspect-0.1.0.tgz': {}
 
   '@aetheria/interaction@file:packages/aetheria-server/artifacts/aetheria-interaction-0.1.0.tgz': {}
 

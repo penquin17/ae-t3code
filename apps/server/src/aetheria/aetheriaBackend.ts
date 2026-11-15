@@ -40,6 +40,8 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { layerFromBackend } from "./backendComposition.ts";
 import { makeCallerContext } from "./callerContext.ts";
+import * as GoalRoundGuard from "./goalRoundGuard.ts";
+import { createBackendServicesMetadata } from "./inspectMetadata.ts";
 import { makeThreadTurnDispatch } from "./humanControlDelivery.ts";
 import { makeLaunchFacts } from "./launchFacts.ts";
 import { makeLineageReader } from "./lineageReader.ts";
@@ -101,6 +103,12 @@ export const makeLayer = (
         );
       const turnDispatch = yield* makeThreadTurnDispatch(threads.value, receipts.value);
       const startup = yield* Effect.serviceOption(ServerRuntimeStartup.ServerRuntimeStartup);
+      // M07 DV2 (IP-24): T3's recovery pass consults this guard per thread and waits for it before it decides. Present only when the layer is built from `layer` below (state root set); a
+      // bare `makeLayer` has none and installs nothing.
+      const goalGuard = yield* Effect.serviceOption(GoalRoundGuard.GoalRoundGuard);
+      // DV8: the waiting recovery pass is released on EVERY ending of this layer — installed below on success, settled here on a failed start or a teardown that came first (no-op once installed).
+      if (Option.isSome(goalGuard))
+        yield* Effect.addFinalizer(() => Effect.sync(() => goalGuard.value.settle()));
       // M05 step 6 (C10): T3 as the children service sees it. A graph without these services leaves the module registered but unavailable (logged), because
       // managed work is not part of late-answer delivery and must not stop the Backend; nothing is stubbed.
       const orchestrator = yield* Effect.serviceOption(Orchestrator.OrchestratorV2);
@@ -185,6 +193,8 @@ export const makeLayer = (
         ...managedWork,
         ...(orchestrationFactory === undefined ? {} : { orchestrationFactory }),
         ...(callerContext === undefined ? {} : { callerContext }),
+        // M11: the read-only driver and RPC metadata for the inspection module. Its enablement stays absent here (inspection off) until the deployment value is decided.
+        inspect: { metadata: createBackendServicesMetadata() },
         ...(options.checkout === undefined ? {} : { checkout: options.checkout }),
         ...(options.interactionFactory === undefined
           ? {}
@@ -250,6 +260,13 @@ export const makeLayer = (
             Effect.ignoreCause,
           ),
       );
+      // M07 DV2: the Backend has started and has reconciled every goal journal, so the guard can answer from them, and the waiting recovery pass is released. The slot is NOT emptied at scope close:
+      // T3's shutdown preparation runs after this layer has drained, and the answer is read from the journal, which a drained service leaves intact; an emptied slot would read `unknown` for every
+      // main thread and stop ordinary threads from continuing after a restart.
+      if (Option.isSome(goalGuard))
+        yield* Effect.sync(() =>
+          goalGuard.value.install((threadId) => service.goalRoundOfThread(threadId)),
+        );
       // M09 step 11 (IP-17): T3's Pi adapter reads the route policy from a process slot. Filled once the Backend runs, emptied before it drains.
       yield* Effect.acquireRelease(
         Effect.sync(() => installPiSelectionSeam(service.piSelectionSeam)),
@@ -296,7 +313,23 @@ export const makeLayer = (
         Effect.forkScoped,
       );
       return service;
-    }),
+    }).pipe(
+      // DV8: any failure of this layer (a graph without T3's services, a refused composition, a Backend that did not start) releases the waiting recovery pass with an EMPTY slot, which answers
+      // `unknown`: nothing is continued in that startup, and it never waits forever. Logged once here; a slot already filled is untouched.
+      Effect.tapCause(() =>
+        Effect.serviceOption(GoalRoundGuard.GoalRoundGuard).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.void,
+              onSome: (guard) =>
+                Effect.logWarning(
+                  "The Aetheria Backend layer failed: T3's recovery pass will not continue any main thread in this startup (goal-round guard unknown)",
+                ).pipe(Effect.andThen(Effect.sync(() => guard.settle()))),
+            }),
+          ),
+        ),
+      ),
+    ),
   ).pipe(
     // The runtime's id allocator is stateless (`Layer.succeed`) and `RuntimeLayer.layerProduction` provides it only to the layers inside it, so it is NOT in this
     // layer's context in the server graph; the Orchestrator, the provider session manager and ThreadManagementService are. Supplying it here makes the instance
@@ -356,11 +389,12 @@ export const layer = whenStateRoot((stateRoot) =>
       const checkout = yield* Config.String(CHECKOUT_ENV).pipe(Config.option);
       // M06 steps 6 and 13: T3's thread dispatch comes from the runtime services and the command receipt store from server.ts (IP-23); makeLayer
       // requires both and fails the Backend start without them.
+      // M07 DV2 (IP-24): the same guard constant ProviderRuntimeRecoveryService provides, so recovery and this layer share one instance.
       return makeLayer(stateRoot, {
         ...(Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {}),
         ...(Option.isSome(piAgentDir) ? { piAgentDir: piAgentDir.value } : {}),
         ...(Option.isSome(checkout) ? { checkout: checkout.value } : {}),
-      });
+      }).pipe(Layer.provide(GoalRoundGuard.layerWhenAetheria));
     }),
   ),
 );

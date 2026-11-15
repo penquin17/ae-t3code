@@ -14,7 +14,14 @@ export interface DirectAdmission {
 }
 
 /** The two members whose answer is a status, not an `ok` result; a refusal keeps the member's own answer shape. */
-const TURN_MEMBERS: ReadonlySet<string> = new Set(["admitTurn", "interruptTurn"]);
+const TURN_MEMBERS: ReadonlySet<string> = new Set([
+  "admitTurn",
+  "admissionState",
+  "interruptTurn",
+  // M07 DV1: the goal-notice adapter's answers are status unions too, never `ok` results
+  "goalNoticeEnqueue",
+  "goalNoticeDeliver",
+]);
 
 /**
  * The members that answer at once and own no store or T3 call: a subscription (the archive's own stop drops it at drain) and the synchronous, never-throwing route read. They stay as they

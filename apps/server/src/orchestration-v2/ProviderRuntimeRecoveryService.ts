@@ -16,6 +16,8 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+// AETHERIA-IP:IP-24 Option reads the optional goal-round guard
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -23,6 +25,8 @@ import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
+// AETHERIA-IP:IP-24 the optional goal-round guard (present only with the Aetheria Backend configured)
+import * as GoalRoundGuard from "../aetheria/goalRoundGuard.ts";
 import { restartContinuationRun } from "./RestartContinuation.ts";
 import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
 import { queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
@@ -185,6 +189,8 @@ export const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const eventSink = yield* EventSink.EventSinkV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
+  // AETHERIA-IP:IP-24 absent without the Aetheria Backend: bare T3 keeps upstream behaviour
+  const goalGuard = yield* Effect.serviceOption(GoalRoundGuard.GoalRoundGuard);
   const outbox = yield* EffectOutbox.EffectOutboxV2;
   type RecoverySession = ProjectionStore.ProjectionRuntimeRecoveryState["providerSessions"][number];
   /** Shared sessions stop on their first recovered thread; later threads still decide wakes from pre-recovery liveness. */
@@ -814,9 +820,16 @@ export const make = Effect.gen(function* () {
     thread.lineage?.relationshipToParent === "subagent" ||
     thread.lineage?.relationshipToParent === "fork";
 
+  // AETHERIA-IP:IP-24 a main thread whose goal round was in flight is never continued either (M07 D9, N1): the guard answers from M07's persisted running-round record, and an answer it cannot
+  // give counts as in flight (fail closed). Without a registered guard nothing is excluded.
+  const goalRoundInFlight = (threadId: string) =>
+    Option.isSome(goalGuard) && goalGuard.value.inFlight(threadId) !== "none";
+
   const reconcile = Effect.fn("ProviderRuntimeRecoveryService.reconcile")(function* (
     trigger: "startup" | "shutdown",
   ) {
+    // AETHERIA-IP:IP-24 the startup pass waits until the Aetheria Backend has started and filled the guard (the Backend's layer is built after this fiber starts); an absent guard waits for nothing
+    if (trigger === "startup" && Option.isSome(goalGuard)) yield* goalGuard.value.awaitReady;
     const continueAfterRestart = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     const threadIds = yield* projections
       .getRecoveryThreadIds("runtime")
@@ -844,6 +857,8 @@ export const make = Effect.gen(function* () {
       const enabled =
         // AETHERIA-IP:IP-24 a child is never continued after a restart (see isChildLineage)
         !isChildLineage(projection.thread) &&
+        // AETHERIA-IP:IP-24 and never a thread with a goal round in flight (see goalRoundInFlight)
+        !goalRoundInFlight(threadId) &&
         continueAfterRestart !== null &&
         resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
           .continueThreadsAfterServerUpdate;
@@ -882,6 +897,8 @@ export const make = Effect.gen(function* () {
         if (
           // AETHERIA-IP:IP-24 a child is never prepared for continuation (see isChildLineage)
           isChildLineage(projection.thread) ||
+          // AETHERIA-IP:IP-24 nor a thread with a goal round in flight (see goalRoundInFlight)
+          goalRoundInFlight(threadId) ||
           !resolveProjectSettings(enabled, projection.thread.projectId).settings
             .continueThreadsAfterServerUpdate
         )
@@ -920,4 +937,7 @@ export const make = Effect.gen(function* () {
   return ProviderRuntimeRecoveryService.of({ reconcile, prepareForShutdown, recover });
 });
 
-export const layer = Layer.effect(ProviderRuntimeRecoveryService, make);
+// AETHERIA-IP:IP-24 the goal-round guard, provided only when AETHERIA_STATE_ROOT is set; the Backend layer provides the same constant, so both see one instance
+export const layer = Layer.effect(ProviderRuntimeRecoveryService, make).pipe(
+  Layer.provide(GoalRoundGuard.layerWhenAetheria),
+);

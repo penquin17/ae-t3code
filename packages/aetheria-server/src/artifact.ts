@@ -2,7 +2,7 @@
 //
 // The outer build wrote each archive and its stamp (tools/lib/foundations/artifact.mjs); the manifest's `aetheriaArtifacts` entries are the
 // declaration the graphs check compares with the archive bytes. The Backend publishes these stamps as facts of its composition, so a
-// module whose row expects another stamp is refused as stale. Five archives are accepted (M09 A15, M06, M05): awareness, providers, interaction, evidence and orchestration.
+// module whose row expects another stamp is refused as stale. Seven archives are accepted (M09 A15, M06, M05, M07, M11): awareness, providers, interaction, evidence, orchestration, goals and inspect.
 import manifest from "../package.json" with { type: "json" };
 
 const declaredArtifacts = manifest.aetheriaArtifacts as Record<
@@ -33,6 +33,12 @@ export const EVIDENCE_PINNED_ARTIFACT = pinned("@aetheria/evidence");
 /** The orchestration archive (M05 step 9): the children service, its stores and M03's identity store as the child writer. The `orchestration-backend` row names it. */
 export const ORCHESTRATION_PINNED_ARTIFACT = pinned("@aetheria/orchestration");
 
+/** The goals archive (M07 step 14): the goal store and service. The `goals-backend` row names it. */
+export const GOALS_PINNED_ARTIFACT = pinned("@aetheria/goals");
+
+/** The inspect archive (M11 DV5): the read-only inspection core — the closed protocol, strict codecs, the projector and the provider registry. The `inspect-backend` row names it. */
+export const INSPECT_PINNED_ARTIFACT = pinned("@aetheria/inspect");
+
 /** Every stamp the Backend gives the shared validator, by archive id. */
 export const PINNED_ARTIFACT_STAMPS: Readonly<Record<string, string>> = Object.freeze({
   [PINNED_ARTIFACT.package]: PINNED_ARTIFACT.stamp,
@@ -40,4 +46,6 @@ export const PINNED_ARTIFACT_STAMPS: Readonly<Record<string, string>> = Object.f
   [INTERACTION_PINNED_ARTIFACT.package]: INTERACTION_PINNED_ARTIFACT.stamp,
   [EVIDENCE_PINNED_ARTIFACT.package]: EVIDENCE_PINNED_ARTIFACT.stamp,
   [ORCHESTRATION_PINNED_ARTIFACT.package]: ORCHESTRATION_PINNED_ARTIFACT.stamp,
+  [GOALS_PINNED_ARTIFACT.package]: GOALS_PINNED_ARTIFACT.stamp,
+  [INSPECT_PINNED_ARTIFACT.package]: INSPECT_PINNED_ARTIFACT.stamp,
 });

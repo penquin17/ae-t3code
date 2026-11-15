@@ -10,7 +10,7 @@ import {
 import { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 import type { BackendAdapter, BackendRegistration } from "./adapter.ts";
 import { createAgentAwarenessBackendRegistration } from "./agentAwareness.ts";
-import { BACKEND_COMPOSITION_ID } from "./composition.ts";
+import { BACKEND_COMPOSITION_ID, backendManifest } from "./composition.ts";
 import {
   createProvidersBackendRegistration,
   type ProvidersBackendRegistration,
@@ -22,7 +22,20 @@ import {
   type DeliverablesService,
 } from "./deliverables/deliverables.ts";
 import { createGroupsBackendRegistration, type GroupsService } from "./groups/groups.ts";
+import { createGoalsRuntime, type GoalRoundState } from "./goals/factory.ts";
+import type { GoalService } from "./goals/goalsEntry.ts";
+import {
+  createAdmissionPort,
+  createGoalRootResolver,
+  createInteractionPort,
+  createNoticePort,
+  createThreadReceiptPort,
+} from "./goals/ports.ts";
+import { createGoalsBackendRegistration } from "./goals/registration.ts";
+import { createInspectAccess } from "./inspect/inspectAccess.ts";
 import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
+import { inspectBackendModuleRow } from "./inspect/inspectRow.ts";
+import type { BackendServicesMetadataPort } from "./inspect/metadataProviders.ts";
 import {
   createHumanControlBackendRegistration,
   type HumanControlService,
@@ -150,6 +163,14 @@ export interface AetheriaBackendServiceOptions {
    * children service uses). Without it `deliverables.declare` answers unavailable: the turn of a declaration is never guessed (M10 step 13).
    */
   readonly callerContext?: CallerContextPort;
+  /**
+   * M11 inspection, from trusted construction only: `enablement` ({ enabled?, deployment? }) turns it on (absent: OFF, both operations answer unavailable) and `metadata` is the read-only driver and RPC
+   * metadata the app server supplies (absent: the `backend-services` provider is not registered).
+   */
+  readonly inspect?: {
+    readonly enablement?: { readonly enabled?: unknown; readonly deployment?: unknown } | undefined;
+    readonly metadata?: BackendServicesMetadataPort | undefined;
+  };
 }
 
 export interface AetheriaBackendService {
@@ -221,6 +242,17 @@ export interface AetheriaBackendService {
    * handlers and the download route; undefined before start and after drain. A caller that finds it undefined answers unavailable.
    */
   deliverables(): DeliverablesService | undefined;
+  /**
+   * The ONE goal service (M07), shared by the client handlers and the model's goal tools of later steps; undefined before start, after drain, and when managed work is not configured. A caller that
+   * finds it undefined answers unavailable, never "no goal".
+   */
+  goals(): GoalService | undefined;
+  /**
+   * T3's recovery guard (M07 DV2, N1): is a goal round in flight for the thread's session? `none` only when the goal journal says so (or the module is unconfigured, so none can exist); a thread
+   * the index does not bind answers `none` only when no root has a round in flight; before start, after a failed start and for an unreadable journal or index record it answers `unknown`, which
+   * recovery reads as in flight. It stays answerable after drain, from the journal, for T3's shutdown preparation. Synchronous, read-only, never throws.
+   */
+  goalRoundOfThread(threadId: string): GoalRoundState;
 }
 
 export type CreateServiceResult =
@@ -415,6 +447,33 @@ export function createAetheriaBackendService(
             }),
   });
   orchestrationNow = () => orchestrationRegistration.service();
+  // M07 step 14: the ONE goal service over the real ports. Configured only when the children service is (its direct calls and T3's receipt are the goals' admission); it starts after M06 and M05
+  // (its row requires them) and drains before them. The owner capability its store asks before every write is this service's own lock: held between acquire and release.
+  let holdingOwnerLock = false;
+  const goalsRegistration = createGoalsBackendRegistration({
+    create:
+      orchestrationFactory === undefined || childThreads === undefined
+        ? undefined
+        : () =>
+            createGoalsRuntime({
+              stateRoot: options.stateRoot,
+              now: options.now ?? Date.now,
+              resolver: createGoalRootResolver({
+                index,
+                resolve: (caller, claimedSessionId) => resolver.resolve(caller, claimedSessionId),
+              }),
+              interaction: createInteractionPort(() => humanControlRegistration.interactions()),
+              admission: createAdmissionPort(() => orchestrationRegistration.service()?.direct()),
+              notices: createNoticePort(() => orchestrationRegistration.service()?.direct()),
+              receipts: createThreadReceiptPort({
+                threads: childThreads,
+                threadOf: sessionAccess.threadOf,
+              }),
+              assertHeld: () => {
+                if (!holdingOwnerLock) throw new Error("the Backend owner lock is not held");
+              },
+            }),
+  });
   // M10 step 7: the ONE session-group store under the state root's aetheria-ui folder; the client RPC handlers reach it through `groups()`.
   const groupsRegistration = createGroupsBackendRegistration({
     stateRoot: options.stateRoot,
@@ -452,6 +511,14 @@ export function createAetheriaBackendService(
       if (sessionId !== undefined) void resumeBarrier.track(sessionId, handling);
     },
   });
+  // The inspect module reads this Backend's live status; the adapter is built by `prepareAetheriaBackend` below, so the read is looked up at each call (not running is unreadable, never a guess).
+  let backendNow: () => BackendAdapter = () => {
+    throw new Error("the Backend is not prepared yet");
+  };
+  // The deployment's `showValues` is the inspect row's own declared value (empty: shapes only).
+  const inspectShowValues = (
+    inspectBackendModuleRow() as { config?: { values?: { showValues?: unknown } } }
+  ).config?.values?.showValues;
   const prepared = prepareAetheriaBackend({
     composition,
     registrations: [
@@ -459,14 +526,33 @@ export function createAetheriaBackendService(
       providersRegistration,
       humanControlRegistration,
       orchestrationRegistration,
+      goalsRegistration,
       groupsRegistration,
       deliverablesRegistration,
-      createInspectBackendRegistration(),
+      // M11: the inspection module over this Backend's own manifest and live status (late-bound: the adapter exists only once the registrations are prepared), the caller check of M03's
+      // main-session rule and, when the host supplies it, the read-only driver and RPC metadata. Inspection is OFF unless trusted construction names `inspect.enablement`.
+      createInspectBackendRegistration({
+        access: createInspectAccess({
+          reader: identityReader,
+          index,
+          checkout: options.checkout,
+          env: options.auditRoles?.env,
+          homedir: options.auditRoles?.homedir,
+        }),
+        enablement: options.inspect?.enablement,
+        sources: {
+          manifest: () => options.manifest ?? backendManifest({ composition }),
+          status: () => backendNow().status(),
+        },
+        metadata: options.inspect?.metadata,
+        showValues: inspectShowValues,
+      }),
     ],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
   if (prepared.outcome === "refused") return { outcome: "refused", faults: prepared.faults };
   const { backend } = prepared;
+  backendNow = () => backend;
 
   const retention = createSnapshotRetention({
     index,
@@ -500,7 +586,9 @@ export function createAetheriaBackendService(
               : `the Backend state root's owner lock cannot be used: ${taken.detail}`,
           );
         held = taken.lock;
+        holdingOwnerLock = true;
         if (disposing) {
+          holdingOwnerLock = false;
           held.release();
           return backend.start();
         }
@@ -510,7 +598,10 @@ export function createAetheriaBackendService(
         if (result.outcome === "started") await board.reconcileAtStart();
         // A start that did not complete releases the lock only when nothing can still be writing: refused before any module was called, or rolled back with a clean disposal report. A
         // rollback that left work live (or could not tell) keeps the lock, as an unclean dispose does, so a successor waits for the proven-dead takeover (review 9, F1).
-        else if (result.outcome === "refused" || result.disposal.ok) held.release();
+        else if (result.outcome === "refused" || result.disposal.ok) {
+          holdingOwnerLock = false;
+          held.release();
+        }
         return result;
       })();
       return started;
@@ -521,7 +612,10 @@ export function createAetheriaBackendService(
       const report = await pending;
       await started?.catch(() => undefined);
       // An unclean drain keeps the lock: this process may still hold writes, so a successor waits for the proven-dead takeover.
-      if (report.ok) held?.release();
+      if (report.ok) {
+        holdingOwnerLock = false;
+        held?.release();
+      }
       return report;
     },
     status: () => backend.status(),
@@ -599,6 +693,17 @@ export function createAetheriaBackendService(
     orchestration: () => orchestrationRegistration.service(),
     groups: () => groupsRegistration.groups(),
     deliverables: () => deliverablesRegistration.deliverables(),
+    goals: () => goalsRegistration.service(),
+    goalRoundOfThread: (threadId) => {
+      try {
+        const found = index.lookup(threadId);
+        if (found.status === "ok") return goalsRegistration.roundInFlight(found.binding.sessionId);
+        // A thread the index holds no binding for names no session to ask about: no round is its own, but any round in flight may be (it could be the thread's before the index re-ingested).
+        return found.status === "absent" ? goalsRegistration.anyRoundInFlight() : "unknown";
+      } catch {
+        return "unknown";
+      }
+    },
   };
   return { outcome: "prepared", service: Object.freeze(service) };
 }

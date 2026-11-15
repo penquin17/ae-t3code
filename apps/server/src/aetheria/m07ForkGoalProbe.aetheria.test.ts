@@ -68,7 +68,13 @@ describe("probe 4 (fork half): typed /goal ingress and the fork observation poin
     const dir = NodePath.join(SERVER, "aetheria");
     const writers = NodeFS.readdirSync(dir)
       .filter((name) => name.endsWith(".ts") && !name.includes(".test.") && !name.startsWith("m07"))
-      .filter((name) => /\bgoal\b/i.test(NodeFS.readFileSync(NodePath.join(dir, name), "utf8")));
+      .filter((name) => {
+        const text = NodeFS.readFileSync(NodePath.join(dir, name), "utf8");
+        // M07 step 14: the Backend wiring and the round guard speak of the goal ROUND (M07's own concept), never of T3's thread `goal`; those two files name no property or field called `goal`.
+        if (name === "aetheriaBackend.ts" || name === "goalRoundGuard.ts")
+          return /\.goal\b|\bgoal\s*[:=]|\bgoal\?\./.test(text);
+        return /\bgoal\b/i.test(text);
+      });
     expect(writers).toEqual([]);
     // The orchestration command surface names `goal` only as T3's own /goal handling (CommandPolicy / Orchestrator / turn start), gated to codex and claude above.
     const commandWriters = [
