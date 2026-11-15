@@ -2104,6 +2104,153 @@ describe("drain", () => {
     );
   });
 
+  // Review 7, F1. PENDING THE RE-STAMP: this factory test loads its fork's installed orchestration archive (it needs the archive's `ChildService.watch` and `stop`).
+  // Boundary: the factory's own boot over the real archive services and a real job record left pending by an earlier boot; the only fault is the root watch (`ChildService.watch`) throwing
+  // AFTER boot scheduled the pending completion wake. It shows the failed boot ends the wake and the registry listener before it stops the children and closes the stores, in the drain's
+  // order, and that a wake that will not end in time keeps both stores open and boot refused. It does NOT show the Backend's retry of a refused boot.
+  async function failedBootOver(stalledWakes: boolean) {
+    const w = world();
+    w.fake.activity.set(CALLER_THREAD, "idle");
+    const first = await started(w, callerOk, {
+      hostProcess: hostD(),
+      newJobId: () => "job-wake",
+      wakeCoalesceMs: 60_000,
+      wakeSchedule: () => () => undefined,
+    });
+    const jobId = await adoptedD(w, first.service);
+    ok(await first.service.handle("jobs.exited", who, { jobId, exit: { code: 0, signal: null } }));
+    await first.service.drain();
+    // The next boot finds the completion still pending, schedules its wake, and then fails setting up the watch of a child's root.
+    const second = world(w.stateRoot);
+    second.fake.activity.set(CALLER_THREAD, "idle");
+    second.lineage.threads = [
+      {
+        threadId: "thread-child-1",
+        parentThreadId: CALLER_THREAD,
+        rootThreadId: ROOT_THREAD,
+        relationshipToParent: "subagent",
+        sessionId: "pi-thread-child-1",
+        closed: false,
+      },
+    ];
+    const order: string[] = [];
+    vi.resetModules();
+    vi.doMock("./library.ts", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./library.ts")>();
+      const watched = <T extends object>(name: string, store: T): T =>
+        new Proxy(store, {
+          get: (target, key) =>
+            key === "close"
+              ? () => {
+                  order.push(`close:${name}`);
+                  return (target as { close(): void }).close();
+                }
+              : Reflect.get(target, key),
+        });
+      return {
+        ...actual,
+        openOrchestrationStore: (...args: Parameters<typeof actual.openOrchestrationStore>) => {
+          const opened = actual.openOrchestrationStore(...args);
+          return opened.ok ? { ...opened, store: watched("orchestration", opened.store) } : opened;
+        },
+        openJobsStore: (...args: Parameters<typeof actual.openJobsStore>) => {
+          const opened = actual.openJobsStore(...args);
+          return opened.ok ? { ...opened, store: watched("jobs", opened.store) } : opened;
+        },
+        createJobRegistry: (...args: Parameters<typeof actual.createJobRegistry>) => {
+          const registry = actual.createJobRegistry(...args);
+          return {
+            ...registry,
+            onChange(listener: Parameters<typeof registry.onChange>[0]) {
+              const unsubscribe = registry.onChange(listener);
+              return () => {
+                order.push("registry.unsubscribe");
+                unsubscribe();
+              };
+            },
+          };
+        },
+        createJobWakes: (...args: Parameters<typeof actual.createJobWakes>) => {
+          const wakes = actual.createJobWakes(...args);
+          return {
+            ...wakes,
+            noticed(sessionId: string) {
+              order.push("wakes.noticed");
+              return wakes.noticed(sessionId);
+            },
+            drain() {
+              order.push("wakes.drain");
+              return stalledWakes ? NEVER() : wakes.drain();
+            },
+          };
+        },
+        createChildService: (...args: Parameters<typeof actual.createChildService>) => {
+          const service = actual.createChildService(...args);
+          return {
+            ...service,
+            watch: () => {
+              throw new Error("the root watch could not be opened");
+            },
+            stop() {
+              order.push("children.stop");
+              return service.stop();
+            },
+          };
+        },
+      };
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { createOrchestrationFactory: isolatedFactory } =
+        await import("./orchestrationFactory.ts");
+      const service = isolatedFactory({
+        callerContext: callerOk,
+        hostProcess: hostD(),
+        wakeCoalesceMs: 60_000,
+      })(second.deps);
+      let result: Awaited<ReturnType<typeof service.start>> | undefined;
+      void service.start().then((r) => (result = r));
+      // Just inside the bound a stalled wake still holds the refusal; at the bound it is released.
+      await vi.advanceTimersByTimeAsync(4999);
+      const beforeBound = result;
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
+      const timers = vi.getTimerCount();
+      await vi.advanceTimersByTimeAsync(600_000);
+      const toOwner = second.fake.turns.filter((turn) => turn.threadId === CALLER_THREAD).length;
+      return { beforeBound, result, order, timers, toOwner };
+    } finally {
+      vi.useRealTimers();
+      vi.doUnmock("./library.ts");
+      vi.resetModules();
+    }
+  }
+
+  it("a boot that fails after scheduling a pending completion wake cancels the wake and unsubscribes the listener before it stops the children and closes the stores", async () => {
+    const { result, order, timers, toOwner } = await failedBootOver(false);
+    expect(result).toMatchObject({ ok: false, code: "BOOT_RECONCILIATION_FAILED" });
+    expect(order).toContain("wakes.noticed");
+    // The wake was cancelled and joined: no timer is left, and nothing reached the owner afterwards.
+    expect(timers).toBe(0);
+    expect(toOwner).toBe(0);
+    expect(order.slice(order.indexOf("wakes.noticed") + 1)).toEqual([
+      "registry.unsubscribe",
+      "wakes.drain",
+      "children.stop",
+      "close:jobs",
+      "close:orchestration",
+    ]);
+  });
+
+  it("a boot failure whose wake drain never settles is refused at the bound and keeps both stores open", async () => {
+    const { beforeBound, result, order } = await failedBootOver(true);
+    expect(beforeBound).toBeUndefined();
+    expect(result).toMatchObject({ ok: false, code: "BOOT_RECONCILIATION_FAILED" });
+    expect(order).toContain("registry.unsubscribe");
+    expect(order).toContain("wakes.drain");
+    expect(order.some((entry) => entry.startsWith("close:"))).toBe(false);
+  });
+
   // M05 drain hardening. Each of the three joins below calls into T3/M09 work (outbox deliveries, result reads, availability consults) that can hang; one stuck promise must not
   // block the drain, and the stores must stay open under the work that may still be writing. Boundary: the factory's own drain over the real archive services, with ONE join
   // replaced by a promise that never settles and the two stores observed at `close`. Does NOT show the Backend's owner lock: that the lock stays held for a non-empty

@@ -533,10 +533,31 @@ export function createOrchestrationFactory(
           if (thread.relationshipToParent === "subagent" || thread.relationshipToParent === "fork")
             watchRoot(state, thread.rootThreadId);
       } catch (error) {
-        for (const watcher of watchers.values()) watcher.unsubscribe();
-        await children.stop();
-        jobs.close();
-        store.close();
+        for (const watcher of watchers.values()) {
+          try {
+            watcher.unsubscribe();
+          } catch {
+            // An unsubscribe that throws leaves nothing live that this service started.
+          }
+        }
+        // Review 7, F1: the failed boot ends what boot itself started, in the drain's order and with its bound. This state never becomes `running`, so no later drain can reach the completion listener
+        // or a wake scheduled above; they end here, before the children stop and before the stores close under them.
+        unsubscribeJobCompletionListener();
+        // A stop that throws is not an ended stop, and never replaces the boot's own failure as the answer.
+        const ends = async (end: () => Promise<unknown> | undefined): Promise<boolean> => {
+          try {
+            return await endsWithinBound(end);
+          } catch {
+            return false;
+          }
+        };
+        const ended = [await ends(() => wakes.drain())];
+        ended.push(await ends(() => children.stop()));
+        // Work that did not end in time may still be writing: the stores stay open (as in the drain) and boot stays refused.
+        if (ended.every(Boolean)) {
+          jobs.close();
+          store.close();
+        }
         return { ok: false, code: "BOOT_RECONCILIATION_FAILED", detail: message(error) };
       }
       // Step 19a: terminal job output is swept at boot and then once per interval (unaccepted parameters). The sweep walks the registry's records only: an adopted, terminal, collected job older
