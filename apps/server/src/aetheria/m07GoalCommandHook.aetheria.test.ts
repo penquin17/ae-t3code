@@ -26,6 +26,7 @@ import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterReg
 import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import {
   layerFrom,
+  type GoalCommandHook,
   type GoalCommandHookInput,
   type GoalCommandHookResult,
 } from "./goalCommandHook.ts";
@@ -179,21 +180,24 @@ const hook = (answer: (input: GoalCommandHookInput) => GoalCommandHookResult) =>
 };
 const handles = () => hook(() => ({ handled: true, notice: NOTICE }));
 
-/** Sends `text` on a thread of `driver` with `hookLayer` (or none) provided to the caller, then lets the provider run. */
-const sendWith = (driver: string, text: string, hookLayer: Layer.Layer<never> | undefined) =>
+/** Sends `text` on a thread of `driver` over an Orchestrator built with `hookLayer` (or none) in its context, then lets the provider run. The hook is read when the Orchestrator is built, not when a command is dispatched. */
+const sendWith = (
+  driver: string,
+  text: string,
+  hookLayer: Layer.Layer<GoalCommandHook> | undefined,
+) =>
   Effect.scoped(
     Effect.gen(function* () {
       const h = yield* harness(driver);
       return yield* Effect.gen(function* () {
         const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
         yield* h.create;
-        const send = h.send("goal", text);
-        const outcome = yield* (
-          hookLayer === undefined ? send : send.pipe(Effect.provide(hookLayer))
-        ).pipe(Effect.result);
+        const outcome = yield* h.send("goal", text).pipe(Effect.result);
         yield* worker.drain();
         return { outcome, started: h.started, projection: yield* h.projection };
-      }).pipe(Effect.provide(h.layer));
+      }).pipe(
+        Effect.provide(hookLayer === undefined ? h.layer : h.layer.pipe(Layer.provide(hookLayer))),
+      );
     }),
   );
 
@@ -283,25 +287,33 @@ it.effect(
     }),
 );
 
-it.effect("is marked in the Orchestrator at the three goal sites (IP-67)", () =>
-  Effect.gen(function* () {
-    const fs = yield* Effect.promise(() => import("node:fs"));
-    const url = yield* Effect.promise(() => import("node:url"));
-    const text = fs.readFileSync(
-      url.fileURLToPath(new URL("../orchestration-v2/Orchestrator.ts", import.meta.url)),
-      "utf8",
-    );
-    const marker = ["AETHERIA-IP", "IP-67"].join(":");
-    assert.isAtLeast(text.split(marker).length - 1, 4);
-    assert.match(
-      text,
-      /yield\* routeAetheriaGoalCommand\(\s*command,\s*command\.threadId,\s*command,/,
-    );
-    assert.match(
-      text,
-      /yield\* routeAetheriaGoalCommand\(\s*command,\s*command\.threadId,\s*queuedMessage,/,
-    );
-    // the Orchestrator reaches the hook, never the Backend
-    assert.notMatch(text, /aetheria\/aetheriaBackend/);
-  }),
+it.effect(
+  "is marked in the Orchestrator at its goal sites, build-time read and layer (IP-67)",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* Effect.promise(() => import("node:fs"));
+      const url = yield* Effect.promise(() => import("node:url"));
+      const text = fs.readFileSync(
+        url.fileURLToPath(new URL("../orchestration-v2/Orchestrator.ts", import.meta.url)),
+        "utf8",
+      );
+      const marker = ["AETHERIA-IP", "IP-67"].join(":");
+      assert.isAtLeast(text.split(marker).length - 1, 6);
+      // the hook is read once at build and the layer provides its slot, never read per dispatch
+      assert.match(
+        text,
+        /const aetheriaGoalHook = yield\* Effect\.serviceOption\(GoalCommandHookModule\.GoalCommandHook\)/,
+      );
+      assert.match(text, /Layer\.provide\(GoalCommandHookModule\.layerWhenAetheria\)/);
+      assert.match(
+        text,
+        /yield\* routeAetheriaGoalCommand\(\s*command,\s*command\.threadId,\s*command,/,
+      );
+      assert.match(
+        text,
+        /yield\* routeAetheriaGoalCommand\(\s*command,\s*command\.threadId,\s*queuedMessage,/,
+      );
+      // the Orchestrator reaches the hook, never the Backend
+      assert.notMatch(text, /aetheria\/aetheriaBackend/);
+    }),
 );

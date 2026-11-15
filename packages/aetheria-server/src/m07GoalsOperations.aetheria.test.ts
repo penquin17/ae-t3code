@@ -15,6 +15,7 @@ import {
   type GoalService,
   type GoalToolReply,
 } from "./goals/goalsEntry.ts";
+import { goalEnvelopeVectors } from "./goals/goalEnvelope.vectors.ts";
 import { createGoalOperations } from "./goals/operations.ts";
 import { createGoalsBackendRegistration } from "./goals/registration.ts";
 import {
@@ -349,6 +350,55 @@ describe("the caller", () => {
     }
     expect(w.cards.size).toBe(0);
   });
+});
+
+describe("the envelope the Agent's goal tools read (DV10)", () => {
+  /** Ids differ per run; the shared vectors name them `proposal-1` and `goal-1`. */
+  const normalized = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(normalized);
+    if (value === null || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.entries(value).map(([key, inner]) => [
+        key,
+        key === "proposalId" ? "proposal-1" : key === "id" ? "goal-1" : normalized(inner),
+      ]),
+    );
+  };
+
+  /** The state a vector's scenario names, built through the real operations: a goal approved by a card, optionally with its round running. */
+  const scenario = async (name: (typeof goalEnvelopeVectors)[number]["scenario"]) => {
+    const { w, runtime, registration } = await started();
+    const session = name === "child" ? CHILD : name === "unreadable" ? UNREADABLE : MAIN;
+    let goalId = "goal-1";
+    let revision = 1;
+    if (name === "armed" || name === "running") {
+      await call(registration, "goals.create", MAIN, { objective: "ship it", max_goal_rounds: 3 });
+      await approveLast(w, runtime);
+      const got = reply(await call(registration, "goals.get", MAIN));
+      if (got.outcome !== "ok" || got.goal === null) throw new Error("no goal");
+      goalId = got.goal.id;
+      revision = got.goal.revision;
+    }
+    if (name === "running") {
+      w.settle(1);
+      await runtime.service.idle();
+    }
+    return { registration, session, goalId, revision };
+  };
+
+  it.each(goalEnvelopeVectors.map((vector) => [vector.name, vector] as const))(
+    "%s: the real operation answers exactly the shared vector",
+    async (_name, vector) => {
+      const { registration, session, goalId, revision } = await scenario(vector.scenario);
+      const args =
+        vector.operation === "goals.update"
+          ? { ...vector.params, goal_id: goalId, revision }
+          : vector.params;
+      const answer = await registration.operations![vector.operation]!(context(session, args));
+      expect(normalized(answer)).toEqual(vector.settled);
+      expect(decodeGoalToolReply((answer as Done).result).ok).toBe(true);
+    },
+  );
 });
 
 describe("a reply the codec refuses, and a service that throws", () => {

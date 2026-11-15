@@ -8,7 +8,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { afterAll, describe, expect, it } from "@effect/vitest";
+import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest";
 import { McpProviderSessions } from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -20,6 +20,8 @@ import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as Live from "./aetheriaBackend.ts";
+import { vi } from "vite-plus/test";
+import * as GoalCommandHookSlot from "./goalCommandHook.ts";
 import { GoalCommandHook } from "./goalCommandHook.ts";
 import * as GoalRoundGuard from "./goalRoundGuard.ts";
 
@@ -30,7 +32,12 @@ const makeRoot = () => {
   roots.push(root);
   return root;
 };
+// The server has the state root set whenever the Backend exists; the slot layer is gated on it (and may be memoized across builds in one file, so set it for the whole file).
+beforeAll(() => {
+  vi.stubEnv("AETHERIA_STATE_ROOT", "/aetheria-test-state-root-unused");
+});
 afterAll(() => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) NodeFS.rmSync(root, { recursive: true, force: true });
 });
 
@@ -98,5 +105,30 @@ describe("the Backend layer and the typed /goal hook", () => {
         ),
       ),
     ),
+  );
+
+  it.live(
+    "fills the slot the Orchestrator layer reads (one instance by memoization) and empties it when the layer ends",
+    () =>
+      Effect.gen(function* () {
+        const slotOf = Effect.scoped(
+          Effect.gen(function* () {
+            const context = yield* Layer.build(
+              Layer.mergeAll(
+                GoalCommandHookSlot.layerWhenAetheria,
+                Live.makeLayer(makeRoot()).pipe(
+                  Layer.provide(guardLayer),
+                  Layer.provide(layerSupplies),
+                ),
+              ),
+            );
+            const slot = Context.get(context, GoalCommandHookSlot.GoalCommandSlot);
+            expect(slot.installed()).toBe(true);
+            return slot;
+          }),
+        );
+        const slot = yield* slotOf;
+        expect(slot.installed()).toBe(false);
+      }),
   );
 });

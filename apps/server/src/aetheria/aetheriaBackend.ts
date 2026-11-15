@@ -42,7 +42,13 @@ import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { layerFromBackend } from "./backendComposition.ts";
 import { makeCallerContext } from "./callerContext.ts";
 import { describeGoalOutcome, makeGoalCommandRoute } from "./goalCommand.ts";
-import { GoalCommandHook, type GoalCommandHookResult } from "./goalCommandHook.ts";
+import * as GoalCommandHookSlot from "./goalCommandHook.ts";
+import {
+  GoalCommandHook,
+  GoalCommandSlot,
+  type GoalCommandHookResult,
+  type GoalCommandRoute,
+} from "./goalCommandHook.ts";
 import { makeGoalForkObserver, type GoalForkObserver } from "./goalForkObserver.ts";
 import * as GoalRoundGuard from "./goalRoundGuard.ts";
 import { getSharedInspectClients } from "./inspectClients.ts";
@@ -410,23 +416,35 @@ const goalCommandHookLayer = Layer.effect(
         return runGoalCommand(command, sessionId, goals);
       },
     });
-    return GoalCommandHook.of({
-      route: Effect.fn("GoalCommandHook.route")(function* ({ threadId, driver, message }) {
-        return yield* Effect.promise(async (): Promise<GoalCommandHookResult> => {
-          const found = backend.index.lookup(threadId);
-          if (found.status !== "ok") return { handled: false };
-          const outcome = await commands.route({
-            driver,
-            sessionId: found.binding.sessionId,
-            message,
-          });
-          if (!outcome.handled) return { handled: false };
-          const notice = describeGoalOutcome(outcome);
-          return notice === null ? { handled: true } : { handled: true, notice };
-        }).pipe(Effect.catchCause(() => Effect.succeed<GoalCommandHookResult>({ handled: false })));
-      }),
+    const route: GoalCommandRoute = Effect.fn("GoalCommandHook.route")(function* ({
+      threadId,
+      driver,
+      message,
+    }) {
+      return yield* Effect.promise(async (): Promise<GoalCommandHookResult> => {
+        const found = backend.index.lookup(threadId);
+        if (found.status !== "ok") return { handled: false };
+        const outcome = await commands.route({
+          driver,
+          sessionId: found.binding.sessionId,
+          message,
+        });
+        if (!outcome.handled) return { handled: false };
+        const notice = describeGoalOutcome(outcome);
+        return notice === null ? { handled: true } : { handled: true, notice };
+      }).pipe(Effect.catchCause(() => Effect.succeed<GoalCommandHookResult>({ handled: false })));
     });
+    // The Orchestrator holds the slot's hook from its own build (IP-67); fill the slot now that the Backend runs, and empty it when this layer ends.
+    const slot = yield* Effect.serviceOption(GoalCommandSlot);
+    if (Option.isSome(slot)) {
+      const uninstall = slot.value.install(route);
+      yield* Effect.addFinalizer(() => Effect.sync(uninstall));
+    }
+    return GoalCommandHook.of({ route });
   }),
+).pipe(
+  // The same constant the Orchestrator layer provides: one slot instance by memoization (present only when AETHERIA_STATE_ROOT is set).
+  Layer.provide(GoalCommandHookSlot.layerWhenAetheria),
 );
 
 /**

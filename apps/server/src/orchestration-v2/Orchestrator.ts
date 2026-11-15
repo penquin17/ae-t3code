@@ -169,7 +169,7 @@ import {
 } from "./ProjectionStore.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
 // AETHERIA-IP:IP-67 the optional hook that routes a typed /goal on a Pi thread to the Aetheria Backend (leaf module: importing the Backend here would be a cycle)
-import { GoalCommandHook } from "../aetheria/goalCommandHook.ts";
+import * as GoalCommandHookModule from "../aetheria/goalCommandHook.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
@@ -1063,6 +1063,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+  // AETHERIA-IP:IP-67 read once, here, from the layer's own context (the layer provides the slot when AETHERIA_STATE_ROOT is set): the hook never depends on the dispatching fiber's context
+  const aetheriaGoalHook = yield* Effect.serviceOption(GoalCommandHookModule.GoalCommandHook);
   // Read once: the policy is fixed for the server's life, and dispatch takes it as an input.
   const { managedPolicy } = serverSettings;
   const runtimeModeCeiling: RuntimeModeCeiling | undefined =
@@ -1111,7 +1113,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     providerInstanceId: ProviderInstanceId,
   ) {
     if (parseGoalCommand(message) === null) return;
-    const hook = yield* Effect.serviceOption(GoalCommandHook);
+    const hook = aetheriaGoalHook;
     if (Option.isNone(hook)) return;
     const { driver } = yield* providerAdapters
       .get(providerInstanceId)
@@ -14344,4 +14346,6 @@ export const layer: Layer.Layer<
   | ThreadForkServiceV2
 > = Layer.effect(OrchestratorV2, makeOrchestrator()).pipe(
   Layer.provide(ThreadCommandExecutor.layer),
+  // AETHERIA-IP:IP-67 the typed-/goal hook and its slot, provided only when AETHERIA_STATE_ROOT is set; the Backend layer provides the same constant and fills the slot, so both see one instance
+  Layer.provide(GoalCommandHookModule.layerWhenAetheria),
 );
