@@ -65,8 +65,25 @@ import {
 } from "./library.ts";
 
 const ORCHESTRATION_UNAVAILABLE = "ORCHESTRATION_UNAVAILABLE";
-/** How long a drain waits for spawns already in flight before it reports them as possibly still live. */
+/** How long a drain waits for spawns already in flight, and then for each of the sweeps, wakes and children joins, before it reports them as possibly still live. */
 const DRAIN_WAIT_MS = 5000;
+
+/**
+ * Wait for one owner's stop to end, at most `DRAIN_WAIT_MS`. `true`: it ended in time. `false`: it did not, and whatever it joins may still be live. A stop that throws
+ * rejects as it always did, and its bound timer is cleared either way.
+ */
+async function endsWithinBound(end: () => Promise<unknown> | undefined): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), DRAIN_WAIT_MS);
+    (timer as { unref?: () => void }).unref?.();
+  });
+  try {
+    return await Promise.race([Promise.resolve(end()).then(() => true as const), bound]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type CallerContextResult =
   | {
@@ -801,13 +818,22 @@ export function createOrchestrationFactory(
         }
         state.watchers.clear();
         // The sweep first: it writes job records, so it must end before the stores close.
-        await state.sweeps.runner?.stop();
+        // Each join below reaches into T3/M09 calls that can hang, so each is bounded: a join that does not end in time is named in `stillLive` and the drain goes on to the next one.
+        const joined: string[] = [];
+        const join = async (name: string, end: () => Promise<unknown> | undefined) => {
+          if (!(await endsWithinBound(end))) joined.push(name);
+        };
+        await join("sweeps", () => state.sweeps.runner?.stop());
         state.unsubscribeJobCompletionListener();
-        await state.wakes.drain();
+        await join("wakes", () => state.wakes.drain());
         // Review 2, F3: the restart-notice retries end here (timers cancelled, the one in flight joined), so nothing delivers or writes a child record once the stores close.
-        await state.children.stop();
-        state.jobs.close();
-        state.store.close();
+        await join("children", () => state.children.stop());
+        stillLive.push(...joined);
+        // An owner that may still be writing keeps the stores open: they are never closed under live work, so the Backend sees an unclean drain and keeps its owner lock.
+        if (joined.length === 0) {
+          state.jobs.close();
+          state.store.close();
+        }
       }
       return { stopped: [], stillLive };
     };

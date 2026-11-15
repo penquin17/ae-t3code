@@ -2084,6 +2084,91 @@ describe("drain", () => {
       expect.objectContaining({ key: `job:${jobId}:completion`, state: "pending" }),
     );
   });
+
+  // M05 drain hardening. Each of the three joins below calls into T3/M09 work (outbox deliveries, result reads, availability consults) that can hang; one stuck promise must not
+  // block the drain, and the stores must stay open under the work that may still be writing. Boundary: the factory's own drain over the real archive services, with ONE join
+  // replaced by a promise that never settles and the two stores observed at `close`. Does NOT show the Backend's owner lock: that the lock stays held for a non-empty
+  // `stillLive` is the Backend's contract, shown by humanControlResume.aetheria.test.ts ("a drain that is not clean keeps the owner lock").
+  type StalledJoin = "sweeps" | "wakes" | "children";
+  const NEVER = () => new Promise<never>(() => undefined);
+  const hang = <T extends object>(real: T, method: string): T => ({ ...real, [method]: NEVER });
+  async function drainOver(stalled: StalledJoin | undefined) {
+    const w = world();
+    const closed: string[] = [];
+    vi.resetModules();
+    vi.doMock("./library.ts", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./library.ts")>();
+      const watched = <T extends object>(name: string, store: T): T =>
+        new Proxy(store, {
+          get: (target, key) =>
+            key === "close"
+              ? () => {
+                  closed.push(name);
+                  return (target as { close(): void }).close();
+                }
+              : Reflect.get(target, key),
+        });
+      return {
+        ...actual,
+        openOrchestrationStore: (...args: Parameters<typeof actual.openOrchestrationStore>) => {
+          const opened = actual.openOrchestrationStore(...args);
+          return opened.ok ? { ...opened, store: watched("orchestration", opened.store) } : opened;
+        },
+        openJobsStore: (...args: Parameters<typeof actual.openJobsStore>) => {
+          const opened = actual.openJobsStore(...args);
+          return opened.ok ? { ...opened, store: watched("jobs", opened.store) } : opened;
+        },
+        createChildService: (...args: Parameters<typeof actual.createChildService>) => {
+          const service = actual.createChildService(...args);
+          return stalled === "children" ? hang(service, "stop") : service;
+        },
+        createJobWakes: (...args: Parameters<typeof actual.createJobWakes>) => {
+          const wakes = actual.createJobWakes(...args);
+          return stalled === "wakes" ? hang(wakes, "drain") : wakes;
+        },
+        startRetentionSweeps: (...args: Parameters<typeof actual.startRetentionSweeps>) => {
+          const runner = actual.startRetentionSweeps(...args);
+          return stalled === "sweeps" ? hang(runner, "stop") : runner;
+        },
+      };
+    });
+    try {
+      const { createOrchestrationFactory: isolatedFactory } =
+        await import("./orchestrationFactory.ts");
+      const service = isolatedFactory({ callerContext: callerOk })(w.deps);
+      expect(await service.start()).toEqual({ ok: true });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let result: Awaited<ReturnType<typeof service.drain>> | undefined;
+      void service.drain().then((r) => (result = r));
+      // Just inside the bound a stalled join still holds the drain; at the bound it is released.
+      await vi.advanceTimersByTimeAsync(4999);
+      const beforeBound = result;
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
+      return { beforeBound, result, closed };
+    } finally {
+      vi.useRealTimers();
+      vi.doUnmock("./library.ts");
+      vi.resetModules();
+    }
+  }
+
+  it("a drain whose joins all finish reports no live work and closes both stores", async () => {
+    const { beforeBound, result, closed } = await drainOver(undefined);
+    expect(beforeBound).toEqual({ stopped: [], stillLive: [] });
+    expect(result).toEqual({ stopped: [], stillLive: [] });
+    expect([...closed].sort()).toEqual(["jobs", "orchestration"]);
+  });
+
+  it.each(["sweeps", "wakes", "children"] as const)(
+    "a %s stop that never settles releases the drain at the bound, names the owner as still live, and closes neither store",
+    async (stalled) => {
+      const { beforeBound, result, closed } = await drainOver(stalled);
+      expect(beforeBound).toBeUndefined();
+      expect(result).toEqual({ stopped: [], stillLive: [stalled] });
+      expect(closed).toEqual([]);
+    },
+  );
 });
 
 describe("the declared archive", () => {
