@@ -27,7 +27,7 @@ export function goalsBackendModuleRow(
     },
     contract: {
       consumer:
-        "T3's recovery pass, through the goal-round guard it consults for each main thread; M10's goal view and the model's goal tools, in later steps, through the Backend's direct goals service. It registers no XC-6 operation and no client RPC yet.",
+        "T3's recovery pass, through the goal-round guard it consults for each main thread; the Agent host's goal tools, through the three XC-6 operations goals.get, goals.create and goals.update; M10's goal view and its Re-arm, through the aetheria.goal.* and aetheria.workflow.* client RPCs, which reach the same goals service.",
       success:
         "One root's goal is a conditional journal under the state root: a person's approved card or client-only re-arm is the only way a goal becomes armed, arming lives in memory only, each round is reserved, admitted once through M05 under one key and counted once, and a restart starts disarmed and sends nothing; the module drains once.",
       failure:

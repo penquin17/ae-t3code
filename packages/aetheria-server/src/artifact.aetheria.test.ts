@@ -62,6 +62,7 @@ describe("the pinned archive", () => {
       "@aetheria/interaction",
       "@aetheria/orchestration",
       "@aetheria/providers",
+      "@aetheria/workflows",
     ]);
     // M05 step 9: the fifth archive is a dependency by file and declared with the same three fields.
     expect(manifest.dependencies["@aetheria/orchestration"]).toBe(
@@ -178,6 +179,7 @@ describe("the Backend agent-awareness module", () => {
       "aetheria:human-control-backend",
       "aetheria:orchestration-backend",
       "aetheria:goals-backend",
+      "aetheria:workflows-backend",
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
       "aetheria:inspect-backend",

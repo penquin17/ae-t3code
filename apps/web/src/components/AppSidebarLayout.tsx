@@ -41,8 +41,10 @@ import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 // AETHERIA-IP:IP-2 — the Aetheria sidebar replaces T3's thread sidebar (import).
 import { AetheriaSidebar } from "../aetheria/sessions/AetheriaSidebar";
-// AETHERIA-IP:IP-2 (widened: RegionsSync) — the one reporter of the page's registered regions (import).
+// AETHERIA-IP:IP-2 (widened: RegionsSync, InspectResponder) — the one reporter of the page's registered regions (import).
 import { RegionsSync } from "../aetheria/regions/RegionsSync";
+// AETHERIA-IP:IP-2 (widened: RegionsSync, InspectResponder) — the one answerer of the Backend's live inspection requests (import).
+import { InspectResponder } from "~/aetheria/inspect/InspectResponder";
 import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
 import { useSidebarStageBackdropVariant } from "./SidebarStageBackdrop";
@@ -449,8 +451,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         style={sidebarProviderStyle}
       >
         <SidebarBrandWidthProbe isElectron={isElectron} onWidthChange={setBrandWidth} />
-        {/* AETHERIA-IP:IP-2 (widened: RegionsSync) — mounted outside Sidebar, so it stays mounted while the phone drawer is closed. */}
+        {/* AETHERIA-IP:IP-2 (widened: RegionsSync, InspectResponder) — mounted outside Sidebar, so they stay mounted while the phone drawer is closed. */}
         <RegionsSync />
+        <InspectResponder />
         <Sidebar
           side="left"
           collapsible="offcanvas"

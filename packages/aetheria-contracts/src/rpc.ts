@@ -25,11 +25,30 @@ import {
   ClientOfferedPathsResult,
 } from "./deliverablesOperations.ts";
 import {
+  GoalChangeEvent,
+  GoalChangesPayload,
+  GoalClearPayload,
+  GoalClearResult,
+  GoalPausePayload,
+  GoalPauseResult,
+  GoalProposePayload,
+  GoalProposeResult,
+  GoalRearmPayload,
+  GoalRearmResult,
+  GoalSnapshotPayload,
+  GoalSnapshotResult,
+  WorkflowCancelPayload,
+  WorkflowCancelResult,
+  WorkflowRunsPayload,
+  WorkflowRunsResult,
+} from "./goalsWorkflows.ts";
+import {
   GroupsApplyPayload,
   GroupsApplyResult,
   GroupsReadPayload,
   GroupsReadResult,
 } from "./groupsOperations.ts";
+import { AetheriaInspectRpcGroup, INSPECT_CLIENT_METHODS } from "./inspectClient.ts";
 import {
   AuthorizationGrantPayload,
   AuthorizationGrantResult,
@@ -104,6 +123,19 @@ export const AETHERIA_WS_METHODS = {
   // M10 step 23 (D17, XC-19): the declared region registry. `report` replaces this client's mounted-region set; `read` returns this connection's own stored client. Both are `orchestration:read`: they change only the caller's own record.
   regionsReport: "aetheria.regions.report",
   regionsRead: "aetheria.regions.read",
+  // M07 step 17 (D24, XC-23): a root's goal. `snapshot` and `changes` (a root/version-only push) are reads (`orchestration:read`); propose, pause, clear and the client-only rearm need `orchestration:operate`.
+  goalSnapshot: "aetheria.goal.snapshot",
+  goalChanges: "aetheria.goal.changes",
+  goalPropose: "aetheria.goal.propose",
+  goalPause: "aetheria.goal.pause",
+  goalClear: "aetheria.goal.clear",
+  goalRearm: "aetheria.goal.rearm",
+  // M07 step 17 (D24, XC-23): a root's workflow runs (a read) and the user's cancel (`orchestration:operate`). Answers unavailable until the workflow Backend lands.
+  workflowRuns: "aetheria.workflow.runs",
+  workflowCancel: "aetheria.workflow.cancel",
+  // M11 step 19 (C5, C6): the live page inspection carrier. `requests` streams the Backend's one query to the page viewing the thread; `reply` is the page's answer. Both `orchestration:read`; the browser gets no inspection authority.
+  inspectRequests: INSPECT_CLIENT_METHODS.requests,
+  inspectReply: INSPECT_CLIENT_METHODS.reply,
 } as const;
 
 /** The Backend is not attached or has not produced a status; the caller sees this instead of an invented value. */
@@ -293,6 +325,52 @@ export const AetheriaRegionsRpcGroup = RpcGroup.make(
   AetheriaRegionsReadRpc,
 );
 
+// The goal strip and the workflow runs (M07 step 17, XC-23). Payloads name a root session and the goal reference only; the actor comes from the connection. A failure is a coded value in the reply, never an empty success.
+// Strict at the wire (see STRICT_WIRE): a payload that names an actor, caller, scope, authority or an origin id outside `goal.rearm` is refused before the handler runs, not silently trimmed.
+const AetheriaGoalSnapshotRpc = Rpc.make(AETHERIA_WS_METHODS.goalSnapshot, {
+  payload: GoalSnapshotPayload,
+  success: GoalSnapshotResult,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaGoalChangesRpc = Rpc.make(AETHERIA_WS_METHODS.goalChanges, {
+  payload: GoalChangesPayload,
+  success: GoalChangeEvent,
+  stream: true,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaGoalProposeRpc = Rpc.make(AETHERIA_WS_METHODS.goalPropose, {
+  payload: GoalProposePayload,
+  success: GoalProposeResult,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaGoalPauseRpc = Rpc.make(AETHERIA_WS_METHODS.goalPause, {
+  payload: GoalPausePayload,
+  success: GoalPauseResult,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaGoalClearRpc = Rpc.make(AETHERIA_WS_METHODS.goalClear, {
+  payload: GoalClearPayload,
+  success: GoalClearResult,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaGoalRearmRpc = Rpc.make(AETHERIA_WS_METHODS.goalRearm, {
+  payload: GoalRearmPayload,
+  success: GoalRearmResult,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaWorkflowRunsRpc = Rpc.make(AETHERIA_WS_METHODS.workflowRuns, {
+  payload: WorkflowRunsPayload,
+  success: WorkflowRunsResult,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaWorkflowCancelRpc = Rpc.make(AETHERIA_WS_METHODS.workflowCancel, {
+  payload: WorkflowCancelPayload,
+  success: WorkflowCancelResult,
+}).annotate(Rpc.ParseOptions, STRICT_WIRE);
+const AetheriaGoalsRpcGroup = RpcGroup.make(
+  AetheriaGoalSnapshotRpc,
+  AetheriaGoalChangesRpc,
+  AetheriaGoalProposeRpc,
+  AetheriaGoalPauseRpc,
+  AetheriaGoalClearRpc,
+  AetheriaGoalRearmRpc,
+  AetheriaWorkflowRunsRpc,
+  AetheriaWorkflowCancelRpc,
+);
+
 export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc)
   .merge(AetheriaInteractionRpcGroup)
   .merge(AetheriaChildrenRpcGroup)
@@ -300,4 +378,6 @@ export const AetheriaRpcGroup = RpcGroup.make(AetheriaCompositionStatusRpc)
   .merge(AetheriaDeliverablesRpcGroup)
   .merge(AetheriaJobsRpcGroup)
   .merge(AetheriaUsageRpcGroup)
-  .merge(AetheriaRegionsRpcGroup);
+  .merge(AetheriaRegionsRpcGroup)
+  .merge(AetheriaGoalsRpcGroup)
+  .merge(AetheriaInspectRpcGroup);

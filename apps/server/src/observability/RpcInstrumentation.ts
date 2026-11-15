@@ -258,6 +258,18 @@ const RPC_AGGREGATES = {
   // AETHERIA-IP:IP-59 span-aggregate labels for the declared region registry (M10 step 23); same exhaustive map
   [AETHERIA_WS_METHODS.regionsReport]: "aetheria",
   [AETHERIA_WS_METHODS.regionsRead]: "aetheria",
+  // AETHERIA-IP:IP-64 span-aggregate labels for the goal strip and the workflow runs (M07 step 17); same exhaustive map
+  [AETHERIA_WS_METHODS.goalSnapshot]: "aetheria",
+  [AETHERIA_WS_METHODS.goalChanges]: "aetheria",
+  [AETHERIA_WS_METHODS.goalPropose]: "aetheria",
+  [AETHERIA_WS_METHODS.goalPause]: "aetheria",
+  [AETHERIA_WS_METHODS.goalClear]: "aetheria",
+  [AETHERIA_WS_METHODS.goalRearm]: "aetheria",
+  [AETHERIA_WS_METHODS.workflowRuns]: "aetheria",
+  [AETHERIA_WS_METHODS.workflowCancel]: "aetheria",
+  // AETHERIA-IP:IP-64 (widened: the live page inspection carrier, M11 step 19) span-aggregate labels; payload-free like the goal rows
+  [AETHERIA_WS_METHODS.inspectRequests]: "aetheria",
+  [AETHERIA_WS_METHODS.inspectReply]: "aetheria",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

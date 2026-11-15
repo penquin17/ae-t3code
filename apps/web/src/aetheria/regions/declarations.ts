@@ -145,7 +145,7 @@ export const REGION = {
     "control.goals",
     "panel",
     "control",
-    "The statement that goals and workflows are not built yet",
+    "The goal for this session and its one-click Re-arm",
     { tokens: CARDS },
   ),
   deliverables: region(

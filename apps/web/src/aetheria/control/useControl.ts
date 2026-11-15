@@ -88,7 +88,7 @@ export function useControlTransport(): ControlTransport {
  * own and the change stream emits nothing when it re-subscribes, so this is what tells a view to read again (the same signal T3's directory reads follow). It fires on a change, not on mount, and
  * once per new session: a failed read does not call it, so there is no loop.
  */
-function useNewSession(environmentId: string, onNewSession: () => void): void {
+export function useNewSession(environmentId: string, onNewSession: () => void): void {
   const generation = environmentCatalog.sessionGenerationAtom(environmentIdOf(environmentId));
   // A listener alone does not compute the atom, so nothing would follow the connection.
   useAtomMount(generation);

@@ -57,7 +57,7 @@ function SettledContent({ record }: { readonly record: InteractionRecord }) {
     <>
       <RawText text={record.content.text} label="What was asked" />
       {record.resolution?.type === "answers" ? (
-        <OriginAndRearm originId={record.resolution.originId} />
+        <OriginAndRearm originId={record.resolution.originId} subject={record.content.subject} />
       ) : null}
     </>
   );

@@ -10,6 +10,7 @@
 // is logged but operation names, statuses, codes and outcomes.
 import type { Xc6Operation, Xc6OperationContext } from "@t3tools/aetheria-contracts";
 
+import type { ClientQueries } from "./clients.ts";
 import type { InspectAccessPort } from "./inspectAccess.ts";
 import {
   INSPECT_LIST_OPERATION,
@@ -17,6 +18,7 @@ import {
   INSPECT_QUERY_OPERATION,
   applySelector,
   compareByHostThenId,
+  createProviderRegistry,
   decodeListRequest,
   decodeListResult,
   decodeProviderList,
@@ -58,6 +60,8 @@ export interface InspectServiceOptions {
   /** Resolved from trusted construction and deployment config by `resolveInspectEnabled`; never from a caller. */
   readonly enabled: boolean;
   readonly registries: readonly InspectRegistryEntry[];
+  /** The live client resolver (C5). Absent: no `client-regions` provider exists and every call answers as before. Its one thread is always the verified caller's. */
+  readonly clients?: ClientQueries;
   /** The deployment's `showValues` setting (XC-4 string-list of `module.field` pairs). Anything that is not a list of pairs shows nothing. */
   readonly showValues: unknown;
   readonly now: () => number;
@@ -104,6 +108,8 @@ const unavailable = (code: string): InspectSettled => ({ status: "unavailable", 
 const refused = (code: string): InspectSettled => ({ status: "refused", code });
 const done = (result: unknown): InspectSettled => ({ status: "done", result });
 const isInspectName = (name: string): boolean => name.startsWith("inspect.");
+/** The one provider of the client host (D2, D9): the regions of the pages viewing the caller's own thread. */
+const CLIENT_REGIONS_PROVIDER_ID = "client-regions";
 
 export function createInspectService(options: InspectServiceOptions): InspectService {
   const deadlineMs = options.deadlineMs ?? INSPECT_PARAMETERS.backendDeadlineMs;
@@ -131,22 +137,55 @@ export function createInspectService(options: InspectServiceOptions): InspectSer
 
   const capturedAt = (): string => new Date(options.now()).toISOString();
 
+  /**
+   * The client host's registry for ONE call, bound to the verified caller's thread (N1): its list is the registry's live view of the regions the pages viewing that thread have mounted, read at the call and
+   * kept nowhere. Its query is never used — a client query is a live round trip answered by `runClientQuery` — so it only answers unavailable.
+   */
+  const clientRegistryFor = (threadId: string): InspectRegistryEntry | undefined => {
+    const clients = options.clients;
+    if (clients === undefined) return undefined;
+    const registry = createProviderRegistry({ host: "client" });
+    registry.register({
+      providerId: CLIENT_REGIONS_PROVIDER_ID,
+      host: "client",
+      list: (page) => {
+        const regions = clients
+          .regions(threadId)
+          .filter((region) => page.kind === undefined || region.kind === page.kind);
+        return {
+          total: regions.length,
+          entries: regions.slice(page.offset, page.offset + page.limit).map((region) => ({
+            targetId: region.id,
+            kind: region.kind,
+            state: region.visible ? "active" : "inactive",
+            summary: region.description,
+          })),
+        };
+      },
+      query: () => ({ outcome: "unavailable" }),
+    });
+    return { host: "client", registry };
+  };
+
   /** Providers of every registry in the stable order: host (agent, backend, client), then id. */
-  const providers = (): Array<{
+  const providers = (
+    threadId: string,
+  ): Array<{
     readonly host: InspectHost;
     readonly id: string;
     readonly registry: ProviderRegistry;
   }> =>
-    options.registries
+    [...options.registries, ...[clientRegistryFor(threadId)].filter((e) => e !== undefined)]
       .flatMap(({ host, registry }) => registry.providers().map((id) => ({ host, id, registry })))
       .sort((a, b) => compareByHostThenId({ host: a.host, id: a.id }, { host: b.host, id: b.id }));
 
   const runList = async (
     request: ReturnType<typeof decodeListRequest> & { ok: true },
     until: Promise<void>,
+    threadId: string,
   ): Promise<InspectSettled> => {
     const window = listWindow(request.value);
-    const all = providers();
+    const all = providers(threadId);
     const wanted = all.filter(
       (p) =>
         (request.value.providerId === undefined || p.id === request.value.providerId) &&
@@ -203,13 +242,70 @@ export function createInspectService(options: InspectServiceOptions): InspectSer
     return done(fitListResult(result, capBytes));
   };
 
+  /**
+   * One live client query (C5): the page is asked once, for the verified caller's own thread, and the answer is judged again by the registry's descriptor. A client query never goes through a provider's
+   * answer decoder: its outcomes (no-client, ambiguous, disconnected, timeout, region-not-found, schema-unsupported) are the resolver's.
+   */
+  const runClientQuery = async (
+    request: ReturnType<typeof decodeQueryRequest> & { ok: true },
+    until: Promise<void>,
+    threadId: string,
+    clients: ClientQueries,
+  ): Promise<InspectSettled> => {
+    const { providerId, targetId, selector, clientId } = request.value;
+    const answer = await clients.query({
+      threadId,
+      regionId: targetId,
+      until,
+      ...(clientId === undefined ? {} : { clientId }),
+    });
+    const at = capturedAt();
+    if (answer.outcome === "ambiguous")
+      return done({
+        outcome: "ambiguous",
+        capturedAt: at,
+        providerId,
+        targetId,
+        clients: answer.clients.map((c) => ({
+          clientId: c.clientId,
+          lastSeen: new Date(c.lastSeenMs).toISOString(),
+        })),
+      });
+    if (answer.outcome !== "ok")
+      return done({ outcome: answer.outcome, capturedAt: at, providerId, targetId });
+    let shape = answer.shape;
+    if (selector !== undefined) {
+      const part = applySelector(shape, selector);
+      if (!part.ok)
+        return done({ outcome: "schema-unsupported", capturedAt: at, providerId, targetId });
+      shape = part.value;
+    }
+    const result = {
+      outcome: "ok",
+      capturedAt: at,
+      providerId,
+      targetId,
+      state: answer.state,
+      ...(selector === undefined ? {} : { selector }),
+      clientId: answer.clientId,
+      shape,
+      values: answer.values,
+      omitted: answer.omitted,
+    } as QueryResult;
+    if (!decodeQueryResult(result).ok) return unavailable("INSPECT_PROVIDER_FAILED");
+    return done(fitQueryResult(result, capBytes));
+  };
+
   const runQuery = async (
     request: ReturnType<typeof decodeQueryRequest> & { ok: true },
     until: Promise<void>,
+    threadId: string,
   ): Promise<InspectSettled> => {
     const { providerId, targetId, selector, clientId } = request.value;
-    const found = providers().find((p) => p.id === providerId);
+    const found = providers(threadId).find((p) => p.id === providerId);
     if (found === undefined) return unavailable("INSPECT_UNKNOWN_PROVIDER");
+    if (found.host === "client" && options.clients !== undefined)
+      return runClientQuery(request, until, threadId, options.clients);
     const handle = found.registry.get(providerId);
     if (handle === undefined) return unavailable("INSPECT_UNAVAILABLE");
     const answer = await handle.query(
@@ -321,14 +417,18 @@ export function createInspectService(options: InspectServiceOptions): InspectSer
       if (!request.ok) return note(operation, refused(request.code));
       return note(
         operation,
-        await hold(operation, context.args, (until) => runList(request, until)),
+        await hold(operation, context.args, (until) =>
+          runList(request, until, context.caller.threadId),
+        ),
       );
     }
     const request = decodeQueryRequest(context.args);
     if (!request.ok) return note(operation, refused(request.code));
     return note(
       operation,
-      await hold(operation, context.args, (until) => runQuery(request, until)),
+      await hold(operation, context.args, (until) =>
+        runQuery(request, until, context.caller.threadId),
+      ),
     );
   };
 
@@ -346,6 +446,8 @@ export function createInspectService(options: InspectServiceOptions): InspectSer
       draining = true;
       const stopping = [...heldCalls];
       for (const call of stopping) call.finish(unavailable("INSPECT_UNAVAILABLE"));
+      // Waiting client queries belong to held calls already counted above: they end here, uncounted twice.
+      options.clients?.drain();
       for (const { registry } of options.registries) registry.dispose();
       return { stopped: stopping.length };
     },

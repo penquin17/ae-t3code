@@ -10,9 +10,28 @@ import { useRegion } from "../regions/useRegion";
 import { IDENTITY_UNKNOWN_TEXT, piSessionIdOf } from "./binding";
 import { ControlPanel } from "./ControlPanel";
 import { GoalsCard } from "./goals/GoalsCard";
+import { GoalsProvider } from "./goals/GoalsProvider";
 import { JobsPanel } from "./jobs/JobsPanel";
 import { cardClass, mutedClass } from "./parts";
 import { UsagePanel } from "./usage/UsagePanel";
+
+/** The panels that follow the root's interactions; the goal card reads the page's goal view when it has one, and says so when it has none. */
+function Panels({
+  environmentId,
+  threadId,
+}: {
+  readonly environmentId: string;
+  readonly threadId: string;
+}) {
+  return (
+    <>
+      <ChildrenPanel environmentId={environmentId} threadId={threadId} />
+      <JobsPanel environmentId={environmentId} threadId={threadId} />
+      <UsagePanel environmentId={environmentId} threadId={threadId} />
+      <GoalsCard />
+    </>
+  );
+}
 
 /**
  * The human-control page at /aetheria/control/:environmentId/:threadId. The cards need the Backend's Pi session id, which is read from the thread's strong Pi native reference; when
@@ -42,23 +61,26 @@ export function ControlPage({
         <h1 className="text-lg font-medium text-foreground">Human control</h1>
         <ConnectionStatus region={REGION.controlConnection} />
         {binding.state === "known" ? (
-          <ControlPanel
+          // One goal view for the root, keyed on both ids: the goal card and an authorization card tied to the goal's Re-arm read the same last read, and a reply that lands after a root switch lands nowhere.
+          <GoalsProvider
             key={`${environmentId}:${binding.value}`}
             environmentId={environmentId}
             rootSessionId={binding.value}
-          />
+          >
+            <ControlPanel environmentId={environmentId} rootSessionId={binding.value} />
+            <Panels environmentId={environmentId} threadId={threadId} />
+          </GoalsProvider>
         ) : (
-          <div data-identity="unknown" className={cardClass}>
-            <p role="status" className="text-sm">
-              {IDENTITY_UNKNOWN_TEXT}
-            </p>
-            <p className={mutedClass}>{binding.reason}.</p>
-          </div>
+          <>
+            <div data-identity="unknown" className={cardClass}>
+              <p role="status" className="text-sm">
+                {IDENTITY_UNKNOWN_TEXT}
+              </p>
+              <p className={mutedClass}>{binding.reason}.</p>
+            </div>
+            <Panels environmentId={environmentId} threadId={threadId} />
+          </>
         )}
-        <ChildrenPanel environmentId={environmentId} threadId={threadId} />
-        <JobsPanel environmentId={environmentId} threadId={threadId} />
-        <UsagePanel environmentId={environmentId} threadId={threadId} />
-        <GoalsCard />
       </main>
     </SidebarInset>
   );

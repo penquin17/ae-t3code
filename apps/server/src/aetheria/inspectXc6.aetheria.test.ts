@@ -19,6 +19,7 @@ import {
   createInspectBackendRegistration,
   createOrchestrationBackendRegistration,
   createProvidersBackendRegistration,
+  createWorkflowsBackendRegistration,
   prepareAetheriaBackend,
   type InspectAccessPort,
 } from "@t3tools/aetheria-server";
@@ -82,6 +83,7 @@ function world(options: { enabled?: boolean; access?: InspectAccessPort } = {}) 
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
       createGoalsBackendRegistration(),
+      createWorkflowsBackendRegistration({}),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       registration,

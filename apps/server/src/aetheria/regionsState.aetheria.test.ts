@@ -539,3 +539,128 @@ describe("a connection reads only its own client", () => {
     expect(bob.readOwn()).toMatchObject({ ok: true, value: undefined });
   });
 });
+
+// M11 Plan step 17 (D8, N1): the two inspector-only reads, scoped by the VIEWED THREAD and not by principal. They are the only members that read across subjects; no client RPC exposes them.
+describe("the inspector's two reads: the clients viewing one thread", () => {
+  const CLIENT_C = "client-carol-00000001";
+  const open = (
+    registry: RegionRegistry,
+    principal: { subject: string; deviceSessionId: string },
+    clientId: string,
+    threads: ReadonlyArray<string>,
+  ) => {
+    const connection = registry.openConnection(principal);
+    const ends = threads.map((thread) => connection.observeViewing(thread));
+    report(connection, clientId, 1, mounted("shell", "composer"));
+    return { connection, ends };
+  };
+
+  it("lists no client for a thread nobody views, one for a single viewer, and two for two viewers", () => {
+    const registry = registryOf();
+    expect(registry.clientsViewing("thread-1")).toEqual([]);
+    open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    expect(registry.clientsViewing("thread-1").map((c) => c.clientId)).toEqual([CLIENT_A]);
+    open(registry, ALICE_PHONE, CLIENT_C, ["thread-1"]);
+    expect(
+      registry
+        .clientsViewing("thread-1")
+        .map((c) => c.clientId)
+        .toSorted(),
+    ).toEqual([CLIENT_A, CLIENT_C].toSorted());
+  });
+
+  it("is across subjects: another signed-in principal viewing the same thread is a viewer, one viewing another thread is not", () => {
+    const registry = registryOf();
+    open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    open(registry, BOB, CLIENT_B, ["thread-1"]);
+    open(registry, { subject: "carol", deviceSessionId: "dev-c1" }, CLIENT_C, ["thread-2"]);
+    expect(
+      registry
+        .clientsViewing("thread-1")
+        .map((c) => c.clientId)
+        .toSorted(),
+    ).toEqual([CLIENT_A, CLIENT_B].toSorted());
+    expect(registry.clientsViewing("thread-2").map((c) => c.clientId)).toEqual([CLIENT_C]);
+    expect(registry.clientsViewing("thread-3")).toEqual([]);
+  });
+
+  it("answers one client only when it views that thread: an id viewing another thread, an unknown id and a foreign client are all absent", () => {
+    const registry = registryOf();
+    open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    open(registry, BOB, CLIENT_B, ["thread-2"]);
+    expect(registry.clientViewing("thread-1", CLIENT_A)?.clientId).toBe(CLIENT_A);
+    expect(registry.clientViewing("thread-1", CLIENT_B)).toBeUndefined();
+    expect(registry.clientViewing("thread-2", CLIENT_A)).toBeUndefined();
+    expect(registry.clientViewing("thread-1", "client-nobody-0000001")).toBeUndefined();
+  });
+
+  it("names each viewer's connection, which a takeover changes and the connection handle also carries", () => {
+    const registry = registryOf();
+    const first = open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    const before = registry.clientViewing("thread-1", CLIENT_A)!;
+    expect(before.connectionId).toBe(first.connection.id);
+    // A reconnect of the same device session takes the client id over; it views nothing until its own subscription runs.
+    const second = registry.openConnection(ALICE);
+    expect(report(second, CLIENT_A, 2, mounted("shell"))).toMatchObject({ ok: true });
+    expect(registry.clientViewing("thread-1", CLIENT_A)).toBeUndefined();
+    second.observeViewing("thread-1");
+    const after = registry.clientViewing("thread-1", CLIENT_A)!;
+    expect(after.connectionId).toBe(second.id);
+    expect(after.connectionId).not.toBe(before.connectionId);
+  });
+
+  it("ends a viewer's membership with its subscription, its disconnect and the registry's drain", () => {
+    const registry = registryOf();
+    const a = open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    const b = open(registry, BOB, CLIENT_B, ["thread-1", "thread-2"]);
+    a.ends[0]!();
+    expect(registry.clientsViewing("thread-1").map((c) => c.clientId)).toEqual([CLIENT_B]);
+    expect(registry.clientViewing("thread-1", CLIENT_A)).toBeUndefined();
+    b.ends[0]!();
+    expect(registry.clientsViewing("thread-1")).toEqual([]);
+    expect(registry.clientsViewing("thread-2").map((c) => c.clientId)).toEqual([CLIENT_B]);
+    b.connection.close();
+    expect(registry.clientsViewing("thread-2")).toEqual([]);
+    open(registry, ALICE_PHONE, CLIENT_C, ["thread-9"]);
+    registry.drain();
+    expect(registry.clientsViewing("thread-9")).toEqual([]);
+    expect(registry.clientViewing("thread-9", CLIENT_C)).toBeUndefined();
+  });
+
+  it("returns copies of what is held, never a handle that changes the store", () => {
+    const registry = registryOf();
+    open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    const copy = registry.clientsViewing("thread-1")[0]!;
+    (copy.regions as unknown as Array<unknown>).length = 0;
+    (copy.viewing as unknown as Array<string>).push("forged");
+    const one = registry.clientViewing("thread-1", CLIENT_A)!;
+    (one.regions as unknown as Array<unknown>).length = 0;
+    const again = registry.clientViewing("thread-1", CLIENT_A)!;
+    expect(again.regions.map((r) => r.descriptor.id).toSorted()).toEqual(["composer", "shell"]);
+    expect(again.viewing).toEqual(["thread-1"]);
+  });
+
+  it("leaves the principal-only reads exactly as they were: no client reads across subjects through them", () => {
+    const registry = registryOf();
+    open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    open(registry, BOB, CLIENT_B, ["thread-1"]);
+    expect(registry.clientsFor({ subject: "alice" }).map((c) => c.clientId)).toEqual([CLIENT_A]);
+    expect(
+      registry
+        .clientsFor({ subject: "alice" }, { viewingThreadId: "thread-1" })
+        .map((c) => c.clientId),
+    ).toEqual([CLIENT_A]);
+    expect(registry.clientOf({ subject: "alice" }, CLIENT_B)).toBeUndefined();
+    expect(registry.clientOf({ subject: "bob" }, CLIENT_A)).toBeUndefined();
+  });
+
+  it("makes no request and emits no event while reading", () => {
+    const registry = registryOf();
+    open(registry, ALICE, CLIENT_A, ["thread-1"]);
+    const seen: RegionEvent[] = [];
+    registry.subscribe({ subject: "alice" }, (event) => seen.push(event));
+    registry.clientsViewing("thread-1");
+    registry.clientViewing("thread-1", CLIENT_A);
+    expect(seen).toEqual([]);
+  });
+});

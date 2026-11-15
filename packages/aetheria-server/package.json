@@ -20,6 +20,7 @@
     "@aetheria/interaction": "file:./artifacts/aetheria-interaction-0.1.0.tgz",
     "@aetheria/orchestration": "file:./artifacts/aetheria-orchestration-0.1.0.tgz",
     "@aetheria/providers": "file:./artifacts/aetheria-providers-0.1.0.tgz",
+    "@aetheria/workflows": "file:./artifacts/aetheria-workflows-0.1.0.tgz",
     "@t3tools/aetheria-contracts": "workspace:*"
   },
   "devDependencies": {
@@ -40,7 +41,7 @@
     "@aetheria/goals": {
       "archive": "artifacts/aetheria-goals-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:017dcea73c92939897fdf35f2e28ec6bff3fa68e6bdb1d8732040388bec793d1"
+      "stamp": "sha256:b3fc3f45da0de3d698259234fb1321498e31f9da9a4820e5abd64e92b6f0c9a0"
     },
     "@aetheria/inspect": {
       "archive": "artifacts/aetheria-inspect-0.1.0.tgz",
@@ -61,6 +62,11 @@
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",
       "version": "0.1.0",
       "stamp": "sha256:710f86dec7c2c6f8b1d0c02c2922247b1bcd021880751b044035ca9f4ee3e0b9"
+    },
+    "@aetheria/workflows": {
+      "archive": "artifacts/aetheria-workflows-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:a1e0230864fb8583a693d854f9fdf9e011c23cdd9d728783b8a900ef444e4292"
     }
   }
 }

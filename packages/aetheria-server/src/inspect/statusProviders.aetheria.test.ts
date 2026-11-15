@@ -17,6 +17,7 @@ import { BACKEND_COMPOSITION_ID } from "../compositionId.ts";
 import { createDeliverablesBackendRegistration } from "../deliverables/deliverables.ts";
 import { createGoalsBackendRegistration } from "../goals/registration.ts";
 import { createGroupsBackendRegistration } from "../groups/groups.ts";
+import { createWorkflowsBackendRegistration } from "../workflows/registration.ts";
 import { createHumanControlBackendRegistration } from "../humanControl.ts";
 import { createOrchestrationBackendRegistration } from "../orchestration.ts";
 import { createProvidersBackendRegistration } from "../providers.ts";
@@ -56,6 +57,7 @@ function world(over: Partial<InspectBackendOptions> = {}) {
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
       createGoalsBackendRegistration(),
+      createWorkflowsBackendRegistration({}),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       registration,

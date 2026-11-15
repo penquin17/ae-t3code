@@ -20,6 +20,8 @@ import { makeLineageReader } from "./lineageReader.ts";
 
 const SERVER = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const source = (relative: string) => NodeFS.readFileSync(NodePath.join(SERVER, relative), "utf8");
+const WRITES_THREAD_GOAL =
+  /OrchestrationV2ProviderGoal|OrchestrationV2ThreadShell|\.goal\s*=[^=]|\bgoal\s*:\s*\{|\bgoal\??\s*:\s*(Option|input|state)\b|\["goal"\]\s*=/;
 
 describe("probe 4 (fork half): typed /goal ingress and the fork observation point", () => {
   it("parses the typed commands M07 would adapt (set and resume → propose; pause and clear → root authority; show → get), and ignores attachments", () => {
@@ -73,9 +75,15 @@ describe("probe 4 (fork half): typed /goal ingress and the fork observation poin
         // M07 step 14: the Backend wiring and the round guard speak of the goal ROUND (M07's own concept), never of T3's thread `goal`; those two files name no property or field called `goal`.
         if (name === "aetheriaBackend.ts" || name === "goalRoundGuard.ts")
           return /\.goal\b|\bgoal\s*[:=]|\bgoal\?\./.test(text);
-        return /\bgoal\b/i.test(text);
+        // Every other file may say "goal" (the /goal command, the goal observer, the goals RPC) but may not WRITE T3's thread `goal`: no use of T3's provider-goal or shell types, no assignment to a `.goal`, no `goal` key given an object or an Option/input/state value.
+        return WRITES_THREAD_GOAL.test(text);
       });
     expect(writers).toEqual([]);
+    // The write pattern itself catches the forms it names and spares the word.
+    for (const write of ["thread.goal = x", "{ goal: { status: 1 } }", "goal: Option.none()"])
+      expect(WRITES_THREAD_GOAL.test(write)).toBe(true);
+    for (const read of ["no goal is set", "const goal = record(x);", "{ goal: null }"])
+      expect(WRITES_THREAD_GOAL.test(read)).toBe(false);
     // The orchestration command surface names `goal` only as T3's own /goal handling (CommandPolicy / Orchestrator / turn start), gated to codex and claude above.
     const commandWriters = [
       "orchestration-v2/CommandPolicy.ts",

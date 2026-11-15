@@ -27,6 +27,7 @@ import {
 import { createDeliverablesBackendRegistration } from "./deliverables/deliverables.ts";
 import { createGoalsBackendRegistration } from "./goals/registration.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
+import { createWorkflowsBackendRegistration } from "./workflows/registration.ts";
 import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import {
@@ -71,6 +72,7 @@ function prepare(
       createHumanControlBackendRegistration({}),
       createOrchestrationBackendRegistration({}),
       createGoalsBackendRegistration(),
+      createWorkflowsBackendRegistration({}),
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       createInspectBackendRegistration(),
@@ -96,6 +98,7 @@ describe("the second pinned archive", () => {
       "@aetheria/interaction",
       "@aetheria/orchestration",
       "@aetheria/providers",
+      "@aetheria/workflows",
     ]);
     expect(Object.keys(declared).sort()).toEqual(["archive", "stamp", "version"]);
     expect(declared).toMatchObject({
@@ -132,6 +135,7 @@ describe("the providers module's descriptor", () => {
       HUMAN_CONTROL_BACKEND_ENTRY,
       "aetheria:orchestration-backend",
       "aetheria:goals-backend",
+      "aetheria:workflows-backend",
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
       "aetheria:inspect-backend",
@@ -165,6 +169,7 @@ describe("the providers module's descriptor", () => {
       "human-control-backend",
       "orchestration-backend",
       "goals-backend",
+      "workflows-backend",
       "groups-backend",
       "deliverables-backend",
       "inspect-backend",
@@ -175,6 +180,7 @@ describe("the providers module's descriptor", () => {
       "human-control-backend",
       "orchestration-backend",
       "goals-backend",
+      "workflows-backend",
       "groups-backend",
       "deliverables-backend",
       "inspect-backend",
@@ -308,6 +314,7 @@ describe("production mode over the real archive", () => {
       "inspect-backend",
       "deliverables-backend",
       "groups-backend",
+      "workflows-backend",
       "goals-backend",
       "orchestration-backend",
       "human-control-backend",

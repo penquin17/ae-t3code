@@ -1559,6 +1559,9 @@ importers:
       '@aetheria/providers':
         specifier: file:./artifacts/aetheria-providers-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz
+      '@aetheria/workflows':
+        specifier: file:./artifacts/aetheria-workflows-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-workflows-0.1.0.tgz
       '@t3tools/aetheria-contracts':
         specifier: workspace:*
         version: link:../aetheria-contracts
@@ -2605,7 +2608,7 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/goals@file:packages/aetheria-server/artifacts/aetheria-goals-0.1.0.tgz':
-    resolution: {integrity: sha512-3ScLIh2rXOsWxhbzZTCQc9i18sMyirBORBKT1vhTesTKO9TcrwYC7/WWhaNn/TTV12VAqsjTUHzqHWRNn+GbfQ==, tarball: file:packages/aetheria-server/artifacts/aetheria-goals-0.1.0.tgz}
+    resolution: {integrity: sha512-M/TGSYqrTLyLFfb6x8e0MWMFHBteH4ru+LQHffhDdevdw2ELqBNMHznjDrPnvhUxPihxHUdEownDNDcfKBQaYw==, tarball: file:packages/aetheria-server/artifacts/aetheria-goals-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
@@ -2633,6 +2636,11 @@ packages:
     peerDependenciesMeta:
       '@earendil-works/pi-coding-agent':
         optional: true
+
+  '@aetheria/workflows@file:packages/aetheria-server/artifacts/aetheria-workflows-0.1.0.tgz':
+    resolution: {integrity: sha512-zJLxi4j1flByhKBY68BnvbY7xhqBQn+RwK24ggsPj3kDdjX8PfFv2KQvm10qZixPvw/zwfEcE6qS49VY0rYJlA==, tarball: file:packages/aetheria-server/artifacts/aetheria-workflows-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
 
   '@ai-sdk/provider-utils@4.0.57':
     resolution: {integrity: sha512-89a7sPvZqXsP3PigcAQLWntu/duIVEcN/RyChAB+j6p3C7NwW767sVttvL8r0+BetTg63uAXQoYHCZZueQKBSw==}
@@ -12651,6 +12659,8 @@ snapshots:
   '@aetheria/orchestration@file:packages/aetheria-server/artifacts/aetheria-orchestration-0.1.0.tgz': {}
 
   '@aetheria/providers@file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz': {}
+
+  '@aetheria/workflows@file:packages/aetheria-server/artifacts/aetheria-workflows-0.1.0.tgz': {}
 
   '@ai-sdk/provider-utils@4.0.57(zod@4.6.5)':
     dependencies:

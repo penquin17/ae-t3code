@@ -7,6 +7,7 @@
 // so (`resolveInspectEnabled`); with it off, both operations answer `unavailable`, no provider is asked, and the module's own inspection state reads `inactive` (disabled) while the raw
 // lifecycle is unchanged.
 import type { BackendRegistration } from "../adapter.ts";
+import type { ClientQueries } from "./clients.ts";
 import type { InspectAccessPort } from "./inspectAccess.ts";
 import {
   createProviderRegistry,
@@ -41,6 +42,8 @@ export interface InspectBackendOptions {
   readonly sources?: Omit<StatusSources, "disabled"> | undefined;
   /** The read-only driver/RPC metadata the app server supplies. Absent: `backend-services` is not registered. */
   readonly metadata?: BackendServicesMetadataPort | undefined;
+  /** The live client resolver (C5), supplied by the app wiring over M10's registry. Absent: no `client-regions` provider. */
+  readonly clients?: ClientQueries | undefined;
   /** The deployment's `showValues` XC-4 setting; absent or malformed shows no value. */
   readonly showValues?: unknown;
   readonly now?: (() => number) | undefined;
@@ -79,6 +82,7 @@ export function createInspectBackendRegistration(
     // Unconfigured is not on: without a caller check no call may reach a provider.
     enabled: enabled && options.access !== undefined,
     registries: [{ host: "backend", registry }],
+    ...(options.clients === undefined ? {} : { clients: options.clients }),
     showValues: options.showValues,
     now: options.now ?? Date.now,
     schedule: options.schedule ?? timerSchedule,

@@ -71,23 +71,29 @@ export type ChangeSignal =
 const CHANGES_TAG =
   "aetheria.interactions.changes" as unknown as typeof WS_METHODS.subscribeServerConfig;
 
+/**
+ * A root's change stream as the hook sees it: `opened` first, then each push, then `ended`, or `failed` with the cause. Shared by every root-and-version stream (interactions, goal), so the
+ * two views read their streams the same way.
+ */
+export const changeSignals = (stream: unknown): Stream.Stream<ChangeSignal> =>
+  // `opened` is the stream's first element: the subscribe call has been made when it arrives, so the hook's first snapshot read (which waits for any element) comes after the subscribe.
+  Stream.concat(
+    Stream.make({ tag: "opened" } as ChangeSignal),
+    (stream as Stream.Stream<InteractionsChange>).pipe(
+      Stream.zipWithIndex,
+      Stream.map(([event, n]): ChangeSignal => ({ tag: "event", n, event })),
+      Stream.concat(Stream.make({ tag: "ended" } as ChangeSignal)),
+      Stream.catchCause((cause) =>
+        Stream.make({ tag: "failed", message: Cause.pretty(cause) } as ChangeSignal),
+      ),
+    ),
+  );
+
 /** The root's change stream. Subscribing is the hook's first act; its end and its failure are values, so a closed Backend reads as unavailable and not as quiet. */
 const changesFamily = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "aetheria:interactions:changes",
   tag: CHANGES_TAG,
-  // `opened` is the stream's first element: the subscribe call has been made when it arrives, so the hook's first snapshot read (which waits for any element) comes after the subscribe.
-  transform: (stream) =>
-    Stream.concat(
-      Stream.make({ tag: "opened" } as ChangeSignal),
-      (stream as unknown as Stream.Stream<InteractionsChange>).pipe(
-        Stream.zipWithIndex,
-        Stream.map(([event, n]): ChangeSignal => ({ tag: "event", n, event })),
-        Stream.concat(Stream.make({ tag: "ended" } as ChangeSignal)),
-        Stream.catchCause((cause) =>
-          Stream.make({ tag: "failed", message: Cause.pretty(cause) } as ChangeSignal),
-        ),
-      ),
-    ),
+  transform: (stream) => changeSignals(stream),
 });
 
 export const interactionChanges = (environmentId: string, rootSessionId: string) =>

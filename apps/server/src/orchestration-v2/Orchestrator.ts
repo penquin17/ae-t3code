@@ -168,6 +168,8 @@ import {
   type ShellSnapshotOptions,
 } from "./ProjectionStore.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
+// AETHERIA-IP:IP-67 the optional hook that routes a typed /goal on a Pi thread to the Aetheria Backend (leaf module: importing the Backend here would be a cycle)
+import { GoalCommandHook } from "../aetheria/goalCommandHook.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
@@ -1099,6 +1101,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     },
   );
+
+  // AETHERIA-IP:IP-67 a typed /goal on a Pi thread belongs to the Aetheria Backend. When the optional hook is present and answers handled, the dispatch fails with the outcome text as the command
+  // error (T3 shows it as a toast) and no turn starts; with no hook, another driver, or a message the hook does not handle, nothing here changes T3's behavior.
+  const routeAetheriaGoalCommand = Effect.fn("Orchestrator.routeAetheriaGoalCommand")(function* (
+    command: OrchestrationV2ServerCommand,
+    threadId: ThreadId,
+    message: { readonly text: string; readonly attachments: ReadonlyArray<ChatAttachment> },
+    providerInstanceId: ProviderInstanceId,
+  ) {
+    if (parseGoalCommand(message) === null) return;
+    const hook = yield* Effect.serviceOption(GoalCommandHook);
+    if (Option.isNone(hook)) return;
+    const { driver } = yield* providerAdapters
+      .get(providerInstanceId)
+      .pipe(mapDispatchError(command));
+    if (driver !== "pi") return;
+    const outcome = yield* hook.value.route({
+      threadId,
+      driver,
+      message: { text: message.text, attachments: message.attachments },
+    });
+    if (!outcome.handled) return;
+    return yield* new OrchestratorDispatchError({
+      commandId: command.commandId,
+      commandType: command.type,
+      cause: outcome.notice ?? "The goal command was handled.",
+    });
+  });
 
   const mapDispatchError =
     (command: OrchestrationV2ServerCommand) =>
@@ -5714,6 +5744,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     ) {
       dispatchMode = { type: "queue_after_active" };
     }
+    // AETHERIA-IP:IP-67 a typed /goal on a Pi thread goes to the Aetheria Backend; handled ends the dispatch here with the notice as its error.
+    yield* routeAetheriaGoalCommand(command, command.threadId, command, modelSelection.instanceId);
     // Codex and Claude own /goal; elsewhere it is ordinary text that cannot steer.
     const parsedGoalCommand = parseGoalCommand(command);
     const goalCommand =
@@ -9561,6 +9593,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
+    // AETHERIA-IP:IP-67 same route for a queued /goal promoted to steer on a Pi thread: handled ends the command with the notice and emits nothing.
+    yield* routeAetheriaGoalCommand(
+      command,
+      command.threadId,
+      queuedMessage,
+      queuedRun.providerInstanceId,
+    );
     const parsedGoalCommand = parseGoalCommand(queuedMessage);
     const goalCommand =
       parsedGoalCommand === null ||

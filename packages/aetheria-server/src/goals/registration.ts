@@ -1,7 +1,8 @@
 // @effect-diagnostics globalTimers:off
-// AETHERIA M07 Plan step 14 — the Backend `goals-backend` registration: one goal service over the injected factory. It registers no XC-6 operation: T3's recovery guard and, in later steps, M10's
-// client handlers and the model's goal tools reach it through `service()`. The module starts after the owner lock, M06 and M05 (its row requires them), reconciles every journal without
-// sending anything, and drains before them: it stops the service (no settle starts a round, no card is honoured) and waits a bounded time for the work in flight.
+// AETHERIA M07 Plan steps 14 and 17 — the Backend `goals-backend` registration: one goal service over the injected factory. It registers exactly the three XC-6 goal operations of DV10 (`goals.get`, `goals.create`,
+// `goals.update`, operations.ts) for the model's tools; T3's recovery guard and M10's client handlers (the `aetheria.goal.*` RPCs) reach the same service through `service()`. The module starts after the owner lock,
+// M06 and M05 (its row requires them), reconciles every journal without sending anything, and drains before them: it stops the service (no settle starts a round, no card is honoured) and waits a bounded
+// time for the work in flight. Its operations answer `unavailable` whenever no service runs (the adapter also gates them on the module's own state).
 //
 // Two states belong to this file and nowhere else: the RUNNING service (present only between start and drain) and the READ side (`roundInFlight`, `anyRoundInFlight`), which stays answerable after
 // drain because it reads the journal and T3's shutdown preparation still asks. `unconfigured` (no factory) answers `none`: no round can exist that this Backend began. A module that never
@@ -10,6 +11,7 @@ import type { BackendRegistration } from "../adapter.ts";
 import type { GoalService } from "./goalsEntry.ts";
 import type { GoalRoundState, GoalsRuntime } from "./factory.ts";
 import { GOALS_BACKEND_ENTRY } from "./goalsRow.ts";
+import { createGoalOperations } from "./operations.ts";
 
 /** How long a drain waits for proposals and rounds already in flight before it reports them as possibly still live. */
 const DRAIN_WAIT_MS = 5000;
@@ -51,6 +53,7 @@ export function createGoalsBackendRegistration(
 
   return {
     entry: GOALS_BACKEND_ENTRY,
+    operations: createGoalOperations(() => running?.service),
     activation: {
       start: async () => {
         if (options.create === undefined) return;

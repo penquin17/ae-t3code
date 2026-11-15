@@ -246,6 +246,18 @@ export const RPC_REQUIRED_SCOPES = {
   // AETHERIA-IP:IP-58 explicit scopes for the declared region registry (M10 step 23): both methods change only the caller's own client record, so orchestration:read suffices
   [AETHERIA_WS_METHODS.regionsReport]: AuthOrchestrationReadScope,
   [AETHERIA_WS_METHODS.regionsRead]: AuthOrchestrationReadScope,
+  // AETHERIA-IP:IP-63 explicit scopes for the goal strip and the workflow runs (M07 step 17, XC-23): the goal snapshot, its change stream and the workflow runs need orchestration:read; propose, pause, clear, the client-only rearm and the workflow cancel need orchestration:operate
+  [AETHERIA_WS_METHODS.goalSnapshot]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.goalChanges]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.workflowRuns]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.goalPropose]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.goalPause]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.goalClear]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.goalRearm]: AuthOrchestrationOperateScope,
+  [AETHERIA_WS_METHODS.workflowCancel]: AuthOrchestrationOperateScope,
+  // AETHERIA-IP:IP-63 (widened: the live page inspection carrier, M11 step 19) the request stream and the page's reply both need orchestration:read; neither gives the browser an inspection authority
+  [AETHERIA_WS_METHODS.inspectRequests]: AuthOrchestrationReadScope,
+  [AETHERIA_WS_METHODS.inspectReply]: AuthOrchestrationReadScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

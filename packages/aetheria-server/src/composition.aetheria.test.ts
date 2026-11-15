@@ -9,6 +9,7 @@ import { prepareAetheriaBackend } from "./aetheriaBackend.ts";
 import { AGENT_AWARENESS_BACKEND_ID, agentAwarenessBackendModuleRow } from "./agentAwareness.ts";
 import { deliverablesBackendModuleRow } from "./deliverables/deliverablesRow.ts";
 import { goalsBackendModuleRow } from "./goals/goalsRow.ts";
+import { workflowsBackendModuleRow } from "./workflows/row.ts";
 import { groupsBackendModuleRow } from "./groups/groupsRow.ts";
 import { humanControlBackendModuleRow } from "./humanControlRow.ts";
 import { inspectBackendModuleRow } from "./inspect/inspectRow.ts";
@@ -37,6 +38,7 @@ describe("the Backend composition", () => {
           "human-control-backend",
           "orchestration-backend",
           "goals-backend",
+          "workflows-backend",
           "groups-backend",
           "deliverables-backend",
           "inspect-backend",
@@ -50,6 +52,7 @@ describe("the Backend composition", () => {
       humanControlBackendModuleRow(),
       orchestrationBackendModuleRow(),
       goalsBackendModuleRow(),
+      workflowsBackendModuleRow(),
       groupsBackendModuleRow(),
       deliverablesBackendModuleRow(),
       inspectBackendModuleRow(),

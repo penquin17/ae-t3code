@@ -38,6 +38,11 @@ import {
   PROVIDERS_BACKEND_ID,
   providersBackendModuleRow,
 } from "./providersRow.ts";
+import {
+  WORKFLOWS_BACKEND_ENTRY,
+  WORKFLOWS_BACKEND_ID,
+  workflowsBackendModuleRow,
+} from "./workflows/row.ts";
 
 export { BACKEND_COMPOSITION_ID };
 
@@ -48,6 +53,7 @@ export const BACKEND_ENTRY_ALLOWLIST: readonly string[] = Object.freeze([
   HUMAN_CONTROL_BACKEND_ENTRY,
   ORCHESTRATION_BACKEND_ENTRY,
   GOALS_BACKEND_ENTRY,
+  WORKFLOWS_BACKEND_ENTRY,
   GROUPS_BACKEND_ENTRY,
   DELIVERABLES_BACKEND_ENTRY,
   INSPECT_BACKEND_ENTRY,
@@ -66,6 +72,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
       humanControlBackendModuleRow(),
       orchestrationBackendModuleRow(),
       goalsBackendModuleRow(),
+      workflowsBackendModuleRow(),
       groupsBackendModuleRow(),
       deliverablesBackendModuleRow(),
       inspectBackendModuleRow(),
@@ -85,6 +92,7 @@ export function backendManifest(options: { readonly composition?: string } = {})
           HUMAN_CONTROL_BACKEND_ID,
           ORCHESTRATION_BACKEND_ID,
           GOALS_BACKEND_ID,
+          WORKFLOWS_BACKEND_ID,
           GROUPS_BACKEND_ID,
           DELIVERABLES_BACKEND_ID,
           INSPECT_BACKEND_ID,

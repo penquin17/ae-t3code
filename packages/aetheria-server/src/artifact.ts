@@ -2,7 +2,7 @@
 //
 // The outer build wrote each archive and its stamp (tools/lib/foundations/artifact.mjs); the manifest's `aetheriaArtifacts` entries are the
 // declaration the graphs check compares with the archive bytes. The Backend publishes these stamps as facts of its composition, so a
-// module whose row expects another stamp is refused as stale. Seven archives are accepted (M09 A15, M06, M05, M07, M11): awareness, providers, interaction, evidence, orchestration, goals and inspect.
+// module whose row expects another stamp is refused as stale. Eight archives are accepted (M09 A15, M06, M05, M07, M11): awareness, providers, interaction, evidence, orchestration, goals, workflows and inspect.
 import manifest from "../package.json" with { type: "json" };
 
 const declaredArtifacts = manifest.aetheriaArtifacts as Record<
@@ -36,6 +36,9 @@ export const ORCHESTRATION_PINNED_ARTIFACT = pinned("@aetheria/orchestration");
 /** The goals archive (M07 step 14): the goal store and service. The `goals-backend` row names it. */
 export const GOALS_PINNED_ARTIFACT = pinned("@aetheria/goals");
 
+/** The workflows archive (M07 step 22): the workflow ledger and its three run-record operations. The `workflows-backend` row names it. */
+export const WORKFLOWS_PINNED_ARTIFACT = pinned("@aetheria/workflows");
+
 /** The inspect archive (M11 DV5): the read-only inspection core — the closed protocol, strict codecs, the projector and the provider registry. The `inspect-backend` row names it. */
 export const INSPECT_PINNED_ARTIFACT = pinned("@aetheria/inspect");
 
@@ -47,5 +50,6 @@ export const PINNED_ARTIFACT_STAMPS: Readonly<Record<string, string>> = Object.f
   [EVIDENCE_PINNED_ARTIFACT.package]: EVIDENCE_PINNED_ARTIFACT.stamp,
   [ORCHESTRATION_PINNED_ARTIFACT.package]: ORCHESTRATION_PINNED_ARTIFACT.stamp,
   [GOALS_PINNED_ARTIFACT.package]: GOALS_PINNED_ARTIFACT.stamp,
+  [WORKFLOWS_PINNED_ARTIFACT.package]: WORKFLOWS_PINNED_ARTIFACT.stamp,
   [INSPECT_PINNED_ARTIFACT.package]: INSPECT_PINNED_ARTIFACT.stamp,
 });

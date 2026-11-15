@@ -1,5 +1,6 @@
-// The goals and workflows card in a real browser (M10 Plan step 18, D14, XC-23). It is a static statement: M07 is not built, so the card makes no request, offers no control and invents no goal,
-// workflow or progress. The images are evidence for a person to view; the assertions prove the words, the absence of controls, the layout and the contrast.
+// The goal card with no goal view mounted, in a real browser (M07 Plan step 18, D24). A card shown alone (no Backend session known) reads nothing, offers no control and says so; it no longer claims goals
+// are "not built". The live states, Re-arm and the authorization card are in `../goals.browser.test.tsx`. The images are evidence for a person to view; the assertions prove the words, the absence of
+// controls, the layout and the contrast.
 import { describe, expect, it } from "vitest";
 import { page } from "vite-plus/test/browser";
 
@@ -16,9 +17,9 @@ const cases = ([1280, 390] as const).flatMap((width) =>
   (["light", "dark"] as const).map((mode) => [width, mode] as const),
 );
 
-describe("the goals and workflows card", () => {
+describe("the goal card with no goal view", () => {
   it.each(cases)(
-    "says goals and workflows are not built yet, with no control, at %i px, %s",
+    "says it has no Backend session, with no control, at %i px, %s",
     async (width, mode: Mode) => {
       await page.viewport(width, width === 390 ? 844 : 900);
       setTheme("system");
@@ -32,15 +33,16 @@ describe("the goals and workflows card", () => {
         </div>,
         { router: false },
       );
-      await expect
-        .poll(() => document.body.textContent ?? "")
-        .toContain("Goals and workflows are not built yet (M07).");
       const card = screen.container.querySelector<HTMLElement>("[data-aetheria='goals']")!;
-      expect(card.querySelector("h2")?.textContent).toBe("Goals and workflows");
+      expect(card.getAttribute("data-goal-view")).toBe("no-session");
+      expect(card.querySelector("h2")?.textContent).toBe("Goal");
+      expect(card.textContent).toContain(
+        "The goal cannot be read here: this page has no Backend session for it.",
+      );
+      expect(card.textContent).not.toContain("not built yet");
       expect(
         card.querySelectorAll("button, a, input, select, textarea, [role='button']"),
       ).toHaveLength(0);
-      expect(card.textContent).not.toMatch(/\b(armed|paused|blocked|complete|pending|progress)\b/i);
       const heading = card.querySelector<HTMLElement>("h2")!;
       const behind = surfaceBehind(heading);
       expect(

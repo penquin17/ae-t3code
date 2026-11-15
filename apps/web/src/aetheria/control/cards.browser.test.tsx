@@ -531,7 +531,7 @@ describe("plan review, authorization and plan mode", () => {
     });
   });
 
-  it("authorization: the grant names the subject shown, the origin is shown once and Re-arm is disabled and honestly labelled", async () => {
+  it("authorization: the grant names the subject shown, the origin is shown once and, with no goal connected to the card, Re-arm is disabled and honestly labelled", async () => {
     await appear(1280, 800, "light");
     const { actions, calls } = scripted(() => confirmed({ originId: ORIGIN }, false));
     await using screen = await render(
@@ -549,8 +549,9 @@ describe("plan review, authorization and plan mode", () => {
     await expect.element(rearm).toBeDisabled();
     expectDisabledLook(document.querySelector("[data-rearm]") as HTMLButtonElement);
     expect(document.body.textContent).toContain(
-      "Waiting for a Re-arm call that is not built yet (M07)",
+      "Re-arm is not available here: no goal is connected to this card.",
     );
+    expect(document.body.textContent).not.toContain("not built yet");
     // The origin id is on the display and nowhere else: no attribute, no second copy.
     expect(document.body.innerHTML.split(ORIGIN).length - 1).toBe(1);
   });

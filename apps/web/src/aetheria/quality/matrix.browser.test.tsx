@@ -726,13 +726,14 @@ const SCENES: Record<string, Scene> = {
   "control/full": {
     ui: () => <ControlFull />,
     ready: () =>
-      ["Researcher", "build docs", "Reviewer", "Goals and workflows"].every((word) =>
+      ["Researcher", "build docs", "Reviewer", "this page has no Backend session"].every((word) =>
         text().includes(word),
       ),
   },
   "control/degraded": {
     ui: () => <ControlDegraded />,
-    ready: () => text().includes("Goals and workflows") && text().includes("not accepting work"),
+    ready: () =>
+      text().includes("this page has no Backend session") && text().includes("not accepting work"),
   },
   "deliverables/cards": {
     ui: () => <DeliverablesFull />,

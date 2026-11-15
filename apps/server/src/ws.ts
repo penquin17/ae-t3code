@@ -22,6 +22,11 @@ import * as AetheriaJobs from "./aetheria/jobsRpc.ts";
 import * as AetheriaUsage from "./aetheria/usageRpc.ts";
 // AETHERIA-IP:IP-60 the declared region registry's client methods and the subscribeThread observer (Aetheria-owned); the principal comes from the connection
 import * as AetheriaRegions from "./aetheria/regionsRpc.ts";
+// AETHERIA-IP:IP-65 the goal strip's and the workflow runs' client methods (Aetheria-owned); the actor comes from the connection
+import * as AetheriaGoals from "./aetheria/goalsRpc.ts";
+// AETHERIA-IP:IP-65 (widened: the live page inspection carrier, M11 step 19) its client methods (Aetheria-owned); the actor and the connection handle come from the connection, the transport and resolver are the process's shared pair
+import * as AetheriaInspect from "./aetheria/inspectRpc.ts";
+import { getSharedInspectClients } from "./aetheria/inspectClients.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 
@@ -1500,6 +1505,8 @@ export const layerWsRpc = (
         aetheriaActor,
         currentSession.subject,
       );
+      // AETHERIA-IP:IP-65 the one transport and resolver the Backend's inspect module also holds
+      const aetheriaInspectClients = getSharedInspectClients();
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -3501,6 +3508,39 @@ export const layerWsRpc = (
           AetheriaRegions.regionsReport(aetheriaRegionConnection, aetheriaActor, input),
         [AETHERIA_WS_METHODS.regionsRead]: (input) =>
           AetheriaRegions.regionsRead(aetheriaRegionConnection, aetheriaActor, input),
+        // AETHERIA-IP:IP-65 the goal strip and the workflow runs (M07 step 17, XC-23). T3 authorizes each scope before these run (IP-63); each handler re-reads the device session on every call, checks the root's access and reaches the goal service once
+        [AETHERIA_WS_METHODS.goalSnapshot]: (input) =>
+          AetheriaGoals.goalSnapshot(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.goalChanges]: (input) =>
+          AetheriaGoals.goalChanges(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.goalPropose]: (input) =>
+          AetheriaGoals.goalPropose(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.goalPause]: (input) =>
+          AetheriaGoals.goalPause(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.goalClear]: (input) =>
+          AetheriaGoals.goalClear(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.goalRearm]: (input) =>
+          AetheriaGoals.goalRearm(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.workflowRuns]: (input) =>
+          AetheriaGoals.workflowRuns(aetheriaBackend, aetheriaActor, input),
+        [AETHERIA_WS_METHODS.workflowCancel]: (input) =>
+          AetheriaGoals.workflowCancel(aetheriaBackend, aetheriaActor, input),
+        // AETHERIA-IP:IP-65 the live page inspection carrier (M11 step 19). T3 authorizes orchestration:read before these run; each call re-reads the device session, and the stream and the reply belong to this connection's own id
+        [AETHERIA_WS_METHODS.inspectRequests]: (input) =>
+          AetheriaInspect.inspectRequests(
+            aetheriaRegionConnection,
+            aetheriaActor,
+            aetheriaInspectClients.transport,
+            aetheriaInspectClients.queries,
+            input,
+          ),
+        [AETHERIA_WS_METHODS.inspectReply]: (input) =>
+          AetheriaInspect.inspectReply(
+            aetheriaRegionConnection,
+            aetheriaActor,
+            aetheriaInspectClients.queries,
+            input,
+          ),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =

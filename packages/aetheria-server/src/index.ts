@@ -110,7 +110,19 @@ export {
   INTERACTION_PINNED_ARTIFACT,
   PINNED_ARTIFACT,
   PROVIDERS_PINNED_ARTIFACT,
+  WORKFLOWS_PINNED_ARTIFACT,
 } from "./artifact.ts";
+// M07 step 22: the workflows module — its row and the registration of the three run-record operations over the workflow ledger.
+export {
+  WORKFLOWS_BACKEND_ENTRY,
+  WORKFLOWS_BACKEND_ID,
+  workflowsBackendModuleRow,
+} from "./workflows/row.ts";
+export {
+  createWorkflowsBackendRegistration,
+  type WorkflowsBackendRegistration,
+  type WorkflowsRegistrationOptions,
+} from "./workflows/registration.ts";
 // M07 step 14: the goals module — its row, registration, factory over the real ports, and the workflow authorization port (DV3) the workflow tool of a later step calls.
 export {
   GOALS_MODULE_NAME,
@@ -121,6 +133,8 @@ export {
   type GoalsRuntime,
 } from "./goals/factory.ts";
 export { GOALS_BACKEND_ENTRY, GOALS_BACKEND_ID, goalsBackendModuleRow } from "./goals/goalsRow.ts";
+// M07 step 19: the one implementation of a typed `/goal` (parse → operation → goal service) the app server binds to its command route; the archive stays imported at one site.
+export { runGoalCommand, type GoalCommandPort, type TypedGoalOutcome } from "./goals/goalsEntry.ts";
 export {
   createAdmissionPort,
   createGoalRootResolver,
@@ -156,6 +170,18 @@ export {
 } from "./groups/groups.ts";
 // M11 steps 8–10: the inspection module's registration, its caller check and the read-only metadata port the app server supplies.
 export { createInspectAccess, type InspectAccessPort } from "./inspect/inspectAccess.ts";
+// M11 step 11: the client-region query port (one request to the viewing page per query) the app server binds to the inspection module.
+export {
+  createClientQueries,
+  type ClientLogEvent,
+  type ClientPort,
+  type ClientQueries,
+  type ClientQueriesOptions,
+  type ClientQueryAnswer,
+  type ClientRegionInfo,
+  type ClientRequest,
+  type ClientView,
+} from "./inspect/clients.ts";
 export {
   createInspectBackendRegistration,
   type InspectBackendOptions,

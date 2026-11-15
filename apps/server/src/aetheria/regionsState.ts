@@ -15,6 +15,10 @@
 //
 // Reader (M11). `clientsFor`, `clientOf` and `subscribe` all take the principal, so no listing across principals exists. A principal with two clients (two tabs, two devices) gets both, each with its device;
 // choosing, ambiguity and waiting are M11's.
+//
+// Inspector reads (M11 Plan step 17, D8/N1). `clientsViewing(threadId)` and `clientViewing(threadId, clientId)` are the only members scoped by a viewed thread instead of a principal: every client whose
+// connection T3 authorized to subscribe to that thread, across subjects. They exist for the Backend's inspector alone, are exposed through no client RPC, and return copies; each copy names the connection
+// the client is bound to (`connectionId`, the same id the connection's own handle carries), so a reply can be tied to the connection that was asked and a takeover is seen. XC-19 is unchanged.
 import * as NodeCrypto from "node:crypto";
 
 import {
@@ -49,6 +53,10 @@ export interface RegionClient {
   readonly connectedAtMs: number;
   readonly updatedAtMs: number;
 }
+/** A client as the inspector reads it: the copy of the store, with the connection it is bound to now. */
+export interface ViewingClient extends RegionClient {
+  readonly connectionId: string;
+}
 export interface RegionEvent {
   readonly type: "client-changed" | "client-removed";
   readonly clientId: string;
@@ -65,6 +73,8 @@ export interface ReportInput {
 
 /** The handle one T3 connection holds. */
 export interface RegionConnection {
+  /** Opaque and unique to this connection; a `ViewingClient` names the one it is bound to. Never sent to a client. */
+  readonly id: string;
   report(input: ReportInput): RegionResult<RegionClient>;
   /** This connection's own client, or `undefined` before its first report. */
   readOwn(): RegionResult<RegionClient | undefined>;
@@ -89,6 +99,10 @@ export interface RegionRegistry {
   ): readonly RegionClient[];
   /** One client of this principal, or `undefined` — also when the id belongs to another principal. */
   clientOf(principal: { readonly subject: string }, clientId: string): RegionClient | undefined;
+  /** Inspector only (M11, D8/N1): every client, of any principal, whose connection is observed viewing `threadId`. Copies. No client RPC reads this. */
+  clientsViewing(threadId: string): readonly ViewingClient[];
+  /** Inspector only: that client if its connection views `threadId`; otherwise `undefined`, also for an unknown id. A copy. */
+  clientViewing(threadId: string, clientId: string): ViewingClient | undefined;
   /** Events for this principal's clients only. */
   subscribe(
     principal: { readonly subject: string },
@@ -210,7 +224,13 @@ export function createRegionRegistry(deps: RegionRegistryDeps): RegionRegistry {
     connection.clientId = undefined;
   };
 
+  const viewingView = (client: ClientState): ViewingClient => ({
+    ...view(client),
+    connectionId: client.connection.id,
+  });
+
   const connectionOf = (connection: ConnectionState): RegionConnection => ({
+    id: connection.id,
     report(input) {
       if (closed || connection.closed)
         return refuse("REGIONS_UNAVAILABLE", "the region registry is not running");
@@ -344,6 +364,17 @@ export function createRegionRegistry(deps: RegionRegistryDeps): RegionRegistry {
       const client = clients.get(clientId);
       return client !== undefined && client.connection.principal.subject === principal.subject
         ? view(client)
+        : undefined;
+    },
+    clientsViewing(threadId) {
+      return [...clients.values()]
+        .filter((c) => c.connection.viewing.has(threadId))
+        .map(viewingView);
+    },
+    clientViewing(threadId, clientId) {
+      const client = clients.get(clientId);
+      return client !== undefined && client.connection.viewing.has(threadId)
+        ? viewingView(client)
         : undefined;
     },
     subscribe(principal, fn) {

@@ -32,6 +32,9 @@ import {
   createThreadReceiptPort,
 } from "./goals/ports.ts";
 import { createGoalsBackendRegistration } from "./goals/registration.ts";
+import { createWorkflowAuthorizer } from "./goals/workflowAuthorize.ts";
+import { createWorkflowsBackendRegistration } from "./workflows/registration.ts";
+import type { ClientQueries } from "./inspect/clients.ts";
 import { createInspectAccess } from "./inspect/inspectAccess.ts";
 import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { inspectBackendModuleRow } from "./inspect/inspectRow.ts";
@@ -170,6 +173,8 @@ export interface AetheriaBackendServiceOptions {
   readonly inspect?: {
     readonly enablement?: { readonly enabled?: unknown; readonly deployment?: unknown } | undefined;
     readonly metadata?: BackendServicesMetadataPort | undefined;
+    /** The client-region query port (M11 step 11): one request to the viewing page per query, built by the app server over its live region registry. Absent: the `client-regions` provider answers unsupported. */
+    readonly clients?: ClientQueries | undefined;
   };
 }
 
@@ -474,6 +479,25 @@ export function createAetheriaBackendService(
               },
             }),
   });
+  // M07 step 22: the ONE workflow ledger under `<stateRoot>/workflows/`, behind the three run-record operations. M03's verdict on starting a workflow is read from the carrier-verified session and the index's
+  // working folder (a session with no working folder is identity-unavailable, so a run start answers unavailable); its writes are guarded by the same owner lock as the goal journal.
+  const workflowAuthorizer = createWorkflowAuthorizer({
+    reader: identityReader,
+    checkout: options.checkout,
+    env: options.auditRoles?.env,
+    homedir: options.auditRoles?.homedir,
+  });
+  const workflowsRegistration = createWorkflowsBackendRegistration({
+    stateRoot: options.stateRoot,
+    authorize: ({ sessionId }) =>
+      workflowAuthorizer({
+        sessionId,
+        workingFolder: index.bindingOfSession(sessionId)?.workingFolder ?? "",
+      }),
+    assertHeld: () => {
+      if (!holdingOwnerLock) throw new Error("the Backend owner lock is not held");
+    },
+  });
   // M10 step 7: the ONE session-group store under the state root's aetheria-ui folder; the client RPC handlers reach it through `groups()`.
   const groupsRegistration = createGroupsBackendRegistration({
     stateRoot: options.stateRoot,
@@ -527,6 +551,7 @@ export function createAetheriaBackendService(
       humanControlRegistration,
       orchestrationRegistration,
       goalsRegistration,
+      workflowsRegistration,
       groupsRegistration,
       deliverablesRegistration,
       // M11: the inspection module over this Backend's own manifest and live status (late-bound: the adapter exists only once the registrations are prepared), the caller check of M03's
@@ -545,6 +570,7 @@ export function createAetheriaBackendService(
           status: () => backendNow().status(),
         },
         metadata: options.inspect?.metadata,
+        clients: options.inspect?.clients,
         showValues: inspectShowValues,
       }),
     ],

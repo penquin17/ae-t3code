@@ -15,6 +15,7 @@ import {
   createOrchestrationFactory,
   installPiSelectionSeam,
   prepareAetheriaBackend,
+  runGoalCommand,
   type AetheriaBackendService,
   type HumanControlServiceFactory,
   type OrchestrationServiceFactory,
@@ -40,7 +41,11 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import { layerFromBackend } from "./backendComposition.ts";
 import { makeCallerContext } from "./callerContext.ts";
+import { describeGoalOutcome, makeGoalCommandRoute } from "./goalCommand.ts";
+import { GoalCommandHook, type GoalCommandHookResult } from "./goalCommandHook.ts";
+import { makeGoalForkObserver, type GoalForkObserver } from "./goalForkObserver.ts";
 import * as GoalRoundGuard from "./goalRoundGuard.ts";
+import { getSharedInspectClients } from "./inspectClients.ts";
 import { createBackendServicesMetadata } from "./inspectMetadata.ts";
 import { makeThreadTurnDispatch } from "./humanControlDelivery.ts";
 import { makeLaunchFacts } from "./launchFacts.ts";
@@ -52,16 +57,23 @@ const STATE_ROOT_ENV = "AETHERIA_STATE_ROOT";
 const PI_AGENT_DIR_ENV = "AETHERIA_PI_AGENT_DIR";
 /** The Aetheria checkout, the launch input the Pi child also receives: the source of the current role catalog the audit evidence check reads (M06 step 23). */
 const CHECKOUT_ENV = "AETHERIA_CHECKOUT";
+/** The operator's marking of this deployment (M11 U1/D7): `local` turns read-only inspection on; unset or anything else leaves it off. */
+const DEPLOYMENT_ENV = "AETHERIA_DEPLOYMENT";
 
 export class AetheriaBackend extends Context.Service<AetheriaBackend, AetheriaBackendService>()(
   "t3/aetheria/aetheriaBackend",
 ) {}
 
+/** What happens on these stored events is one more look at T3's thread listing for a new fork (M07 step 19, D10): a thread appears, or a provider session is attached to it so M04's index can name its Pi session. */
+const FORK_OBSERVATION_EVENTS: ReadonlySet<string> = new Set([
+  "thread.created",
+  "provider-session.attached",
+]);
+
 /**
- * The running service for a given state root. Requires the event sink and the MCP credential store. `attachmentsDir` is T3's attachments directory,
- * handed over explicitly by the server graph (M09 step 21); without it the snapshot operations stay registered and fail closed.
+ * The running service for a given state root, alone. `makeLayer` below is the one the graph uses: it adds the typed-`/goal` hook that depends on this service.
  */
-export const makeLayer = (
+const makeBackendLayer = (
   stateRoot: string,
   options: {
     readonly attachmentsDir?: string;
@@ -75,6 +87,11 @@ export const makeLayer = (
      * services exist (a test seam otherwise); without them the orchestration module answers unavailable.
      */
     readonly orchestrationFactory?: OrchestrationServiceFactory;
+    /**
+     * The operator's marking of this deployment (M11 U1/D7), from `AETHERIA_DEPLOYMENT`. Only `local` turns read-only inspection on; absent, `remote` or any other value leaves it off.
+     * Passed to the Backend as trusted construction config; nothing a model or a browser sends can set it.
+     */
+    readonly deployment?: string;
   } = {},
 ) =>
   Layer.effect(
@@ -118,6 +135,17 @@ export const makeLayer = (
       const ids = yield* Effect.serviceOption(IdAllocator.IdAllocatorV2);
       let indexOf: (() => AetheriaBackendService["index"] | undefined) | undefined;
       const sessionIndex = () => indexOf?.();
+      /** The Pi session M04's index bound to a thread: null when none, "unknown" when the index cannot be read (the children service and the goal fork observer ask the same question). */
+      const sessionOfThread = (threadId: string): string | null | "unknown" => {
+        const found = sessionIndex()?.lookup(threadId);
+        return found === undefined
+          ? "unknown"
+          : found.status === "ok"
+            ? found.binding.sessionId
+            : found.status === "absent"
+              ? null
+              : "unknown";
+      };
       const managedWork =
         Option.isSome(orchestrator) && Option.isSome(providerSessions) && Option.isSome(ids)
           ? {
@@ -128,16 +156,7 @@ export const makeLayer = (
                 sink,
                 ids: ids.value,
               }),
-              childLineage: yield* makeLineageReader(threads.value, (threadId) => {
-                const found = sessionIndex()?.lookup(threadId);
-                return found === undefined
-                  ? "unknown"
-                  : found.status === "ok"
-                    ? found.binding.sessionId
-                    : found.status === "absent"
-                      ? null
-                      : "unknown";
-              }),
+              childLineage: yield* makeLineageReader(threads.value, sessionOfThread),
               launchFacts: yield* makeLaunchFacts(
                 orchestrator.value,
                 (sessionId) => sessionIndex()?.bindingOfSession(sessionId)?.threadId,
@@ -193,8 +212,16 @@ export const makeLayer = (
         ...managedWork,
         ...(orchestrationFactory === undefined ? {} : { orchestrationFactory }),
         ...(callerContext === undefined ? {} : { callerContext }),
-        // M11: the read-only driver and RPC metadata for the inspection module. Its enablement stays absent here (inspection off) until the deployment value is decided.
-        inspect: { metadata: createBackendServicesMetadata() },
+        // M11: the read-only driver and RPC metadata for the inspection module, and its enablement from the operator's own marking of this deployment (U1/D7): only `local` turns inspection on, and an
+        // absent marking leaves it off. The value is the operator's environment, never a model, browser or hostname input; the Backend itself decides what the marking means.
+        inspect: {
+          metadata: createBackendServicesMetadata(),
+          // The one live-client wiring ws.ts's handlers also hold: the same registry, so a query reaches the page the Backend's client-regions provider listed.
+          clients: getSharedInspectClients().queries,
+          ...(options.deployment === undefined
+            ? {}
+            : { enablement: { deployment: options.deployment } }),
+        },
         ...(options.checkout === undefined ? {} : { checkout: options.checkout }),
         ...(options.interactionFactory === undefined
           ? {}
@@ -260,6 +287,25 @@ export const makeLayer = (
             Effect.ignoreCause,
           ),
       );
+      // M07 step 19 (D10, B6): once the goal service runs, the fork observer takes its replay fence from ONE pull of T3's thread listing — every fork listed now is history and is never copied — and then
+      // looks again on each thread creation and each provider-session attachment (below, after the identity feed has applied the event). It never throws: an unreadable listing or a service that is
+      // not ready leaves the thread waiting for the next look.
+      let forkObserver: GoalForkObserver | undefined;
+      const goals = service.goals();
+      if (goals !== undefined && managedWork !== undefined) {
+        forkObserver = makeGoalForkObserver({
+          reader: managedWork.childLineage,
+          sessionOf: sessionOfThread,
+          goals,
+        });
+        yield* Effect.promise(() => forkObserver!.observe()).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Aetheria goal fork observer could not take its fence", {
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
+      }
       // M07 DV2: the Backend has started and has reconciled every goal journal, so the guard can answer from them, and the waiting recovery pass is released. The slot is NOT emptied at scope close:
       // T3's shutdown preparation runs after this layer has drained, and the answer is read from the journal, which a drained service leaves intact; an emptied slot would read `unknown` for every
       // main thread and stop ordinary threads from continuing after a restart.
@@ -287,7 +333,19 @@ export const makeLayer = (
       // One unfiltered subscription from the start of the event log: replay, then live. Its end or failure is a missed observation.
       yield* sink.stream().pipe(
         Stream.runForEach((storedEvent) =>
-          Effect.promise(() => service.ingest(storedEvent as unknown as StoredEventLike)),
+          Effect.promise(() => service.ingest(storedEvent as unknown as StoredEventLike)).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                if (
+                  forkObserver !== undefined &&
+                  FORK_OBSERVATION_EVENTS.has(
+                    (storedEvent as unknown as StoredEventLike).event.type,
+                  )
+                )
+                  void forkObserver.observe().catch(() => undefined);
+              }),
+            ),
+          ),
         ),
         Effect.matchCause({
           onSuccess: () => service.noteFeed("feed-ended"),
@@ -336,6 +394,49 @@ export const makeLayer = (
     // irrelevant: any allocator derives the same ids.
     Layer.provide(IdAllocator.layer),
   );
+
+/**
+ * M07 step 19 (DV11; IP-67): the typed-`/goal` hook the Orchestrator reads, built over the running Backend. A message on a Pi thread becomes one goal operation for that thread's Pi session (M04's index),
+ * through `runGoalCommand` bound to the ONE goal service; any other driver, an unbound thread, a Backend without the goal service and any failure answer `handled: false`, so T3 handles the message as before.
+ */
+const goalCommandHookLayer = Layer.effect(
+  GoalCommandHook,
+  Effect.gen(function* () {
+    const backend = yield* AetheriaBackend;
+    const commands = makeGoalCommandRoute({
+      run: async (command, sessionId) => {
+        const goals = backend.goals();
+        if (goals === undefined) return { handled: false, reason: "goal-service-unavailable" };
+        return runGoalCommand(command, sessionId, goals);
+      },
+    });
+    return GoalCommandHook.of({
+      route: Effect.fn("GoalCommandHook.route")(function* ({ threadId, driver, message }) {
+        return yield* Effect.promise(async (): Promise<GoalCommandHookResult> => {
+          const found = backend.index.lookup(threadId);
+          if (found.status !== "ok") return { handled: false };
+          const outcome = await commands.route({
+            driver,
+            sessionId: found.binding.sessionId,
+            message,
+          });
+          if (!outcome.handled) return { handled: false };
+          const notice = describeGoalOutcome(outcome);
+          return notice === null ? { handled: true } : { handled: true, notice };
+        }).pipe(Effect.catchCause(() => Effect.succeed<GoalCommandHookResult>({ handled: false })));
+      }),
+    });
+  }),
+);
+
+/**
+ * The running service for a given state root, with the typed-`/goal` hook over it. Requires the event sink and the MCP credential store. `attachmentsDir` is T3's attachments directory,
+ * handed over explicitly by the server graph (M09 step 21); without it the snapshot operations stay registered and fail closed.
+ */
+export const makeLayer = (
+  stateRoot: string,
+  options: Parameters<typeof makeBackendLayer>[1] = {},
+) => goalCommandHookLayer.pipe(Layer.provideMerge(makeBackendLayer(stateRoot, options)));
 
 /** The services managed work needs from T3's runtime and which of them the graph does not give, by name (the warning must say, or a missing service hides). */
 export const managedWorkMissing = (have: {
@@ -387,6 +488,7 @@ export const layer = whenStateRoot((stateRoot) =>
         yield* Effect.logWarning("Aetheria snapshots are off: the server config is not available");
       const piAgentDir = yield* Config.String(PI_AGENT_DIR_ENV).pipe(Config.option);
       const checkout = yield* Config.String(CHECKOUT_ENV).pipe(Config.option);
+      const deployment = yield* Config.String(DEPLOYMENT_ENV).pipe(Config.option);
       // M06 steps 6 and 13: T3's thread dispatch comes from the runtime services and the command receipt store from server.ts (IP-23); makeLayer
       // requires both and fails the Backend start without them.
       // M07 DV2 (IP-24): the same guard constant ProviderRuntimeRecoveryService provides, so recovery and this layer share one instance.
@@ -394,6 +496,7 @@ export const layer = whenStateRoot((stateRoot) =>
         ...(Option.isSome(config) ? { attachmentsDir: config.value.attachmentsDir } : {}),
         ...(Option.isSome(piAgentDir) ? { piAgentDir: piAgentDir.value } : {}),
         ...(Option.isSome(checkout) ? { checkout: checkout.value } : {}),
+        ...(Option.isSome(deployment) ? { deployment: deployment.value } : {}),
       }).pipe(Layer.provide(GoalRoundGuard.layerWhenAetheria));
     }),
   ),

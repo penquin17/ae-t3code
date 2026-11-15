@@ -254,6 +254,50 @@ describe("the Backend layer", () => {
     }),
   );
 
+  it.live(
+    "turns read-only inspection on only for the operator's `local` deployment marking (M11 U1/D7), and leaves it off for no marking, remote or any other value",
+    () =>
+      Effect.gen(function* () {
+        const ask = (options?: { readonly deployment: string }) =>
+          Effect.scoped(
+            Layer.build(
+              Live.makeLayer(makeRoot(false), options).pipe(
+                Layer.provide(Layer.mergeAll(layerSink([]), layerCredentials(undefined))),
+              ),
+            ).pipe(
+              Effect.flatMap((context) =>
+                Effect.promise(
+                  async () =>
+                    (await Context.get(context, Live.AetheriaBackend).operations()["inspect.list"]!(
+                      {
+                        caller: {
+                          threadId: THREAD,
+                          providerSessionId: "p",
+                          providerInstanceId: "i",
+                        },
+                        sessionId: SESSION,
+                        kind: "main",
+                        rootSessionId: SESSION,
+                        args: {},
+                      } as never,
+                    )) as unknown as { status: string; code?: string },
+                ),
+              ),
+            ),
+          );
+        // Off: the module answers unavailable before any caller check or provider.
+        for (const options of [undefined, { deployment: "remote" }, { deployment: "LOCAL" }])
+          expect(yield* ask(options)).toEqual({
+            status: "unavailable",
+            code: "INSPECT_UNAVAILABLE",
+          });
+        // On: the call reaches M03's caller check (this session has no record, so it is refused with M03's code), which an off module never does.
+        const enabled = yield* ask({ deployment: "local" });
+        expect(enabled.status).toBe("refused");
+        expect(enabled.code).toMatch(/^AUTH_/);
+      }),
+  );
+
   it.live("binds nothing when T3 holds no credential for the thread", () =>
     Effect.gen(function* () {
       const root = makeRoot();

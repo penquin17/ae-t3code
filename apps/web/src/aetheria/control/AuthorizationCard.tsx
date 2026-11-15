@@ -1,15 +1,24 @@
 // The authorization card (C7, XC-18). The Backend's own text and the subject it is for. Approve and Decline answer the request (answer with the one option); "Grant for this subject only" is the
-// one-step `aetheria.authorization.grant`, which records a grant without answering the request. The returned `originId` is shown as supplied and goes nowhere else: the Re-arm call that would
-// use it is M07's and is not built, so that branch is a disabled, honestly labelled control. No Re-arm call is invented.
+// one-step `aetheria.authorization.grant`, which records a grant without answering the request. The returned `originId` is shown as supplied and goes nowhere else. Re-arm (M07 Plan step 18) is enabled
+// only when this request's subject is the one the goal's current snapshot offers; the click then runs the goal card's own one-click Re-arm, never this origin.
 import { Button } from "../../components/ui/button";
 import type { ActionReport } from "./actions";
+import { useGoalsHandle } from "./goals/GoalsProvider";
+import { RearmButton, RearmStatus } from "./goals/RearmButton";
+import type { GoalView } from "./goals/reply";
+import type { GoalsHandle } from "./goals/useGoals";
 import type { CardRunner } from "./InteractionCard";
 import { RawText, mutedClass } from "./parts";
-import type { InteractionRecord } from "./types";
+import type { InteractionRecord, InteractionSubject } from "./types";
 
 type AuthorizationRecord = Extract<InteractionRecord, { kind: "authorization" }>;
 
-const REARM_WAITING_TEXT = "Waiting for a Re-arm call that is not built yet (M07)";
+const REARM_NO_GOAL_TEXT = "Re-arm is not available here: no goal is connected to this card.";
+const REARM_NOT_LIVE_TEXT =
+  "Re-arm is not offered while the goal is being read or may be out of date.";
+const REARM_NO_OFFER_TEXT = "Re-arm is not offered: the goal's current view has no Re-arm request.";
+const REARM_OTHER_SUBJECT_TEXT =
+  "Re-arm is offered only for the goal's own Re-arm request, and this request is for another subject.";
 
 export interface AuthorizationCardProps {
   readonly record: AuthorizationRecord;
@@ -30,7 +39,37 @@ function originOf(
   return null;
 }
 
-export function OriginAndRearm({ originId }: { readonly originId: string }) {
+/** Why Re-arm is not offered on this card, in words; null when it is offered. */
+function rearmHeldText(
+  handle: GoalsHandle | null,
+  goal: GoalView | null,
+  subject: InteractionSubject,
+): string | null {
+  if (handle === null) return REARM_NO_GOAL_TEXT;
+  if (handle.view.status !== "live") return REARM_NOT_LIVE_TEXT;
+  const offer = goal?.rearm;
+  if (offer === undefined) return REARM_NO_OFFER_TEXT;
+  return offer.subject.type === subject.type &&
+    offer.subject.id === subject.id &&
+    offer.subject.revision === subject.revision
+    ? null
+    : REARM_OTHER_SUBJECT_TEXT;
+}
+
+/**
+ * The origin the Backend supplied, shown as supplied, and the Re-arm. Re-arm is enabled only when this request is the one the goal's current snapshot offers (same subject type, id and revision): then the click
+ * is the same one-click Re-arm as the goal card, which makes its own fresh grant and never reuses the origin shown here.
+ */
+export function OriginAndRearm({
+  originId,
+  subject,
+}: {
+  readonly originId: string;
+  readonly subject: InteractionSubject;
+}) {
+  const handle = useGoalsHandle();
+  const goal = handle !== null && handle.view.status === "live" ? handle.view.goal : null;
+  const held = rearmHeldText(handle, goal, subject);
   return (
     <div data-origin className="flex flex-col gap-2 rounded-lg border border-border p-3">
       <p className="text-sm">
@@ -39,10 +78,19 @@ export function OriginAndRearm({ originId }: { readonly originId: string }) {
       <p className={mutedClass}>
         Shown as the Backend supplied it. It is not sent anywhere from this page.
       </p>
-      <Button data-rearm variant="ghost-muted" disabled>
-        Re-arm
-      </Button>
-      <p className={mutedClass}>{REARM_WAITING_TEXT}</p>
+      {held === null && handle !== null && goal !== null ? (
+        <>
+          <RearmButton goal={goal} handle={handle} />
+          <RearmStatus handle={handle} />
+        </>
+      ) : (
+        <>
+          <Button data-rearm="held" variant="ghost-muted" disabled>
+            Re-arm
+          </Button>
+          <p className={mutedClass}>{held}</p>
+        </>
+      )}
     </div>
   );
 }
@@ -117,7 +165,7 @@ export function AuthorizationCard({ record, runner }: AuthorizationCardProps) {
       <p className={mutedClass}>
         A one-step grant records the grant for this subject; it does not answer the request above.
       </p>
-      {origin === null ? null : <OriginAndRearm originId={origin} />}
+      {origin === null ? null : <OriginAndRearm originId={origin} subject={subject} />}
     </div>
   );
 }
