@@ -4,8 +4,11 @@ import { AETHERIA_NAME } from "./brand";
 const MARK_LIGHT = "/aetheria/aetheria-mark-light.svg";
 const MARK_DARK = "/aetheria/aetheria-mark-dark.svg";
 
-/** The tileless Aetheria mark in the version for the app's light or dark appearance. Decorative: the name is the text beside it. */
-function AetheriaMark({ className }: { readonly className?: string }) {
+/**
+ * The tileless Aetheria mark in the version for the app's light or dark appearance. Decorative: the name is the text beside it,
+ * or, as the Pi provider's icon (IP-68), the provider's label beside the icon.
+ */
+export function AetheriaMark({ className }: { readonly className?: string }) {
   return (
     <>
       <img

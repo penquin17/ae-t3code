@@ -12,6 +12,8 @@ import { AntigravityIcon, ClaudeAI, Icon, OpenAI } from "../Icons";
 import { cn } from "~/lib/utils";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
+// AETHERIA-IP:IP-68 the Pi provider shows the Aetheria mark, not Pi's own glyph
+import { AetheriaMark } from "../../aetheria/AetheriaWordmark";
 import {
   AcpRegistryAgentIcon,
   officialAcpRegistryIconUrlForAgentId,
@@ -84,6 +86,8 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   const badgeContent = props.badgeContent ?? "initials";
   const iconClassName = cn(props.size === "compact" && "size-3.5", props.iconClassName);
   const isAcpRegistry = props.driverKind === "acpRegistry";
+  // AETHERIA-IP:IP-68 every Pi instance (driver kind "pi", so `pi` and `pi-builder`) is the Aetheria agent: its icon is the Aetheria mark
+  const showsAetheriaMark = props.driverKind === "pi";
   const acpRegistryIconUrl = resolveProviderInstanceAcpRegistryIconUrl({
     driverKind: props.driverKind,
     agentId: props.acpRegistryAgentId,
@@ -99,7 +103,10 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       style={accentStyle}
       data-provider-accent-color={accentColor}
     >
-      {isAcpRegistry ? (
+      {/* AETHERIA-IP:IP-68 the mark replaces the package icon; it is decorative, as the other icons are */}
+      {showsAetheriaMark ? (
+        <AetheriaMark className={cn("size-5 shrink-0 object-contain", iconClassName)} />
+      ) : isAcpRegistry ? (
         <AcpRegistryAgentIcon
           className={cn("size-5 rounded-none bg-transparent", iconClassName)}
           fallbackClassName="size-full"
