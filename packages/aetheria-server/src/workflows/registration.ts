@@ -5,8 +5,11 @@
 // every child's state. The caller is the verified carrier session (`context.sessionId`, `rootSessionId`, `kind`), never an argument; only a main session writes a record, and M03's verdict on the
 // `workflow` tool is asked for a run start only (later calls are checked against the record's owner).
 //
-// One state belongs to this file and nowhere else: the RUNNING ledger, present only between start and drain. While it is absent every operation answers `unavailable` (the adapter also gates them on the
-// module's own state): nothing is recorded and no caller may read that as a start. Writes are guarded by the Backend's owner lock through `assertHeld`, so a write after drain or without the lock fails closed.
+// Two states belong to this file and nowhere else: the RUNNING ledger, present from start until the drain's wait ends, and DRAINING, true from the first step of a drain. While the ledger is absent every
+// operation answers `unavailable` (the adapter also gates them on the module's own state): nothing is recorded and no caller may read that as a start. While draining, a run start and a new member
+// answer `unavailable` (`WORKFLOWS_DRAINING`), but `workflows.run-end` and the settlement of a member the ledger already holds still reach the ledger: the drain waits for the terminal record the Agent
+// publishes through that operation (D23, Plan step 28), so the ledger is cleared only after the wait. Writes are guarded by the Backend's owner lock through `assertHeld`, so a write after drain or
+// without the lock fails closed.
 import type { Xc6Operation, Xc6OperationContext } from "@t3tools/aetheria-contracts";
 
 import type { BackendRegistration } from "../adapter.ts";
@@ -17,11 +20,15 @@ import {
   openWorkflowLedger,
   type ReconcileReport,
   type RunsPorts,
+  type WorkflowAnswer,
   type WorkflowLedger,
   type WorkflowRunAuthorization,
   type WorkflowRuns,
 } from "./entry.ts";
 import { WORKFLOWS_BACKEND_ENTRY } from "./row.ts";
+
+/** The code of an answer to a run start or a new member that arrives while the module drains. */
+const DRAINING = "WORKFLOWS_DRAINING";
 
 export interface WorkflowsRegistrationOptions {
   /** The Backend's state root. Absent: the module runs unconfigured (digest only), no ledger exists and every operation answers unavailable. */
@@ -51,7 +58,7 @@ export interface WorkflowsRegistrationOptions {
 }
 
 export type WorkflowsBackendRegistration = BackendRegistration & {
-  /** The running ledger, or undefined before start and after drain (a caller then answers unavailable, never "no run"). */
+  /** The running ledger (still present while a drain waits for terminal records), or undefined before start and after the drain (a caller then answers unavailable, never "no run"). */
   readonly ledger: () => WorkflowLedger | undefined;
   /** The running run service (list, cancel), or undefined before start, after drain, and when no ports were supplied. */
   readonly runs: () => WorkflowRuns | undefined;
@@ -65,25 +72,58 @@ export function createWorkflowsBackendRegistration(
   let running: WorkflowLedger | undefined;
   let service: WorkflowRuns | undefined;
   let lastReport: ReconcileReport | undefined;
+  // True from the first step of a drain until its wait ends (then the ledger is gone). The ledger stays present while it is true, so the Agent's terminal `run-end` (and the settlement of an existing member) can still
+  // be written and the drain's wait can see it; only new work is refused.
+  let draining = false;
 
   const operations = createWorkflowOperations({
     ledger: () => running,
-    authorize: async (context) =>
-      options.authorize === undefined
-        ? { ok: false, code: "AUTH_IDENTITY_UNAVAILABLE", reason: "no workflow authorizer" }
-        : options.authorize({ sessionId: context.sessionId, rootSessionId: context.rootSessionId }),
+    authorize: async (context) => {
+      if (draining) return { ok: false, code: DRAINING };
+      if (options.authorize === undefined)
+        return { ok: false, code: "AUTH_IDENTITY_UNAVAILABLE", reason: "no workflow authorizer" };
+      const verdict = await options.authorize({
+        sessionId: context.sessionId,
+        rootSessionId: context.rootSessionId,
+      });
+      // A drain may have begun, or even ended, while M03 was asked (the operation took its ledger before): the run is not recorded then.
+      return draining || running === undefined ? { ok: false, code: DRAINING } : verdict;
+    },
   });
 
+  /** Does the ledger already hold this member of this run? Only that member's settlement is old work; anything else is a new member. */
+  const holdsMember = (args: Readonly<Record<string, unknown>>): boolean => {
+    const { runId, seq } = args;
+    if (typeof runId !== "string" || typeof seq !== "number") return false;
+    const read = running?.read(runId);
+    return (
+      read?.ok === true && read.value !== null && read.value.members.some((m) => m.seq === seq)
+    );
+  };
+
+  const unavailableWhileDraining: WorkflowAnswer = { status: "unavailable", code: DRAINING };
   const served: Record<string, Xc6Operation> = {};
   for (const name of WORKFLOW_OPERATIONS) {
     const run = operations[name];
-    served[name] = (context: Xc6OperationContext) =>
-      run({
+    served[name] = async (context: Xc6OperationContext) => {
+      // While draining: no new run and no new member; `run-end` and an existing member's settlement go on, because the drain waits for the Agent's terminal fact.
+      if (
+        draining &&
+        (name === "workflows.run-start" ||
+          (name === "workflows.member" && !holdsMember(context.args)))
+      )
+        return unavailableWhileDraining;
+      const answer = await run({
         sessionId: context.sessionId,
         rootSessionId: context.rootSessionId,
         kind: context.kind,
         args: context.args,
       });
+      // The authorizer's drain refusal is the module's, not M03's verdict.
+      return answer.status === "refused" && answer.code === DRAINING
+        ? unavailableWhileDraining
+        : answer;
+    };
   }
 
   return {
@@ -121,16 +161,23 @@ export function createWorkflowsBackendRegistration(
       },
       drain: async () => {
         const stopped = running === undefined ? [] : ["backend-workflows.ledger"];
-        // Admission first: nothing new is accepted, then every cancel in flight is joined, and only then does the ledger go.
-        running = undefined;
-        const draining = service;
+        // Admission first: no new run, no new member and no new cancel is accepted. The ledger stays, because the drain waits for each run's terminal record, which the Agent publishes through
+        // `workflows.run-end`; it goes only after the run service's drain (bounded) returns, even if that throws.
+        draining = true;
+        const stopping = service;
         service = undefined;
         let stillLive: readonly string[] = [];
-        if (draining !== undefined) {
-          const report = await draining.drain();
-          if (report.joined > 0) stopped.push(`backend-workflows.cancels:${report.joined}`);
-          stopped.push(...report.ended.map((runId) => `backend-workflows.run:${runId}`));
-          stillLive = report.stillLive;
+        try {
+          if (stopping !== undefined) {
+            const report = await stopping.drain();
+            if (report.joined > 0) stopped.push(`backend-workflows.cancels:${report.joined}`);
+            stopped.push(...report.ended.map((runId) => `backend-workflows.run:${runId}`));
+            stillLive = report.stillLive;
+          }
+        } finally {
+          running = undefined;
+          // The absent ledger now answers every operation `unavailable`; the draining state has done its work.
+          draining = false;
         }
         return { released: [], stopped, transferred: [], stillLive: [...stillLive] };
       },
