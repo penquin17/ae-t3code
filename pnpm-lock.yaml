@@ -2638,7 +2638,7 @@ packages:
         optional: true
 
   '@aetheria/workflows@file:packages/aetheria-server/artifacts/aetheria-workflows-0.1.0.tgz':
-    resolution: {integrity: sha512-sbYU0a/hbumi/diVWD8i41pJBSG0D9gxlPdzBauC2tEhskCwotSeCtQq1YkcEe6QAvHwiaUgX4SWg8G8uZoAGg==, tarball: file:packages/aetheria-server/artifacts/aetheria-workflows-0.1.0.tgz}
+    resolution: {integrity: sha512-x+HvzmPL+Ykns+9jaAG3cb/1okxC4/mxPXPmj3MQKMMqjQ5/rs8M5f1kYw7MAmy22cc4blnex/0xFtYJuPxyCA==, tarball: file:packages/aetheria-server/artifacts/aetheria-workflows-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 

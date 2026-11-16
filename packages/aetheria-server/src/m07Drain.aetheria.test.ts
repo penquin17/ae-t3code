@@ -5,8 +5,9 @@
 // it lists, kills and closes, each call recorded). SCRIPTED: M05 itself, M03's authorizer and the owner lock. It shows: a second cancel of one run joins the first (one piece of work, one kill, one
 // close per child); the drain joins a cancel still in flight, says how many it joined, and only then lets the ledger go — after it every call answers unavailable and nothing is accepted; while it waits
 // (F1 of the round-2 review) a run start and a new member are refused as `WORKFLOWS_DRAINING` but the Agent's `workflows.run-end` and an existing member's settlement still reach the ledger, so a controller
-// that answers the cancel with its terminal record lets the drain report the run `stopped` with nothing `stillLive`; a run whose Agent never answers stays `stillLive` and a `run-end` after the drain is
-// unavailable; the drain itself never writes a terminal fact (the Backend owns no process of the run), and the next start marks an unanswered run `lost` ONCE and closes
+// that answers the cancel with its terminal record lets the drain report the run `stopped` with nothing `stillLive`; a run whose Agent never answers but whose kill and closes were all confirmed is
+// ALSO `stopped` (`stillLive` names a live owned resource, not a stale record; its record stays `running` and a `run-end` after the drain is unavailable), while a kill that is not confirmed or a close that
+// fails keeps it `stillLive`; the drain itself never writes a terminal fact (the Backend owns no process of the run), and the next start marks an unanswered run `lost` ONCE and closes
 // its children, a pending member found by its label included and one that never started closed as such; a close that fails at that start is a recorded debt that the NEXT start retries; a cancel
 // for a run of another root (or one that does not exist) is `RUN_UNKNOWN` — which the client RPC answers as NOT_FOUND — marks nothing and stops nothing; a root with no bound thread leaves its job and
 // children unresolved, never "none". It does NOT show the client RPC handlers or their scopes (a read-only connection cannot cancel: apps/server `m07GoalsRpc.aetheria.test.ts`, which imports
@@ -35,6 +36,14 @@ const stateRoot = (): string => {
 afterEach(() => {
   for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/** The run's state as the file in the state root holds it, read after the module's ledger is gone. */
+const recordState = (dir: string, runId: string): unknown =>
+  (
+    JSON.parse(NodeFS.readFileSync(join(dir, "workflows", "runs", `${runId}.json`), "utf8")) as {
+      run: { state: unknown };
+    }
+  ).run.state;
 
 const MAIN = "s-main";
 const OTHER = "s-other";
@@ -65,6 +74,8 @@ interface World {
   calls: { op: string; id: string }[];
   /** A close the test makes fail (by child id), and gates it can hold shut. */
   failClose: Set<string>;
+  /** A kill M05 does not confirm (it answers a failure code). */
+  failKill: boolean;
   killGate: Promise<void> | undefined;
   /** Called when M05 is asked to kill the run's job: the test's stand-in for the Agent controller noticing the cancel. */
   onKill: (() => void) | undefined;
@@ -76,6 +87,7 @@ const world = (): World => ({
   children: [],
   calls: [],
   failClose: new Set(),
+  failKill: false,
   killGate: undefined,
   onKill: undefined,
   threads: new Map([[MAIN, "thread-main"]]),
@@ -89,6 +101,7 @@ const scriptedDirect = (w: World): OrchestrationDirectApi =>
       w.calls.push({ op: "kill", id: input.args.jobId });
       w.onKill?.();
       if (w.killGate !== undefined) await w.killGate;
+      if (w.failKill) return { ok: false, code: "JOB_KILL_UNCONFIRMED" };
       return { ok: true, value: { state: "killed" } };
     },
     listChildren: async () => ({ ok: true, value: { rows: w.children, diagnostics: [] } }),
@@ -243,7 +256,7 @@ describe("the drain waits for the Agent's terminal record, so run-end stays open
     expect(next.registration.reconcileReport()).toMatchObject({ lost: [], unresolved: [] });
   });
 
-  it("a run whose Agent never answers stays stillLive, and a run-end after the drain is unavailable", async () => {
+  it("a silent Agent whose kill and closes were all confirmed is stopped, not stillLive: its record stays running, run-end after the drain is unavailable, and the restart marks it lost once", async () => {
     const dir = stateRoot();
     const w = world();
     const m = await mounted(dir, w);
@@ -252,8 +265,12 @@ describe("the drain waits for the Agent's terminal record, so run-end stays open
       stillLive: string[];
       stopped: string[];
     };
-    expect(report.stillLive).toEqual(["workflow-run:run-1"]);
-    expect(report.stopped).not.toContain("backend-workflows.run:run-1");
+    expect(report.stillLive).toEqual([]);
+    expect(report.stopped).toContain("backend-workflows.run:run-1");
+    expect(w.calls).toEqual([
+      { op: "kill", id: "job-1" },
+      { op: "close", id: "child-1" },
+    ]);
     expect(await m.call("workflows.run-end", context(MAIN, runEndArgs()))).toEqual({
       status: "unavailable",
       code: "WORKFLOWS_UNAVAILABLE",
@@ -263,9 +280,52 @@ describe("the drain waits for the Agent's terminal record, so run-end stays open
       "and nothing is started after the drain either",
     ).toEqual({ status: "unavailable", code: "WORKFLOWS_UNAVAILABLE" });
     expect(
-      (await mounted(dir, w)).run()?.state,
-      "the unanswered run is marked lost at restart",
-    ).toBe("lost");
+      recordState(dir, "run-1"),
+      "the drain wrote no terminal fact: the record is still running",
+    ).toBe("running");
+    const restarted = await mounted(dir, w);
+    expect(restarted.run()?.state, "the unanswered run is marked lost at restart").toBe("lost");
+    expect(restarted.registration.reconcileReport()).toMatchObject({
+      lost: ["run-1"],
+      unresolved: [],
+    });
+    expect(
+      w.calls.filter((c) => c.op === "kill"),
+      "the restart touches no job",
+    ).toHaveLength(1);
+  });
+
+  it("a kill M05 does not confirm keeps the run stillLive with its id; the restart still marks it lost", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.failKill = true;
+    const m = await mounted(dir, w);
+    await seedRun(m);
+    const report = (await m.registration.activation.drain("test")) as {
+      stillLive: string[];
+      stopped: string[];
+    };
+    expect(report.stillLive).toEqual(["workflow-run:run-1"]);
+    expect(report.stopped).not.toContain("backend-workflows.run:run-1");
+    expect(recordState(dir, "run-1")).toBe("running");
+    expect((await mounted(dir, w)).run()?.state).toBe("lost");
+  });
+
+  it("a close that fails keeps the run stillLive with its id, and the failed close is recorded for the restart to retry", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.failClose.add("child-1");
+    const m = await mounted(dir, w);
+    await seedRun(m);
+    const report = (await m.registration.activation.drain("test")) as {
+      stillLive: string[];
+      stopped: string[];
+    };
+    expect(report.stillLive).toEqual(["workflow-run:run-1"]);
+    expect(report.stopped).not.toContain("backend-workflows.run:run-1");
+    const restarted = await mounted(dir, w);
+    expect(restarted.run()?.state).toBe("lost");
+    expect(restarted.members()[0]).toMatchObject({ state: "failed", cause: "close-failed" });
   });
 
   it("a run start whose authorizer answers after the drain began is not recorded", async () => {
@@ -336,7 +396,10 @@ describe("the Backend's drain and restart of the workflows module", () => {
     const report = await draining;
     expect(report.stopped).toContain("backend-workflows.ledger");
     expect(report.stopped).toContain("backend-workflows.cancels:1");
-    expect(report.stillLive).toEqual(["workflow-run:run-1"]);
+    expect(report.stillLive, "kill and close both completed: the run owns nothing live").toEqual(
+      [],
+    );
+    expect(report.stopped).toContain("backend-workflows.run:run-1");
     expect(w.calls).toEqual([
       { op: "kill", id: "job-1" },
       { op: "close", id: "child-1" },
@@ -352,7 +415,7 @@ describe("the Backend's drain and restart of the workflows module", () => {
     ).toEqual({ status: "unavailable", code: "WORKFLOWS_UNAVAILABLE" });
   });
 
-  it("a drain asks M05 to stop a live run and reports it stillLive until the Agent records its terminal fact; the next start marks it lost and closes remaining open children", async () => {
+  it("a drain asks M05 to stop a live run and reports it stillLive while a pending member cannot be found (an unresolved cancel step); the next start marks it lost and closes remaining open children", async () => {
     const dir = stateRoot();
     const w = world();
     w.children = [

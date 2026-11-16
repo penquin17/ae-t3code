@@ -171,6 +171,8 @@ export function createWorkflowsBackendRegistration(
           if (stopping !== undefined) {
             const report = await stopping.drain();
             if (report.joined > 0) stopped.push(`backend-workflows.cancels:${report.joined}`);
+            // `ended` is a run whose cancel steps all completed: it is `stopped` whether or not the Agent's terminal record arrived (a silent one stays `running` in the ledger and boot marks it `lost`
+            // once; this module never writes the terminal itself). `stillLive` is only a run with an unresolved cancel step: XC-7 names live owned resources, not stale records.
             stopped.push(...report.ended.map((runId) => `backend-workflows.run:${runId}`));
             stillLive = report.stillLive;
           }
