@@ -13,7 +13,7 @@ import { cn } from "~/lib/utils";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
 // AETHERIA-IP:IP-68 the Pi provider shows the Aetheria mark, not Pi's own glyph
-import { AetheriaMark } from "../../aetheria/AetheriaWordmark";
+import { AetheriaProviderMark } from "../../aetheria/AetheriaProviderMark";
 import {
   AcpRegistryAgentIcon,
   officialAcpRegistryIconUrlForAgentId,
@@ -105,7 +105,10 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     >
       {/* AETHERIA-IP:IP-68 the mark replaces the package icon; it is decorative, as the other icons are */}
       {showsAetheriaMark ? (
-        <AetheriaMark className={cn("size-5 shrink-0 object-contain", iconClassName)} />
+        <AetheriaProviderMark
+          displayName={props.displayName}
+          className={cn("size-5 shrink-0 object-contain", iconClassName)}
+        />
       ) : isAcpRegistry ? (
         <AcpRegistryAgentIcon
           className={cn("size-5 rounded-none bg-transparent", iconClassName)}
@@ -125,7 +128,8 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
           {providerInstanceInitials(props.displayName)}
         </span>
       )}
-      {props.showBadge ? (
+      {/* AETHERIA-IP:IP-68 no corner badge on a Pi instance: Aetheria is the bare mark, Builder carries its glyph inside the mark */}
+      {props.showBadge && !showsAetheriaMark ? (
         <span
           className={cn(
             "pointer-events-none absolute right-0 bottom-0 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border px-0.5 text-4xs font-semibold leading-none shadow-sm",

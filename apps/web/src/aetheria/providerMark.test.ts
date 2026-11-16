@@ -12,10 +12,11 @@ const marker = ["AETHERIA-IP", "IP-68"].join(":");
 describe("the Pi provider mark's registered edit site (IP-68)", () => {
   const source = read(new URL("../components/chat/ProviderInstanceIcon.tsx", import.meta.url));
 
-  it("marks the import, the driver test and the render branch, once each", () => {
-    expect(source.split(marker).length - 1).toBe(3);
+  it("marks the import, the driver test, the render branch and the badge guard, once each", () => {
+    expect(source.split(marker).length - 1).toBe(4);
     expect(source).toContain('props.driverKind === "pi"');
-    expect(source).toContain("<AetheriaMark");
+    expect(source).toContain("<AetheriaProviderMark");
+    expect(source).toContain("props.showBadge && !showsAetheriaMark");
   });
 
   it("is the only site: the marker is not in this folder, and Pi's own client is unchanged", () => {
