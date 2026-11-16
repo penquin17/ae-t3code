@@ -8,6 +8,7 @@ export {
 } from "@aetheria/workflows/backend";
 export type {
   LedgerResult,
+  DrainReport,
   ReconcileReport,
   RunView,
   RunsPortResult,

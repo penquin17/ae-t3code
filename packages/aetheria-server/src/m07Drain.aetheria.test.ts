@@ -97,6 +97,8 @@ const scriptedDirect = (w: World): OrchestrationDirectApi =>
 const mounted = async (dir: string, w: World, start = true) => {
   const registration = createWorkflowsBackendRegistration({
     stateRoot: dir,
+    drainBoundMs: 100,
+    drainPollMs: 1,
     authorize: async () => ({ ok: true }),
     ports: createWorkflowRunsPorts({
       direct: () => scriptedDirect(w),
@@ -190,7 +192,7 @@ describe("the Backend's drain and restart of the workflows module", () => {
     const report = await draining;
     expect(report.stopped).toContain("backend-workflows.ledger");
     expect(report.stopped).toContain("backend-workflows.cancels:1");
-    expect(report.stillLive).toEqual([]);
+    expect(report.stillLive).toEqual(["workflow-run:run-1"]);
     expect(w.calls).toEqual([
       { op: "kill", id: "job-1" },
       { op: "close", id: "child-1" },
@@ -206,7 +208,7 @@ describe("the Backend's drain and restart of the workflows module", () => {
     ).toEqual({ status: "unavailable", code: "WORKFLOWS_UNAVAILABLE" });
   });
 
-  it("a drain leaves a running run running and reports nothing as live; the next start marks it lost once, closes every open child — a pending one found by its label, one that never started as such — and a third start finds nothing", async () => {
+  it("a drain asks M05 to stop a live run and reports it stillLive until the Agent records its terminal fact; the next start marks it lost and closes remaining open children", async () => {
     const dir = stateRoot();
     const w = world();
     w.children = [
@@ -219,14 +221,22 @@ describe("the Backend's drain and restart of the workflows module", () => {
       stillLive: string[];
       released: string[];
     };
-    expect(drained.stillLive).toEqual([]);
+    expect(drained.stillLive).toEqual(["workflow-run:run-1"]);
+    expect(w.calls.filter((call) => call.op === "kill")).toEqual([{ op: "kill", id: "job-1" }]);
+    expect(
+      w.calls
+        .filter((call) => call.op === "close")
+        .map((call) => call.id)
+        .sort(),
+    ).toEqual(["child-1", "child-2"]);
 
+    const killsAtDrain = w.calls.filter((call) => call.op === "kill").length;
     const second = await mounted(dir, w);
     expect(second.run()?.state, "the drain wrote no terminal fact; the start marks it").toBe(
       "lost",
     );
     const report = second.registration.reconcileReport();
-    expect(report).toMatchObject({ lost: ["run-1"], closed: 3, unresolved: [], unreadable: [] });
+    expect(report).toMatchObject({ lost: ["run-1"], closed: 1, unresolved: [], unreadable: [] });
     expect(
       w.calls
         .filter((c) => c.op === "close")
@@ -234,14 +244,11 @@ describe("the Backend's drain and restart of the workflows module", () => {
         .sort(),
     ).toEqual(["child-1", "child-2"]);
     expect(second.members().map((member) => [member.seq, member.state, member.cause])).toEqual([
-      [1, "closed", "lost-run"],
-      [2, "closed", "lost-run"],
+      [1, "closed", "cancelled"],
+      [2, "closed", "cancelled"],
       [3, "closed", "never-started"],
     ]);
-    expect(
-      w.calls.some((c) => c.op === "kill"),
-      "boot does not touch jobs: M05's own boot owns the process group",
-    ).toBe(false);
+    expect(w.calls.filter((c) => c.op === "kill")).toHaveLength(killsAtDrain);
     expect(second.runs().list(MAIN)).toMatchObject({
       ok: true,
       runs: [{ runId: "run-1", state: "lost" }],

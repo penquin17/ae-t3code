@@ -1,4 +1,4 @@
-// @effect-diagnostics globalDate:off - The run service's default clock is the host's wall time; this module is plain async code outside any Effect runtime.
+// @effect-diagnostics globalDate:off globalTimers:off - The run service's clock and bounded drain poll use host APIs outside an Effect runtime.
 /* oxlint-disable t3code/no-low-value-comments -- The header states the authority boundary of the run-record operations and the one state this file owns. */
 // AETHERIA M07 Plan step 22 — the Backend `workflows-backend` registration: ONE workflow ledger under `<stateRoot>/workflows/`, served through exactly the three strict, data-only XC-6 operations
 // `workflows.run-start`, `workflows.member` and `workflows.run-end` (the archive's names and codecs). The module starts no script, no child and no process: the Agent host's controller does, and M05 keeps
@@ -44,6 +44,10 @@ export interface WorkflowsRegistrationOptions {
   readonly ports?: RunsPorts | undefined;
   /** The clock for `cancelRequestedAt` and `lost`. Default: the system clock. */
   readonly now?: (() => string) | undefined;
+  /** Whole workflow cancel-and-join bound at Backend shutdown. Default 5000 ms. */
+  readonly drainBoundMs?: number | undefined;
+  /** Poll interval while waiting for the Agent to publish a terminal run fact. Default 20 ms. */
+  readonly drainPollMs?: number | undefined;
 }
 
 export type WorkflowsBackendRegistration = BackendRegistration & {
@@ -100,6 +104,9 @@ export function createWorkflowsBackendRegistration(
             ledger: () => ledger,
             ports: options.ports,
             now: options.now ?? (() => new Date().toISOString()),
+            drainWait: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+            ...(options.drainBoundMs === undefined ? {} : { drainBoundMs: options.drainBoundMs }),
+            ...(options.drainPollMs === undefined ? {} : { drainPollMs: options.drainPollMs }),
           });
           // Before any update or start is accepted: a run left `running` by a stopped Backend becomes `lost` and its children are closed. A failure here is a recorded debt, never a refusal to
           // start the module and never a clean claim.
@@ -118,11 +125,14 @@ export function createWorkflowsBackendRegistration(
         running = undefined;
         const draining = service;
         service = undefined;
+        let stillLive: readonly string[] = [];
         if (draining !== undefined) {
-          const joined = await draining.drain();
-          if (joined > 0) stopped.push(`backend-workflows.cancels:${joined}`);
+          const report = await draining.drain();
+          if (report.joined > 0) stopped.push(`backend-workflows.cancels:${report.joined}`);
+          stopped.push(...report.ended.map((runId) => `backend-workflows.run:${runId}`));
+          stillLive = report.stillLive;
         }
-        return { released: [], stopped, transferred: [], stillLive: [] };
+        return { released: [], stopped, transferred: [], stillLive: [...stillLive] };
       },
     },
     ledger: () => running,
