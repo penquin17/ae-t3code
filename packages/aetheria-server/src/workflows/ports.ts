@@ -19,6 +19,18 @@ const unavailable = (detail: string) => ({
   detail,
 });
 
+/**
+ * M05's two process-group facts for a job, as explicit booleans. M05 omits a flag when it is false, so an absent flag in M05's answer means "not so". The run service reads a `lost` job as stopped only
+ * when both arrive as `false`, so a job M05 lists `lost` with an unconfirmed termination stays unresolved instead of being read as stopped on its state alone.
+ */
+const groupFactsOf = (job: {
+  readonly terminationUnconfirmed?: boolean;
+  readonly livenessIndeterminate?: boolean;
+}) => ({
+  terminationUnconfirmed: job.terminationUnconfirmed === true,
+  livenessIndeterminate: job.livenessIndeterminate === true,
+});
+
 export function createWorkflowRunsPorts(deps: WorkflowRunsPortsDeps): RunsPorts {
   const open = (root: string) => {
     const direct = deps.direct();
@@ -48,6 +60,7 @@ export function createWorkflowRunsPorts(deps: WorkflowRunsPortsDeps): RunsPorts 
             jobId: job.jobId,
             label: job.label,
             state: job.state,
+            ...groupFactsOf(job),
           })),
         };
       } catch {
@@ -63,7 +76,7 @@ export function createWorkflowRunsPorts(deps: WorkflowRunsPortsDeps): RunsPorts 
           args: { rootThreadId: at.thread, jobId },
         });
         return answer.ok
-          ? { ok: true, value: { state: answer.value.state } }
+          ? { ok: true, value: { state: answer.value.state, ...groupFactsOf(answer.value) } }
           : {
               ok: false,
               code: answer.code,

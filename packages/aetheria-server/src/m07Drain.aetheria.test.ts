@@ -69,7 +69,16 @@ const tick = async () => {
 };
 
 interface World {
-  jobs: { jobId: string; label: string; state: string }[];
+  /** M05's job rows as its direct list shows them: a flag appears only when true (M05 omits a false one). */
+  jobs: {
+    jobId: string;
+    label: string;
+    state: string;
+    terminationUnconfirmed?: true;
+    livenessIndeterminate?: true;
+  }[];
+  /** Kill answers M05 gives in turn: each one is also written into the job's record, so the next list shows it (a stateful M05). Empty: the kill answers `killed`. */
+  killScript: Record<string, unknown>[];
   children: { childId: string; label?: string }[];
   calls: { op: string; id: string }[];
   /** A close the test makes fail (by child id), and gates it can hold shut. */
@@ -84,6 +93,7 @@ interface World {
 
 const world = (): World => ({
   jobs: [{ jobId: "job-1", label: "# workflow run-1 demo", state: "running" }],
+  killScript: [],
   children: [],
   calls: [],
   failClose: new Set(),
@@ -102,7 +112,15 @@ const scriptedDirect = (w: World): OrchestrationDirectApi =>
       w.onKill?.();
       if (w.killGate !== undefined) await w.killGate;
       if (w.failKill) return { ok: false, code: "JOB_KILL_UNCONFIRMED" };
-      return { ok: true, value: { state: "killed" } };
+      const scripted = w.killScript.shift();
+      if (scripted === undefined) return { ok: true, value: { state: "killed" } };
+      const job = w.jobs.find((row) => row.jobId === input.args.jobId);
+      if (job !== undefined) {
+        delete job.terminationUnconfirmed;
+        delete job.livenessIndeterminate;
+        Object.assign(job, scripted);
+      }
+      return { ok: true, value: { ...scripted } };
     },
     listChildren: async () => ({ ok: true, value: { rows: w.children, diagnostics: [] } }),
     closeChild: async (input: { args: { target: string } }) => {
@@ -544,5 +562,71 @@ describe("the Backend's drain and restart of the workflows module", () => {
       "the ask is recorded, so no new member is admitted",
     ).toBeDefined();
     expect(w.calls).toEqual([]);
+  });
+});
+
+describe("a job M05 holds lost without proof that its group is empty (review round 4, F1): the real ports carry M05's flags, the real run service keeps it unresolved", () => {
+  const UNCONFIRMED = { state: "lost", terminationUnconfirmed: true };
+  const kills = (w: World) => w.calls.filter((c) => c.op === "kill").length;
+
+  it("cancel → the kill answers lost/unconfirmed → a repeat cancel lists that lost job → the drain: unresolved every time, the run stillLive, M05 asked to re-verify, no terminal record", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.killScript.push(UNCONFIRMED, UNCONFIRMED, UNCONFIRMED);
+    const m = await mounted(dir, w);
+    await seedRun(m);
+    const first = await m.runs().cancel(MAIN, "run-1");
+    if (!first.ok) throw new Error("unreachable");
+    expect(first.unresolved).toEqual([
+      { what: "job", id: "job-1", code: "JOB_TERMINATION_UNCONFIRMED" },
+    ]);
+    expect(w.jobs[0]).toMatchObject({ state: "lost", terminationUnconfirmed: true });
+    const repeat = await m.runs().cancel(MAIN, "run-1");
+    if (!repeat.ok) throw new Error("unreachable");
+    expect(repeat.unresolved, "the listed lost row is no longer ignored").toEqual([
+      { what: "job", id: "job-1", code: "JOB_TERMINATION_UNCONFIRMED" },
+    ]);
+    const report = (await m.registration.activation.drain("test")) as {
+      stillLive: string[];
+      stopped: string[];
+    };
+    expect(report.stillLive).toEqual(["workflow-run:run-1"]);
+    expect(report.stopped).not.toContain("backend-workflows.run:run-1");
+    expect(kills(w), "two cancels and the drain each re-verified the job through M05's kill").toBe(
+      3,
+    );
+    expect(recordState(dir, "run-1")).toBe("running");
+  });
+
+  it("a lost job whose group M05 proves empty (it omits both flags) is resolved: the cancel and the drain are clean, the proven job is not killed again, and the run is stopped", async () => {
+    const dir = stateRoot();
+    const w = world();
+    w.killScript.push(UNCONFIRMED, { state: "lost" });
+    const m = await mounted(dir, w);
+    await seedRun(m);
+    const first = await m.runs().cancel(MAIN, "run-1");
+    if (!first.ok) throw new Error("unreachable");
+    expect(first.unresolved.map((u) => u.code)).toEqual(["JOB_TERMINATION_UNCONFIRMED"]);
+    const second = await m.runs().cancel(MAIN, "run-1");
+    if (!second.ok) throw new Error("unreachable");
+    expect(second.unresolved, "the re-verification proved the group empty").toEqual([]);
+    expect(w.jobs[0]).toEqual({ jobId: "job-1", label: "# workflow run-1 demo", state: "lost" });
+    const report = (await m.registration.activation.drain("test")) as {
+      stillLive: string[];
+      stopped: string[];
+    };
+    expect(report.stillLive).toEqual([]);
+    expect(report.stopped).toContain("backend-workflows.run:run-1");
+    expect(kills(w), "the listed lost/proven job is left alone").toBe(2);
+  });
+
+  it("a kill that answers lost with liveness indeterminate is not proof either", async () => {
+    const w = world();
+    w.killScript.push({ state: "lost", livenessIndeterminate: true });
+    const m = await mounted(stateRoot(), w);
+    await seedRun(m);
+    const answer = await m.runs().cancel(MAIN, "run-1");
+    if (!answer.ok) throw new Error("unreachable");
+    expect(answer.unresolved.map((u) => u.code)).toEqual(["JOB_TERMINATION_UNCONFIRMED"]);
   });
 });

@@ -910,6 +910,9 @@ interface RunWorld {
   readonly calls: Array<{ op: string; id: string }>;
   /** A child close the test makes fail (by child id), so a cancel does not finish every step. */
   readonly failClose: Set<string>;
+  /** M05's record of the run's job as its list shows it; a kill that has an answer scripted writes the answer here (a stateful M05). A flag appears only when true. */
+  readonly job: Record<string, unknown>;
+  killAnswer: Record<string, unknown> | undefined;
 }
 
 const runContext = (sessionId: string, args: Record<string, unknown>): Xc6OperationContext => ({
@@ -924,18 +927,24 @@ const runContext = (sessionId: string, args: Record<string, unknown>): Xc6Operat
 const liveRuns = async () => {
   const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "m07-rpc-runs-"));
   mountedRoots.push(dir);
-  const w: RunWorld = { calls: [], failClose: new Set() };
+  const w: RunWorld = {
+    calls: [],
+    failClose: new Set(),
+    job: { jobId: "job-1", label: "# workflow run-1 demo", state: "running" },
+    killAnswer: undefined,
+  };
   const direct = {
     listJobs: async () => ({
       ok: true,
-      value: {
-        jobs: [{ jobId: "job-1", label: "# workflow run-1 demo", state: "running" }],
-        unreadable: 0,
-      },
+      value: { jobs: [{ ...w.job }], unreadable: 0 },
     }),
     killJob: async (input: { args: { jobId: string } }) => {
       w.calls.push({ op: "kill", id: input.args.jobId });
-      return { ok: true, value: { state: "killed" } };
+      if (w.killAnswer === undefined) return { ok: true, value: { state: "killed" } };
+      delete w.job.terminationUnconfirmed;
+      delete w.job.livenessIndeterminate;
+      Object.assign(w.job, w.killAnswer);
+      return { ok: true, value: { ...w.killAnswer } };
     },
     listChildren: async () => ({
       ok: true,
@@ -1082,6 +1091,31 @@ describe("the workflow methods: the same checks, then the live run service", () 
         );
         expect(bad.detail).toContain("child-1");
         expect(bad.detail).toContain("read the runs");
+      }),
+  );
+
+  it.effect(
+    "a job M05 holds lost with termination unconfirmed is WORKFLOWS_OUTCOME_UNKNOWN on every cancel, however often repeated, until M05 proves its group empty (review round 4, F1)",
+    () =>
+      Effect.gen(function* () {
+        const live = yield* Effect.promise(() => liveRuns());
+        yield* Effect.promise(() => live.seed(MAIN, "run-1", "child-1"));
+        live.w.killAnswer = { state: "lost", terminationUnconfirmed: true };
+        const s = yield* Effect.promise(() => setup({ workflows: live.service }));
+        const actor = yield* withDevice(s, actorOf());
+        const cancel = () =>
+          withDevice(s, workflowCancel(s.backend, actor, { rootSessionId: MAIN, runId: "run-1" }));
+        for (const attempt of [1, 2]) {
+          const bad = badOf(yield* cancel(), "WORKFLOWS_OUTCOME_UNKNOWN");
+          expect(bad.detail, `attempt ${attempt}`).toContain("job-1");
+          expect(bad.detail).toContain("JOB_TERMINATION_UNCONFIRMED");
+        }
+        // M05's re-verification proves the group empty: only now is the same cancel a success.
+        live.w.killAnswer = { state: "lost" };
+        const done = okOf(yield* cancel());
+        expect(done.value.run).toMatchObject({ runId: "run-1" });
+        okOf(yield* cancel());
+        expect(live.w.calls.filter((c) => c.op === "kill")).toHaveLength(3);
       }),
   );
 
