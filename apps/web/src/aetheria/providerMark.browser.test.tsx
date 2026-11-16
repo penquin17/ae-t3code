@@ -14,6 +14,7 @@ const DARK_MARK = "/aetheria/aetheria-mark-dark.svg";
 const ACCENT = { light: "rgb(37, 99, 235)", dark: "rgb(96, 165, 250)" } as const;
 
 const BUILDER = "[data-aetheria-builder-mark]";
+const WORD = "[data-aetheria-builder-word]";
 
 function shownImage(container: HTMLElement) {
   return [...container.querySelectorAll<HTMLImageElement>("img")].find(
@@ -40,6 +41,7 @@ function icon(
     readonly displayName?: string;
     readonly size?: "default" | "compact";
     readonly showBadge?: boolean;
+    readonly iconClassName?: string;
   } = {},
 ) {
   const { displayName = driver, ...rest } = extra;
@@ -53,10 +55,18 @@ function icon(
 }
 
 const aetheria = (
-  extra: { readonly size?: "default" | "compact"; readonly showBadge?: boolean } = {},
+  extra: {
+    readonly size?: "default" | "compact";
+    readonly showBadge?: boolean;
+    readonly iconClassName?: string;
+  } = {},
 ) => icon("pi", { displayName: "Aetheria", ...extra });
 const builder = (
-  extra: { readonly size?: "default" | "compact"; readonly showBadge?: boolean } = {},
+  extra: {
+    readonly size?: "default" | "compact";
+    readonly showBadge?: boolean;
+    readonly iconClassName?: string;
+  } = {},
 ) => icon("pi", { displayName: "Aetheria Builder", ...extra });
 const other = (
   extra: { readonly size?: "default" | "compact"; readonly showBadge?: boolean } = {},
@@ -121,41 +131,66 @@ describe("the Aetheria instance's icon is the plain Aetheria mark (IP-68)", () =
   });
 });
 
-describe("the Builder instance's icon is the mark with a hammer inside it (IP-68)", () => {
+describe('the Builder instance\'s icon is the mark with the word "builder" inside it (IP-68)', () => {
   it.each(["light", "dark"] as const)(
-    "shows the %s mark with the hammer centred in the wreath, in the accent colour",
+    "shows the %s mark with the word centred in the wreath, bold, in the accent colour, and no hammer",
     async (mode) => {
       await inAppearance(mode, async () => {
         await using screen = await render(builder());
         expect(shownMarks(screen.container)).toEqual([mode === "light" ? LIGHT_MARK : DARK_MARK]);
         const wrapper = screen.container.querySelector<HTMLElement>(BUILDER)!;
         expect(wrapper).not.toBeNull();
-        const hammer = wrapper.querySelector<SVGElement>("svg")!;
+        // The one svg is the word's overlay: no hammer glyph (a lucide icon is an svg holding paths, this holds only text).
         expect(wrapper.querySelectorAll("svg")).toHaveLength(1);
-        expect(hammer.getAttribute("aria-hidden")).toBe("true");
-        expect(getComputedStyle(hammer).color).toBe(ACCENT[mode]);
+        const overlay = wrapper.querySelector<SVGElement>("svg")!;
+        expect(overlay.getAttribute("aria-hidden")).toBe("true");
+        expect(overlay.querySelector("path, line, polyline, circle")).toBeNull();
+        const word = wrapper.querySelector<SVGTextElement>(WORD)!;
+        expect(word.textContent).toBe("builder");
+        expect(wrapper.textContent).toBe("builder");
+        expect(getComputedStyle(word).fill).toBe(ACCENT[mode]);
+        expect(Number(getComputedStyle(word).fontWeight)).toBeGreaterThanOrEqual(700);
 
         // Inside the mark's box, on its vertical axis, a little below the middle (the wreath's open middle, under the spark).
         const mark = shownImage(screen.container)!.getBoundingClientRect();
-        const glyph = hammer.getBoundingClientRect();
-        expect(glyph.left).toBeGreaterThanOrEqual(mark.left);
-        expect(glyph.right).toBeLessThanOrEqual(mark.right);
-        expect(glyph.top).toBeGreaterThanOrEqual(mark.top);
-        expect(glyph.bottom).toBeLessThanOrEqual(mark.bottom);
-        const across = (glyph.left + glyph.right) / 2 - (mark.left + mark.right) / 2;
+        const box = word.getBoundingClientRect();
+        expect(box.left).toBeGreaterThanOrEqual(mark.left);
+        expect(box.right).toBeLessThanOrEqual(mark.right);
+        expect(box.top).toBeGreaterThanOrEqual(mark.top);
+        expect(box.bottom).toBeLessThanOrEqual(mark.bottom);
+        const across = (box.left + box.right) / 2 - (mark.left + mark.right) / 2;
         expect(Math.abs(across)).toBeLessThan(0.5);
-        const down = ((glyph.top + glyph.bottom) / 2 - mark.top) / mark.height;
+        const down = ((box.top + box.bottom) / 2 - mark.top) / mark.height;
         expect(down).toBeGreaterThan(0.5);
         expect(down).toBeLessThan(0.62);
-        expect(glyph.width / mark.width).toBeLessThan(0.5);
+        // Within the wreath's clear middle (x 19.5 to 44.5 of 64), fitted to 24 of 64 units wide.
+        expect(box.left).toBeGreaterThanOrEqual(mark.left + mark.width * (19.5 / 64));
+        expect(box.right).toBeLessThanOrEqual(mark.left + mark.width * (44.5 / 64));
+        expect(box.width / mark.width).toBeGreaterThan(0.3);
+        expect(box.width / mark.width).toBeLessThan(0.42);
       });
     },
   );
 
-  it("carries no corner badge and no initials, even where the caller asks for the badge", async () => {
+  it("fits the same share of the mark at every size: default, compact and large", async () => {
+    for (const [size, extra] of [
+      [20, {}],
+      [14, { size: "compact" as const }],
+      [64, { iconClassName: "size-16" }],
+    ] as const) {
+      await using screen = await render(builder(extra));
+      const mark = shownImage(screen.container)!.getBoundingClientRect();
+      expect(mark.width).toBe(size);
+      const box = screen.container.querySelector(WORD)!.getBoundingClientRect();
+      expect(box.width / mark.width, `${size}px`).toBeGreaterThan(0.3);
+      expect(box.width / mark.width, `${size}px`).toBeLessThan(0.42);
+    }
+  });
+
+  it("carries no corner badge, even where the caller asks for the badge; the only text is the word", async () => {
     await using screen = await render(builder({ showBadge: true }));
     expect(cornerBadge(screen.container)).toBeNull();
-    expect(screen.container.textContent).toBe("");
+    expect(screen.container.textContent).toBe("builder");
   });
 
   it("is decorative: empty alt and aria-hidden on both images", async () => {
@@ -273,6 +308,31 @@ describe("captures of the three icons", () => {
           save: true,
         });
         expect(frame.querySelectorAll(BUILDER)).toHaveLength(2);
+      });
+    },
+  );
+
+  it.each(["light", "dark"] as const)(
+    "saves the %s Builder mark large (64 px) beside the plain mark, so the word can be judged",
+    async (mode) => {
+      await inAppearance(mode, async () => {
+        const iconClassName = "size-16";
+        await using screen = await render(
+          <div
+            id="provider-mark-large"
+            className="inline-flex items-center gap-6 bg-background p-4 text-foreground"
+          >
+            {builder({ iconClassName })}
+            {aetheria({ iconClassName })}
+          </div>,
+        );
+        const frame = screen.container.querySelector<HTMLElement>("#provider-mark-large")!;
+        expect(frame.querySelector<HTMLElement>(BUILDER)!.getBoundingClientRect().width).toBe(64);
+        await page.elementLocator(frame).screenshot({
+          base64: true,
+          path: `__screenshots__/providerMark-${mode}-builder-64.png`,
+          save: true,
+        });
       });
     },
   );
