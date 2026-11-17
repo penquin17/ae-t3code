@@ -32,6 +32,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -215,6 +216,8 @@ const makeBackendLayer = (
       const made = createAetheriaBackendService({
         stateRoot,
         turnDispatch,
+        // M12: the T3 server's own version for the diagnostics health. The Pi version is left out: no Pi package is installed in this tree (the Pi CLI is a separate process), so health shows it as unknown.
+        versions: { t3Server: packageJson.version },
         ...managedWork,
         ...(orchestrationFactory === undefined ? {} : { orchestrationFactory }),
         ...(callerContext === undefined ? {} : { callerContext }),

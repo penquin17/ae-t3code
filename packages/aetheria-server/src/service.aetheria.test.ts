@@ -307,6 +307,41 @@ describe("the state-root owner lock (user decision F1, step 29)", () => {
     expect(NodeFS.existsSync(NodePath.join(dir, "writer.lock"))).toBe(false);
   });
 
+  it("the diagnostics health carries this build's pinned archive versions, the host's versions, the composition id and digest, and the module states the Backend tracks, with no path", async () => {
+    const stateRoot = rootOf();
+    const made = createAetheriaBackendService({
+      stateRoot,
+      credentialOf: () => undefined,
+      projectRootOf: (folder) => folder,
+      versions: { pi: "1.5.0", t3Server: "0.1.6" },
+    });
+    if (made.outcome !== "prepared") throw new Error("refused");
+    const { service } = made;
+    const before = service.diagnosticsHealth();
+    expect(before.composition.id).toBe("aetheria-backend");
+    expect(before.composition.digest).toBe(service.digest().value);
+    expect(before.composition.modules.map((m) => m.state)).toEqual(
+      before.composition.modules.map(() => "registered"),
+    );
+    expect((await service.start()).outcome).toBe("started");
+    const health = service.diagnosticsHealth();
+    expect(health.versions.pi).toBe("1.5.0");
+    expect(health.versions.t3Server).toBe("0.1.6");
+    expect(health.versions.aetheria.map((a) => a.package)).toEqual(
+      expect.arrayContaining(["@aetheria/awareness", "@aetheria/diagnostics", "@aetheria/goals"]),
+    );
+    expect(health.versions.aetheria.length).toBe(9);
+    expect(health.composition.digest).toBe(service.status().digest.value);
+    expect(health.composition.modules).toEqual(
+      service.status().modules.map((m) => ({ id: m.id, state: m.state })),
+    );
+    expect(health.composition.modules.find((m) => m.id === "diagnostics-backend")?.state).toBe(
+      "running",
+    );
+    expect(JSON.stringify(health)).not.toContain(stateRoot);
+    await service.dispose("test");
+  });
+
   it("a clean dispose releases the lock, so the next Backend can start over the same root", async () => {
     const first = await started();
     expect((await first.service.dispose("switch")).ok).toBe(true);

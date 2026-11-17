@@ -57,3 +57,20 @@ export const PINNED_ARTIFACT_STAMPS: Readonly<Record<string, string>> = Object.f
   [INSPECT_PINNED_ARTIFACT.package]: INSPECT_PINNED_ARTIFACT.stamp,
   [DIAGNOSTICS_PINNED_ARTIFACT.package]: DIAGNOSTICS_PINNED_ARTIFACT.stamp,
 });
+
+/** Every archive this build pins (package, version, stamp), for the diagnostics health's installed versions. Read from the same declarations as the stamps above. */
+export const PINNED_ARCHIVES: readonly {
+  readonly package: string;
+  readonly version: string;
+  readonly stamp: string;
+}[] = Object.freeze([
+  PINNED_ARTIFACT,
+  PROVIDERS_PINNED_ARTIFACT,
+  INTERACTION_PINNED_ARTIFACT,
+  EVIDENCE_PINNED_ARTIFACT,
+  ORCHESTRATION_PINNED_ARTIFACT,
+  GOALS_PINNED_ARTIFACT,
+  WORKFLOWS_PINNED_ARTIFACT,
+  INSPECT_PINNED_ARTIFACT,
+  DIAGNOSTICS_PINNED_ARTIFACT,
+]);

@@ -73,6 +73,10 @@ const STORE_RESOURCE = "backend-diagnostics.store";
 const RECORDER_RESOURCE = "backend-diagnostics.recorder";
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
+const PACKAGE_ID = /^@[a-z0-9][a-z0-9-]{0,63}\/[a-z0-9][a-z0-9-]{0,63}$/;
+/** A version text: a semver-like token, nothing that could be a path or a credential. */
+const VERSION = /^[0-9][0-9A-Za-z.+-]{0,63}$/;
+const MODULE_STATE = /^[a-z][a-z-]{0,31}$/;
 
 export interface DiagnosticsAccess {
   /** Does the caller still hold access: its session, and its root, are still bound? A revoked caller reads nothing. Throws or absent port: unavailable, never a guess. */
@@ -98,6 +102,17 @@ export interface DiagnosticsRegistrationOptions {
   readonly host?: string | undefined;
   /** The composition digest (`sha256:<hex>`) of this Backend's lifecycle, read at each event. A value of another shape is left out of the event. */
   readonly digest?: (() => string | undefined) | undefined;
+  /** The installed versions health shows. Absent or a value of another shape: left out (Aetheria archives) or `unknown` (Pi, T3 server). Only a pinned package id, a version and a stamp are ever shown. */
+  readonly versions?:
+    | {
+        /** The Aetheria archives this build pins: package id, version and stamp, from each archive's own declaration. */
+        readonly aetheria?: readonly DiagnosticsPinnedArchive[] | undefined;
+        readonly pi?: string | undefined;
+        readonly t3Server?: string | undefined;
+      }
+    | undefined;
+  /** The Backend's own composition id, digest and module states, read at each health call (late-bound: the Backend does not exist until its registrations are prepared). Throws or absent: shown as unknown, never a guess. */
+  readonly composition?: (() => DiagnosticsCompositionFacts | undefined) | undefined;
   /** The effective telemetry settings this Backend was built with, shown in health. Absent: `unknown` for T3's. Aetheria itself sends no telemetry. */
   readonly telemetry?: { readonly t3?: "disabled" | "enabled" | "unknown" | undefined } | undefined;
   /** Test seam: another store than the state root's. The module owns whichever it is given for one run. */
@@ -110,6 +125,19 @@ export interface DiagnosticsRegistrationOptions {
   readonly newId?: (() => string) | undefined;
   /** The most events one read returns. Default 1000. */
   readonly readLimit?: number | undefined;
+}
+
+export interface DiagnosticsPinnedArchive {
+  readonly package: string;
+  readonly version: string;
+  readonly stamp: string;
+}
+
+/** What the Backend knows of its own composition: its id, its digest, and each registered module's id with the state the Backend tracks (registered, starting, running, failed, skipped, disposed). */
+export interface DiagnosticsCompositionFacts {
+  readonly composition: string;
+  readonly digest: string;
+  readonly modules: readonly { readonly id: string; readonly state: string }[];
 }
 
 export interface DiagnosticsHealth {
@@ -135,6 +163,18 @@ export interface DiagnosticsHealth {
   readonly telemetry: {
     readonly t3: "disabled" | "enabled" | "unknown";
     readonly aetheria: "none";
+  };
+  /** The installed versions, content-free: the pinned Aetheria archives (package, version, stamp), and Pi's and the T3 server's version or `unknown` when the host supplied none. */
+  readonly versions: {
+    readonly aetheria: readonly DiagnosticsPinnedArchive[];
+    readonly pi: string;
+    readonly t3Server: string;
+  };
+  /** The Backend's composition id and digest (`null` when it cannot be read) and each module's id with the state the Backend tracks for it. A module the Backend does not hold is absent, not given a state. */
+  readonly composition: {
+    readonly id: string | null;
+    readonly digest: string | null;
+    readonly modules: readonly { readonly id: string; readonly state: string }[];
   };
   readonly release: ReleaseReport | null;
 }
@@ -531,7 +571,7 @@ export function createDiagnosticsBackendRegistration(
 
   // ---------------------------------------------------------------- health
 
-  /** `diagnostics.health`: the content-free health snapshot (`health()`: states, reason codes, counts, the telemetry setting, the recorder state; never a path, an event or a credential) for a caller whose access is held. Arguments are exactly `{}`. */
+  /** `diagnostics.health`: the content-free health snapshot (`health()`: states, reason codes, counts, the telemetry setting, the recorder state, the installed versions, the composition id, digest and module states; never a path, an event or a credential) for a caller whose access is held. Arguments are exactly `{}`. */
   const healthOperation: Xc6Operation = async (context) => {
     const down = notRunning();
     if (down !== undefined) return down;
@@ -542,6 +582,68 @@ export function createDiagnosticsBackendRegistration(
     if (problem !== undefined) return problem;
     return { status: "done", result: health() };
   };
+
+  /** The installed versions as the host gave them; a value that is not a package id, a version and a stamp (or a version text) is left out, so no path or credential can ride in. */
+  function installedVersions(): DiagnosticsHealth["versions"] {
+    const given = options.versions;
+    const known = (value: unknown): string =>
+      typeof value === "string" && VERSION.test(value) ? value : "unknown";
+    const archives: DiagnosticsPinnedArchive[] = [];
+    for (const archive of given?.aetheria ?? []) {
+      if (
+        isObject(archive) &&
+        typeof archive.package === "string" &&
+        PACKAGE_ID.test(archive.package) &&
+        known(archive.version) !== "unknown" &&
+        typeof archive.stamp === "string" &&
+        DIGEST.test(archive.stamp)
+      )
+        archives.push(
+          Object.freeze({
+            package: archive.package,
+            version: archive.version,
+            stamp: archive.stamp,
+          }),
+        );
+    }
+    return Object.freeze({
+      aetheria: Object.freeze(archives),
+      pi: known(given?.pi),
+      t3Server: known(given?.t3Server),
+    });
+  }
+
+  /** The Backend's own composition facts, read now. Read through the late-bound source; a source that throws or answers another shape shows as null and no modules. */
+  function compositionFacts(): DiagnosticsHealth["composition"] {
+    try {
+      const facts = options.composition?.();
+      if (isObject(facts)) {
+        const modules: { id: string; state: string }[] = [];
+        for (const entry of Array.isArray(facts.modules) ? (facts.modules as unknown[]) : []) {
+          if (
+            isObject(entry) &&
+            typeof entry.id === "string" &&
+            ID.test(entry.id) &&
+            typeof entry.state === "string" &&
+            MODULE_STATE.test(entry.state)
+          )
+            modules.push(Object.freeze({ id: entry.id, state: entry.state }));
+        }
+        return Object.freeze({
+          id:
+            typeof facts.composition === "string" && ID.test(facts.composition)
+              ? facts.composition
+              : null,
+          digest:
+            typeof facts.digest === "string" && DIGEST.test(facts.digest) ? facts.digest : null,
+          modules: Object.freeze(modules),
+        });
+      }
+    } catch {
+      /* an unreadable composition is shown as unknown */
+    }
+    return Object.freeze({ id: null, digest: null, modules: Object.freeze([]) });
+  }
 
   function health(): DiagnosticsHealth {
     const snapshot = (() => {
@@ -576,6 +678,8 @@ export function createDiagnosticsBackendRegistration(
         t3: options.telemetry?.t3 ?? "unknown",
         aetheria: "none" as const,
       }),
+      versions: installedVersions(),
+      composition: compositionFacts(),
       release: lastRelease,
     });
   }

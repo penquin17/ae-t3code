@@ -691,6 +691,86 @@ describe("diagnostics.health", () => {
     await w.drain();
   });
 
+  const STAMP = `sha256:${"ab".repeat(32)}`;
+  const DIGEST = `sha256:${"cd".repeat(32)}`;
+
+  it("adds the installed versions, the composition id and digest and each module's state the Backend tracks, and nothing that is a path or a credential", async () => {
+    const modules = [
+      { id: "agent-awareness-backend", state: "running" },
+      { id: "diagnostics-backend", state: "running" },
+      { id: "providers-backend", state: "failed" },
+      { id: "inspect-backend", state: "skipped" },
+    ];
+    const w = world({
+      versions: {
+        aetheria: [{ package: "@aetheria/diagnostics", version: "0.1.0", stamp: STAMP }],
+        pi: "1.5.0",
+        t3Server: "0.1.6",
+      },
+      composition: () => ({ composition: "aetheria-backend", digest: DIGEST, modules }),
+    });
+    await w.start();
+    const got = await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"));
+    expect(got.status).toBe("done");
+    expect(got.result).toMatchObject({
+      versions: {
+        aetheria: [{ package: "@aetheria/diagnostics", version: "0.1.0", stamp: STAMP }],
+        pi: "1.5.0",
+        t3Server: "0.1.6",
+      },
+      composition: { id: "aetheria-backend", digest: DIGEST, modules },
+    });
+    const text = JSON.stringify(got.result);
+    for (const forbidden of [w.stateRoot, "events.jsonl", CANARY, "/Users", "token"])
+      expect(text, forbidden).not.toContain(forbidden);
+    await w.drain();
+  });
+
+  it("shows a version, digest, module or state of another shape as unknown or leaves it out, and a composition source that throws as unknown", async () => {
+    const hostile = world({
+      versions: {
+        aetheria: [
+          { package: "@aetheria/diagnostics", version: "0.1.0", stamp: "not-a-stamp" },
+          { package: "/etc/passwd", version: "0.1.0", stamp: STAMP },
+          { package: "@aetheria/goals", version: `/home/u/${CANARY}`, stamp: STAMP },
+        ],
+        pi: `/home/u/${CANARY}`,
+        t3Server: "sk-live-secret value",
+      },
+      composition: () => ({
+        composition: "/home/u/state",
+        digest: "sha256:short",
+        modules: [
+          { id: "providers-backend", state: "running" },
+          { id: `/home/u/${CANARY}`, state: "running" },
+          { id: "goals-backend", state: `failed: ${CANARY}` },
+        ],
+      }),
+    });
+    await hostile.start();
+    const shown = hostile.registration.health();
+    expect(shown.versions).toEqual({ aetheria: [], pi: "unknown", t3Server: "unknown" });
+    expect(shown.composition).toEqual({
+      id: null,
+      digest: null,
+      modules: [{ id: "providers-backend", state: "running" }],
+    });
+    expect(JSON.stringify(shown)).not.toContain(CANARY);
+    await hostile.drain();
+
+    const throwing = createDiagnosticsBackendRegistration({
+      composition: () => {
+        throw new Error(`boom ${CANARY}`);
+      },
+    });
+    expect(throwing.health().composition).toEqual({ id: null, digest: null, modules: [] });
+    expect(createDiagnosticsBackendRegistration({}).health().versions).toEqual({
+      aetheria: [],
+      pi: "unknown",
+      t3Server: "unknown",
+    });
+  });
+
   it("shows a recorder fault and the telemetry setting it was built with as unavailable, never as silence", async () => {
     const stateRoot = rootOf();
     const { store, mode } = flaky(createDiagnosticsStore({ stateRoot }));

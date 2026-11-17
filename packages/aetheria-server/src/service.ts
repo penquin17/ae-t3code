@@ -11,6 +11,7 @@ import {
 import { prepareAetheriaBackend, type AetheriaBackendOptions } from "./aetheriaBackend.ts";
 import type { BackendAdapter, BackendRegistration } from "./adapter.ts";
 import { createAgentAwarenessBackendRegistration } from "./agentAwareness.ts";
+import { PINNED_ARCHIVES } from "./artifact.ts";
 import { BACKEND_COMPOSITION_ID, backendManifest } from "./composition.ts";
 import {
   createProvidersBackendRegistration,
@@ -123,6 +124,11 @@ export interface AetheriaBackendServiceOptions {
   /** Test seam: another audit check and evidence reader. Absent in production, which uses M03's logic and the evidence archive. */
   readonly auditPort?: AuditPort;
   readonly now?: () => number;
+  /**
+   * The versions the host knows and this package cannot: the Pi version and the T3 server's, shown in the diagnostics health (content-free; a value that is not a version token is shown as `unknown`).
+   * Absent: `unknown`. The Aetheria archives' versions and stamps are always this build's own pins.
+   */
+  readonly versions?: { readonly pi?: string; readonly t3Server?: string };
   /** Test seam: another manifest to prove a mixed composition is refused. */
   readonly manifest?: AetheriaBackendOptions["manifest"];
   /** The awareness evidence parameters (idleMs, summaryMaxBytes of at least 512, failOpen, enabled); omitted fields take DSH's defaults. */
@@ -255,7 +261,7 @@ export interface AetheriaBackendService {
    */
   deliverables(): DeliverablesService | undefined;
   /**
-   * The diagnostics module's health (M12 step 8): the recorder's state and counters, the store's code when it cannot be used, the Agent appends and the channel observation counts, and the effective
+   * The diagnostics module's health (M12 step 8): the recorder's state and counters, the store's code when it cannot be used, the Agent appends and the channel observation counts, the installed versions, the composition id and digest with each module's state, and the effective
    * telemetry setting. Always answers (`not-started`, `unconfigured`, `unavailable` and `released` are states, never an error); it never says `ok` because nothing arrived.
    */
   diagnosticsHealth(): DiagnosticsHealth;
@@ -552,6 +558,16 @@ export function createAetheriaBackendService(
       if (!holdingOwnerLock) throw new Error("the Backend owner lock is not held");
     },
     digest: () => backendNow().status().digest.value,
+    // Health's versions and composition: this build's archive pins, the host's Pi and T3 server versions, and the Backend's own id, digest and module states, read late like the digest.
+    versions: { aetheria: PINNED_ARCHIVES, ...options.versions },
+    composition: () => {
+      const status = backendNow().status();
+      return {
+        composition: status.composition,
+        digest: status.digest.value,
+        modules: status.modules.map((module) => ({ id: module.id, state: module.state })),
+      };
+    },
     ...(options.now === undefined ? {} : { clock: options.now }),
   });
   // M06 step 13: T3 attaching a bound thread to a provider session after the replay is a resume; the interaction service ends the waits no segment
