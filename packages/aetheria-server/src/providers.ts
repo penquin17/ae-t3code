@@ -4,6 +4,7 @@
 // `production` answers from an explicit Pi agent directory (a Backend option, never the environment), else unknown; a refused
 // directory degrades visibly (unknown plus a path-free warning). `fixture` (FX-AV) refuses the production composition.
 // The service is created at module start, so a restart begins with empty failure memory.
+import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import {
@@ -65,6 +66,32 @@ const isInvalidAgentDir = (error: unknown): boolean =>
   error instanceof Error &&
   error.name === "ProviderAuthError" &&
   (error as Error & { code?: unknown }).code === "invalid-agent-dir";
+
+/** A loopback http base URL with an explicit port and an optional plain path: no credentials, query or fragment, and never another host. */
+const LOOPBACK_BASE_URL = /^http:\/\/(?:127\.0\.0\.1|localhost):\d{1,5}(?:\/[^?#\s\\]*)?$/;
+
+/**
+ * The search route override: `providers["openai-codex"].baseUrl` of `<agentDir>/models.json` (the run home's Pi routing override), read now, and
+ * only when it is a loopback http URL. Anything else — no file, unreadable or unparseable file, a non-string, a non-loopback host or scheme — answers
+ * undefined, so a models.json can never send the subscription token off this machine.
+ */
+export function codexBaseUrlOf(agentDir: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(agentDir, "models.json"), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const providers = (parsed as { providers?: unknown }).providers;
+    if (typeof providers !== "object" || providers === null) return undefined;
+    const codex = (providers as Record<string, unknown>)["openai-codex"];
+    if (typeof codex !== "object" || codex === null) return undefined;
+    const baseUrl = (codex as { baseUrl?: unknown }).baseUrl;
+    if (typeof baseUrl !== "string" || !LOOPBACK_BASE_URL.test(baseUrl)) return undefined;
+    return URL.canParse(baseUrl) ? baseUrl : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Test seams for research: the search transport and a replacement fetch work. Never supplied in production, never model-controlled. */
 export type ProvidersResearchSeams = Pick<ProductionResearchOptions, "fetch" | "fetchWork">;
@@ -205,6 +232,9 @@ export function createProvidersBackendRegistration(
         research = createProductionResearch({
           now: clock.now,
           ...(researchAuth === undefined ? {} : { auth: researchAuth }),
+          ...(researchAuth !== undefined && mode.mode === "production" && "agentDir" in mode
+            ? { searchRoute: () => codexBaseUrlOf(mode.agentDir) }
+            : {}),
           ...(options.stateRoot === undefined
             ? {}
             : { recordsDir: NodePath.join(options.stateRoot, ...SEARCH_RECORDS_FOLDER) }),

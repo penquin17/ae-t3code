@@ -2636,7 +2636,7 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/providers@file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz':
-    resolution: {integrity: sha512-pn43dCep7m9uvvfrZJafC9it4RdQKo3kk/+emU5yefyT8av8uXSFw/WlhU1/EUuk3Bjb4fpmGS5Hd3a36kxDQg==, tarball: file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz}
+    resolution: {integrity: sha512-vk20vj0sAR1tl9Q2t827fTJe1aVypJUUrNh66/v+zXAfMfunlQWiwOzf2jYS0lyMo9IWSfzGolR6iEJ6OazP5w==, tarball: file:packages/aetheria-server/artifacts/aetheria-providers-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
     peerDependencies:

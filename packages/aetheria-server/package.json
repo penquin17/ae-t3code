@@ -67,7 +67,7 @@
     "@aetheria/providers": {
       "archive": "artifacts/aetheria-providers-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:710f86dec7c2c6f8b1d0c02c2922247b1bcd021880751b044035ca9f4ee3e0b9"
+      "stamp": "sha256:314de2c56af4ee41d452e412a5d57bcc5e6ba1e5ded94e6172dcef9a0aced316"
     },
     "@aetheria/workflows": {
       "archive": "artifacts/aetheria-workflows-0.1.0.tgz",
