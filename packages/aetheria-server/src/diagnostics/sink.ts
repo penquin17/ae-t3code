@@ -6,8 +6,8 @@
 //   writer.lock    the one writer: created exclusively, holds the writing process's id; a lock whose process is gone is taken over, a live one is WRITER_EXISTS
 //
 // Refusal, never repair (the deliverables store's rule): an unreadable store, a line that is not an event of the closed field list, or an unfinished last line (a crash mid-append) makes the store
-// unusable. It is left byte for byte as it was, and the caller shows it as unavailable. An append that fails is `failed`; one whose confirmation cannot be checked THROWS, so the recorder counts it as
-// uncertain, never as stored. Every append asks the Backend's owner lock first (`assertHeld`), so a write after drain or without the lock fails closed. No parameter property: outer Node tests load this
+// unusable. It is left byte for byte as it was, and the caller shows it as unavailable. An append that fails BEFORE any byte can be written (open, size) is `failed`; one that fails from the write on
+// (the append, its sync) or whose confirmation cannot be checked THROWS, so the recorder counts it as uncertain, never as stored and never as plainly lost. Every append asks the Backend's owner lock first (`assertHeld`), so a write after drain or without the lock fails closed. No parameter property: outer Node tests load this
 // source with type stripping only.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -43,6 +43,16 @@ export interface DiagnosticsStoreOptions {
   readonly isAlive?: ((pid: number) => boolean) | undefined;
   /** This process's id, written into the lock. Default `process.pid`. A test seam. */
   readonly pid?: number | undefined;
+  /** Open the events file for appending. Default: `node:fs/promises` `open(file, "a", 0o600)`. A test seam: a wrapper makes one stage fail on the real file. */
+  readonly openAppend?: ((file: string) => Promise<AppendHandle>) | undefined;
+}
+
+/** The part of a file handle one append uses: the size, the line, the sync and the close. */
+export interface AppendHandle {
+  stat(): Promise<{ readonly size: number }>;
+  appendFile(data: string): Promise<void>;
+  sync(): Promise<void>;
+  close(): Promise<void>;
 }
 
 const errnoOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException)?.code;
@@ -140,6 +150,8 @@ export function createDiagnosticsStore(options: DiagnosticsStoreOptions): Diagno
   const lockFile = NodePath.join(dir, DIAGNOSTICS_LOCK_FILE);
   const isAlive = options.isAlive ?? processAlive;
   const pid = options.pid ?? process.pid;
+  const openAppend =
+    options.openAppend ?? ((file: string): Promise<AppendHandle> => NodeFSP.open(file, "a", 0o600));
   const serial = createSerial();
 
   /** Take the writer lock. A lock left by a process that is gone is removed once (the Backend's owner lock already shows no other Backend runs); a live or unreadable one is WRITER_EXISTS. */
@@ -210,6 +222,9 @@ export function createDiagnosticsStore(options: DiagnosticsStoreOptions): Diagno
 
       let seq = existing.length;
       let ended = false;
+      // Set when an append failed after its first byte may have been written. A later line could be glued onto an unfinished one, so the sink writes nothing more in this process: every later
+      // append is `failed` with DIAGNOSTICS_STORE_UNUSABLE (definitely not written), and the next open judges the file as it is.
+      let unsettled = false;
       const failed = (code: string): AppendReceipt => ({ status: "failed", code });
       const sink: DiagnosticsSink = {
         // Open, append one line, sync, close: nothing is held between appends, so a removed store fails the NEXT append and is never half-seen. The size the file grew by must equal the line's
@@ -217,6 +232,7 @@ export function createDiagnosticsStore(options: DiagnosticsStoreOptions): Diagno
         append: (event) =>
           serial(async () => {
             if (ended) return failed(SINK_RELEASED);
+            if (unsettled) return failed(DIAGNOSTICS_STORE_UNUSABLE);
             try {
               options.assertHeld?.();
             } catch {
@@ -226,24 +242,41 @@ export function createDiagnosticsStore(options: DiagnosticsStoreOptions): Diagno
             const bytes = Buffer.byteLength(line);
             let before = -1;
             let after = -1;
-            let handle: NodeFSP.FileHandle | undefined;
+            // Stage 1, before any byte can be written: open, then the size to compare against. A failure here leaves the file as it was, so it is plainly `failed`.
+            let handle: AppendHandle;
             try {
-              handle = await NodeFSP.open(eventsFile, "a", 0o600);
-              before = (await handle.stat()).size;
-              await handle.appendFile(line);
-              await handle.sync();
+              handle = await openAppend(eventsFile);
             } catch {
-              await handle?.close().catch(() => undefined);
               return failed(DIAGNOSTICS_IO);
             }
             try {
-              after = (await handle?.stat())?.size ?? -1;
+              before = (await handle.stat()).size;
+            } catch {
+              await handle.close().catch(() => undefined);
+              return failed(DIAGNOSTICS_IO);
+            }
+            if (!Number.isSafeInteger(before) || before < 0) {
+              await handle.close().catch(() => undefined);
+              return failed(DIAGNOSTICS_IO);
+            }
+            // Stage 2, from the first byte on: an append that throws may have written part of the line and a sync that throws leaves a whole line unconfirmed, so neither is "not stored". The sink
+            // throws, the recorder counts the append as uncertain, and the file is left as it is (an unfinished last line makes the next open refuse the store; nothing is repaired here).
+            try {
+              await handle.appendFile(line);
+              await handle.sync();
+            } catch {
+              unsettled = true;
+              await handle.close().catch(() => undefined);
+              throw new Error("the append or its sync failed after the line may have been written");
+            }
+            try {
+              after = (await handle.stat()).size;
             } catch {
               after = -1;
             } finally {
-              await handle?.close().catch(() => undefined);
+              await handle.close().catch(() => undefined);
             }
-            if (before < 0 || after < 0 || after - before !== bytes)
+            if (after < 0 || after - before !== bytes)
               throw new Error("the stored size cannot be confirmed against the appended line");
             seq += 1;
             return { status: "stored", eventId: event.eventId, seq } satisfies AppendReceipt;

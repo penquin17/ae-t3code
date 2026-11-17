@@ -6,6 +6,7 @@
 // access rule; every observed operation gives exactly one correctly attributed event and returns its result untouched; the drain flushes and releases once. Does not show: the assembled Backend
 // service under a real T3 (the app server's carrier route), durability across a power loss, another host OS, or the Agent side of `diagnostics.append`.
 import * as NodeFS from "node:fs";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -34,6 +35,7 @@ import {
   DIAGNOSTICS_FORMAT_FILE,
   DIAGNOSTICS_LOCK_FILE,
   createDiagnosticsStore,
+  type AppendHandle,
 } from "./sink.ts";
 
 const here = NodePath.dirname(new URL(import.meta.url).pathname);
@@ -158,6 +160,49 @@ function flaky(real: DiagnosticsStore) {
   };
   return { store, mode };
 }
+
+/**
+ * The sink's `openAppend` seam over a REAL file: each stage of one append can be made to fail while the other stages touch the real events file, so what is on disk can be read back.
+ * `partial` writes the first bytes of the line and then throws; `sync` throws after the whole line is written; `open` and `stat` fail before any byte; `size` makes the confirming stat disagree.
+ */
+function seamed() {
+  const mode = {
+    current: "pass" as "pass" | "open" | "stat" | "partial" | "sync" | "size",
+  };
+  const openAppend = async (file: string): Promise<AppendHandle> => {
+    if (mode.current === "open") throw new Error("cannot open");
+    const real = await NodeFSP.open(file, "a", 0o600);
+    let stats = 0;
+    return {
+      stat: async () => {
+        stats += 1;
+        if (mode.current === "stat") throw new Error("cannot stat");
+        const { size } = await real.stat();
+        return { size: mode.current === "size" && stats > 1 ? size + 1 : size };
+      },
+      appendFile: async (data) => {
+        if (mode.current === "partial") {
+          await real.appendFile(data.slice(0, 20));
+          throw new Error("the disk filled up");
+        }
+        await real.appendFile(data);
+      },
+      sync: async () => {
+        if (mode.current === "sync") throw new Error("the sync failed");
+        await real.sync();
+      },
+      close: () => real.close(),
+    };
+  };
+  return { mode, openAppend };
+}
+
+const eventsPath = (stateRoot: string) =>
+  NodePath.join(stateRoot, DIAGNOSTICS_DIRECTORY, DIAGNOSTICS_EVENTS_FILE);
+const onDisk = (stateRoot: string) => {
+  const file = eventsPath(stateRoot);
+  return NodeFS.existsSync(file) ? NodeFS.readFileSync(file, "utf8") : "";
+};
 
 describe("the module's row and its one import site", () => {
   it("selects the Backend module with its own state, no required module and the archive stamp this build carries", () => {
@@ -380,9 +425,114 @@ describe("the filesystem sink", () => {
       code: "DIAGNOSTICS_SINK_RELEASED",
     });
   });
+
+  it("fails an append plainly when the open or the size read fails: nothing was written, so the store is as it was", async () => {
+    const stateRoot = rootOf();
+    const { mode, openAppend } = seamed();
+    const opened = await createDiagnosticsStore({ stateRoot, openAppend }).openWriter();
+    if (!opened.ok) throw new Error(opened.code);
+    for (const stage of ["open", "stat"] as const) {
+      mode.current = stage;
+      expect(await opened.sink.append(agentEvent("s1", 1) as any), stage).toEqual({
+        status: "failed",
+        code: "DIAGNOSTICS_IO",
+      });
+      expect(onDisk(stateRoot), stage).toBe("");
+    }
+    mode.current = "pass";
+    expect(await opened.sink.append(agentEvent("s1", 2) as any)).toMatchObject({
+      status: "stored",
+      seq: 1,
+    });
+  });
+
+  it("throws, never fails, when the append broke after part of the line was written: the bytes on disk are the unfinished line and the next open refuses the store", async () => {
+    const stateRoot = rootOf();
+    const { mode, openAppend } = seamed();
+    const opened = await createDiagnosticsStore({ stateRoot, openAppend }).openWriter();
+    if (!opened.ok) throw new Error(opened.code);
+    mode.current = "partial";
+    const event = agentEvent("s1", 1);
+    await expect(opened.sink.append(event as any)).rejects.toThrow(/may have been written/);
+    const line = `${JSON.stringify(event)}\n`;
+    expect(onDisk(stateRoot)).toBe(line.slice(0, 20));
+    mode.current = "pass";
+    expect(await opened.sink.append(agentEvent("s1", 2) as any)).toEqual({
+      status: "failed",
+      code: "DIAGNOSTICS_STORE_UNUSABLE",
+    });
+    expect(onDisk(stateRoot)).toBe(line.slice(0, 20));
+    await opened.sink.release();
+    expect(await createDiagnosticsStore({ stateRoot }).openWriter()).toEqual({
+      ok: false,
+      code: "DIAGNOSTICS_STORE_UNUSABLE",
+    });
+    expect(onDisk(stateRoot)).toBe(line.slice(0, 20));
+  });
+
+  it("throws, never fails, when the sync broke after the whole line was appended: the event is on disk and the position is not claimed", async () => {
+    const stateRoot = rootOf();
+    const { mode, openAppend } = seamed();
+    const opened = await createDiagnosticsStore({ stateRoot, openAppend }).openWriter();
+    if (!opened.ok) throw new Error(opened.code);
+    mode.current = "sync";
+    const event = agentEvent("s1", 1);
+    await expect(opened.sink.append(event as any)).rejects.toThrow(/may have been written/);
+    expect(onDisk(stateRoot)).toBe(`${JSON.stringify(event)}\n`);
+    const read = await createDiagnosticsStore({ stateRoot }).read();
+    expect(read).toMatchObject({ ok: true, events: [{ eventId: event.eventId }] });
+  });
+
+  it("throws when the size after the write does not match the line", async () => {
+    const stateRoot = rootOf();
+    const { mode, openAppend } = seamed();
+    const opened = await createDiagnosticsStore({ stateRoot, openAppend }).openWriter();
+    if (!opened.ok) throw new Error(opened.code);
+    mode.current = "size";
+    await expect(opened.sink.append(agentEvent("s1", 1) as any)).rejects.toThrow(
+      /cannot be confirmed/,
+    );
+    expect(onDisk(stateRoot)).toBe(`${JSON.stringify(agentEvent("s1", 1))}\n`);
+  });
 });
 
 describe("diagnostics.append", () => {
+  it("answers unavailable DIAGNOSTICS_IO for a failure before any byte, and DIAGNOSTICS_APPEND_UNCERTAIN for one from the write on, over the real file adapter; health counts each", async () => {
+    const stateRoot = rootOf();
+    const { mode, openAppend } = seamed();
+    const w = world({ stateRoot, store: createDiagnosticsStore({ stateRoot, openAppend }) });
+    await w.start();
+    const call = (n: number) =>
+      w.call(DIAGNOSTICS_APPEND_OPERATION, ctx("s1", { event: agentEvent("s1", n) }));
+    mode.current = "open";
+    expect(await call(1)).toEqual({ status: "unavailable", code: "DIAGNOSTICS_IO" });
+    mode.current = "partial";
+    expect(await call(2)).toEqual({ status: "unavailable", code: "DIAGNOSTICS_APPEND_UNCERTAIN" });
+    mode.current = "pass";
+    expect(await call(3)).toEqual({ status: "unavailable", code: "DIAGNOSTICS_STORE_UNUSABLE" });
+    expect(w.registration.health()).toMatchObject({
+      state: "unavailable",
+      agentAppends: { stored: 0, failed: 2, uncertain: 1 },
+    });
+
+    const syncRoot = rootOf();
+    const synced = seamed();
+    const s = world({
+      stateRoot: syncRoot,
+      store: createDiagnosticsStore({ stateRoot: syncRoot, openAppend: synced.openAppend }),
+    });
+    await s.start();
+    synced.mode.current = "sync";
+    expect(
+      await s.call(DIAGNOSTICS_APPEND_OPERATION, ctx("s1", { event: agentEvent("s1", 1) })),
+    ).toEqual({ status: "unavailable", code: "DIAGNOSTICS_APPEND_UNCERTAIN" });
+    expect(s.registration.health()).toMatchObject({
+      state: "unavailable",
+      reasons: ["agent-append-uncertain"],
+      agentAppends: { stored: 0, failed: 0, uncertain: 1 },
+    });
+  });
+
   it("stores an Agent event for the verified session and answers stored with its position; a retry names the same position", async () => {
     const w = world();
     await w.start();
