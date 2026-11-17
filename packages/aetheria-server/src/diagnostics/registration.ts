@@ -1,7 +1,7 @@
 // @effect-diagnostics globalDate:off globalRandom:off - The recorder's clock and event ids use host APIs outside an Effect runtime.
 /* oxlint-disable t3code/no-low-value-comments -- The header states the authority boundary of the diagnostics operations and the state this file owns. */
-// AETHERIA M12 Plan step 8 — the Backend `diagnostics-backend` registration: ONE content-free diagnostics store under `<stateRoot>/aetheria-diagnostics/` (sink.ts), ONE recorder over it, and three strict XC-6
-// operations: `diagnostics.append` (the Agent host's events about its own session), `diagnostics.list` and `diagnostics.read` (a session's own events). The caller is the carrier-verified session
+// AETHERIA M12 Plan step 8 — the Backend `diagnostics-backend` registration: ONE content-free diagnostics store under `<stateRoot>/aetheria-diagnostics/` (sink.ts), ONE recorder over it, and four strict XC-6
+// operations: `diagnostics.append` (the Agent host's events about its own session), `diagnostics.list` and `diagnostics.read` (a session's own events), and `diagnostics.health` (the module's content-free health). The caller is the carrier-verified session
 // (`context.sessionId`, `rootSessionId`), never an argument: an event naming another session, root or this host, an argument the contract does not list, a session the caller does not own and a caller whose
 // access is revoked are refused, and nothing is stored or shown.
 //
@@ -44,10 +44,12 @@ import { createDiagnosticsStore } from "./sink.ts";
 export const DIAGNOSTICS_APPEND_OPERATION = "diagnostics.append";
 export const DIAGNOSTICS_LIST_OPERATION = "diagnostics.list";
 export const DIAGNOSTICS_READ_OPERATION = "diagnostics.read";
+export const DIAGNOSTICS_HEALTH_OPERATION = "diagnostics.health";
 const DIAGNOSTICS_OPERATIONS: readonly string[] = Object.freeze([
   DIAGNOSTICS_APPEND_OPERATION,
   DIAGNOSTICS_LIST_OPERATION,
   DIAGNOSTICS_READ_OPERATION,
+  DIAGNOSTICS_HEALTH_OPERATION,
 ]);
 
 /** The session a Backend-side event with no session of its own is attributed to (the Backend's lifecycle). No Pi session has this id, so no principal owns it. */
@@ -326,7 +328,7 @@ export function createDiagnosticsBackendRegistration(
       return produced;
     };
 
-  // ---------------------------------------------------------------- the three operations
+  // ---------------------------------------------------------------- the operations (append, list, read; health is below)
 
   const identityOf = (context: Xc6OperationContext) =>
     text(context.sessionId) && text(context.rootSessionId) && ID.test(context.sessionId)
@@ -529,6 +531,18 @@ export function createDiagnosticsBackendRegistration(
 
   // ---------------------------------------------------------------- health
 
+  /** `diagnostics.health`: the content-free health snapshot (`health()`: states, reason codes, counts, the telemetry setting, the recorder state; never a path, an event or a credential) for a caller whose access is held. Arguments are exactly `{}`. */
+  const healthOperation: Xc6Operation = async (context) => {
+    const down = notRunning();
+    if (down !== undefined) return down;
+    const caller = identityOf(context);
+    if (caller === undefined) return unavailable(DIAGNOSTICS_IDENTITY_UNAVAILABLE);
+    if (strictArgs(context.args, []) === undefined) return refused(DIAGNOSTICS_ARGS_INVALID);
+    const problem = accessProblem(caller);
+    if (problem !== undefined) return problem;
+    return { status: "done", result: health() };
+  };
+
   function health(): DiagnosticsHealth {
     const snapshot = (() => {
       try {
@@ -623,6 +637,7 @@ export function createDiagnosticsBackendRegistration(
     [DIAGNOSTICS_APPEND_OPERATION]: append,
     [DIAGNOSTICS_LIST_OPERATION]: list,
     [DIAGNOSTICS_READ_OPERATION]: read,
+    [DIAGNOSTICS_HEALTH_OPERATION]: healthOperation,
   };
 
   return {

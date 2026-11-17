@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off
-// AETHERIA M12 Plan step 8 (fork part) — the Backend `diagnostics-backend` module: its row, its filesystem sink, the three strict XC-6 operations, the channel wrap and the drain.
+// AETHERIA M12 Plan step 8 (fork part) — the Backend `diagnostics-backend` module: its row, its filesystem sink, the four strict XC-6 operations (append, list, read, health), the channel wrap and the drain.
 // Boundary: real files under real temporary state roots and the real `@aetheria/diagnostics` archive (builder, vocabulary, recorder); the access rule and the operations that are observed are doubles. Shows: the store declares
 // formatVersion 1 and refuses a newer, corrupt, foreign or unfinished one without repair; one writer; an append is `stored` only when the file agrees; an append failure or an uncertain one never changes the
 // observed operation and leaves health unavailable; read and list serve only the verified caller's own sessions and refuse a forged session, root or host, an unknown field, a revoked caller and a missing
@@ -16,6 +16,7 @@ import { DIAGNOSTICS_PINNED_ARTIFACT } from "../artifact.ts";
 import type { DiagnosticsSink, DiagnosticsStore } from "./entry.ts";
 import {
   DIAGNOSTICS_APPEND_OPERATION,
+  DIAGNOSTICS_HEALTH_OPERATION,
   DIAGNOSTICS_LIST_OPERATION,
   DIAGNOSTICS_READ_OPERATION,
   createDiagnosticsBackendRegistration,
@@ -659,6 +660,144 @@ describe("diagnostics.read and diagnostics.list", () => {
       ),
     ).toBe('{"formatVersion":2}\n');
     await newer.drain();
+  });
+});
+
+describe("diagnostics.health", () => {
+  it("serves the content-free health snapshot, the same one health() gives, to a verified caller whose access is held", async () => {
+    const w = world();
+    await w.start();
+    const event = agentEvent("s1", 1, { name: "bash" });
+    await w.call(DIAGNOSTICS_APPEND_OPERATION, ctx("s1", { event }));
+    await w.settle();
+    const got = await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"));
+    expect(got.status).toBe("done");
+    expect(got.result).toEqual(w.registration.health());
+    expect(got.result).toMatchObject({
+      state: "ok",
+      reasons: [],
+      storeCode: null,
+      format: { formatVersion: 1 },
+      agentAppends: { stored: 1, failed: 0, uncertain: 0, refused: 0 },
+      telemetry: { t3: "unknown", aetheria: "none" },
+      recorder: { state: "ok" },
+    });
+    // Another session whose access is held reads the same module-wide health; the snapshot carries no path, no event, no id of an event and no session.
+    const other = await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s2"));
+    expect(other.status).toBe("done");
+    const text = JSON.stringify(got.result);
+    for (const forbidden of [w.stateRoot, event.eventId, "s1", "events.jsonl", CANARY])
+      expect(text, forbidden).not.toContain(forbidden);
+    await w.drain();
+  });
+
+  it("shows a recorder fault and the telemetry setting it was built with as unavailable, never as silence", async () => {
+    const stateRoot = rootOf();
+    const { store, mode } = flaky(createDiagnosticsStore({ stateRoot }));
+    const w = world({ stateRoot, store, telemetry: { t3: "disabled" } });
+    await w.start();
+    mode.current = "fail";
+    await w.call(DIAGNOSTICS_APPEND_OPERATION, ctx("s1", { event: agentEvent("s1", 1) }));
+    expect(await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).toMatchObject({
+      status: "done",
+      result: {
+        state: "unavailable",
+        reasons: ["agent-append-failed"],
+        agentAppends: { failed: 1 },
+        telemetry: { t3: "disabled", aetheria: "none" },
+      },
+    });
+    await w.drain();
+  });
+
+  it("refuses every argument, the operation takes exactly {}", async () => {
+    const w = world();
+    await w.start();
+    for (const bad of [{ sessionId: "s1" }, { extra: 1 }, { rootSessionId: "s2" }, { limit: 1 }])
+      expect(
+        await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1", bad)),
+        JSON.stringify(bad),
+      ).toEqual({ status: "refused", code: "DIAGNOSTICS_ARGS_INVALID" });
+    expect(
+      await w.call(DIAGNOSTICS_HEALTH_OPERATION, {
+        ...ctx("s1"),
+        args: [] as unknown as Record<string, unknown>,
+      }),
+    ).toEqual({ status: "refused", code: "DIAGNOSTICS_ARGS_INVALID" });
+    expect(
+      await w.call(DIAGNOSTICS_HEALTH_OPERATION, {
+        ...ctx("s1"),
+        args: null as unknown as Record<string, unknown>,
+      }),
+    ).toEqual({ status: "refused", code: "DIAGNOSTICS_ARGS_INVALID" });
+    await w.drain();
+  });
+
+  it("refuses a caller whose access is revoked, and answers unavailable without an access rule or an identity", async () => {
+    const revoked = new Set<string>();
+    const w = world({ revoked });
+    await w.start();
+    revoked.add("s1");
+    expect(await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).toEqual({
+      status: "refused",
+      code: "DIAGNOSTICS_ACCESS_REVOKED",
+    });
+    expect((await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s2"))).status).toBe("done");
+    expect(await w.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("../x"))).toEqual({
+      status: "unavailable",
+      code: "DIAGNOSTICS_IDENTITY_UNAVAILABLE",
+    });
+    await w.drain();
+    const bare = world({ noAccess: true });
+    await bare.start();
+    expect(await bare.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).toEqual({
+      status: "unavailable",
+      code: "DIAGNOSTICS_ACCESS_UNAVAILABLE",
+    });
+    await bare.drain();
+    const throwing = world({
+      access: {
+        canRead: () => {
+          throw new Error("the session table is gone");
+        },
+      },
+    });
+    await throwing.start();
+    expect(await throwing.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).toEqual({
+      status: "unavailable",
+      code: "DIAGNOSTICS_ACCESS_UNAVAILABLE",
+    });
+    await throwing.drain();
+  });
+
+  it("answers unavailable before start, before the store is open, after drain and when unconfigured", async () => {
+    const early = world();
+    expect(await early.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).toEqual({
+      status: "unavailable",
+      code: "DIAGNOSTICS_NOT_RUNNING",
+    });
+    await early.activate();
+    expect(early.registration.health().state).toBe("not-open");
+    expect(await early.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).toEqual({
+      status: "unavailable",
+      code: "DIAGNOSTICS_NOT_RUNNING",
+    });
+    await early.registration.open();
+    expect((await early.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).status).toBe("done");
+    await early.drain();
+    expect(await early.call(DIAGNOSTICS_HEALTH_OPERATION, ctx("s1"))).toEqual({
+      status: "unavailable",
+      code: "DIAGNOSTICS_NOT_RUNNING",
+    });
+    const unconfigured = createDiagnosticsBackendRegistration({});
+    await unconfigured.activation.start({ id: DIAGNOSTICS_BACKEND_ID });
+    expect(
+      answer(
+        await (unconfigured.operations as Record<string, Xc6Operation>)[
+          DIAGNOSTICS_HEALTH_OPERATION
+        ]!(ctx("s1")),
+      ),
+    ).toEqual({ status: "unavailable", code: "DIAGNOSTICS_NOT_RUNNING" });
   });
 });
 
