@@ -21,8 +21,14 @@ import {
   agentAwarenessBackendModuleRow,
   createAgentAwarenessBackendRegistration,
 } from "./agentAwareness.ts";
-import { INSPECT_PINNED_ARTIFACT, PINNED_ARTIFACT, PINNED_ARTIFACT_STAMPS } from "./artifact.ts";
+import {
+  DIAGNOSTICS_PINNED_ARTIFACT,
+  INSPECT_PINNED_ARTIFACT,
+  PINNED_ARTIFACT,
+  PINNED_ARTIFACT_STAMPS,
+} from "./artifact.ts";
 import { BACKEND_ENTRY_ALLOWLIST } from "./composition.ts";
+import { diagnosticsBackendModuleRow } from "./diagnostics/row.ts";
 import { inspectBackendModuleRow } from "./inspect/inspectRow.ts";
 import {
   EVIDENCE_LIBRARY_EXPORTS,
@@ -56,6 +62,7 @@ describe("the pinned archive", () => {
     // M09 A15: awareness and the pinned providers archive (checked in providers.aetheria.test.ts); M06 adds the interaction archive.
     expect(Object.keys(manifest.aetheriaArtifacts).sort()).toEqual([
       "@aetheria/awareness",
+      "@aetheria/diagnostics",
       "@aetheria/evidence",
       "@aetheria/goals",
       "@aetheria/inspect",
@@ -183,6 +190,7 @@ describe("the Backend agent-awareness module", () => {
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
       "aetheria:inspect-backend",
+      "aetheria:diagnostics-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(agentAwarenessBackendModuleRow()).toMatchObject({
@@ -275,6 +283,37 @@ describe("the inspect archive and its Backend row (M11 DV5)", () => {
     const stale = `sha256:${"1".repeat(64)}`;
     expect(inspectBackendModuleRow({ stamp: stale })).toMatchObject({
       compat: { artifacts: { "@aetheria/inspect": { stamp: stale } } },
+    });
+  });
+});
+
+describe("the diagnostics archive and its Backend row (M12 step 8)", () => {
+  const declared = manifest.aetheriaArtifacts["@aetheria/diagnostics"];
+
+  it("has the declared stamp as its independently computed SHA-256, and the Backend gives it to the validator", () => {
+    const archive = NodeFS.readFileSync(NodePath.join(pkgDir, declared.archive));
+    const computed = `sha256:${NodeCrypto.createHash("sha256").update(archive).digest("hex")}`;
+    expect(declared.stamp).toBe(computed);
+    expect(manifest.dependencies["@aetheria/diagnostics"]).toBe(
+      "file:./artifacts/aetheria-diagnostics-0.1.0.tgz",
+    );
+    expect(DIAGNOSTICS_PINNED_ARTIFACT).toEqual({
+      package: "@aetheria/diagnostics",
+      version: "0.1.0",
+      stamp: computed,
+    });
+    expect(PINNED_ARTIFACT_STAMPS["@aetheria/diagnostics"]).toBe(computed);
+  });
+
+  it("names the archive this build carries, and a stamp override replaces only that stamp", () => {
+    expect(diagnosticsBackendModuleRow()).toMatchObject({
+      compat: {
+        artifacts: { "@aetheria/diagnostics": { stamp: DIAGNOSTICS_PINNED_ARTIFACT.stamp } },
+      },
+    });
+    const stale = `sha256:${"1".repeat(64)}`;
+    expect(diagnosticsBackendModuleRow({ stamp: stale })).toMatchObject({
+      compat: { artifacts: { "@aetheria/diagnostics": { stamp: stale } } },
     });
   });
 });

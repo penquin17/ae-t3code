@@ -28,6 +28,7 @@ import { createDeliverablesBackendRegistration } from "./deliverables/deliverabl
 import { createGoalsBackendRegistration } from "./goals/registration.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createWorkflowsBackendRegistration } from "./workflows/registration.ts";
+import { createDiagnosticsBackendRegistration } from "./diagnostics/registration.ts";
 import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import {
@@ -76,6 +77,7 @@ function prepare(
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       createInspectBackendRegistration(),
+      createDiagnosticsBackendRegistration({}),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);
@@ -92,6 +94,7 @@ describe("the second pinned archive", () => {
     // M06 adds the interaction archive (its own declaration is checked in humanControl.aetheria.test.ts) and the evidence archive (step 22/23).
     expect(Object.keys(manifest.aetheriaArtifacts).sort()).toEqual([
       "@aetheria/awareness",
+      "@aetheria/diagnostics",
       "@aetheria/evidence",
       "@aetheria/goals",
       "@aetheria/inspect",
@@ -139,6 +142,7 @@ describe("the providers module's descriptor", () => {
       "aetheria:groups-backend",
       "aetheria:deliverables-backend",
       "aetheria:inspect-backend",
+      "aetheria:diagnostics-backend",
     ]);
     expect(Object.isFrozen(BACKEND_ENTRY_ALLOWLIST)).toBe(true);
     expect(PROVIDERS_BACKEND_ENTRY).toBe("aetheria:providers-backend");
@@ -173,6 +177,7 @@ describe("the providers module's descriptor", () => {
       "groups-backend",
       "deliverables-backend",
       "inspect-backend",
+      "diagnostics-backend",
     ]);
     expect(m.compositions[0]?.modules).toEqual([
       "agent-awareness-backend",
@@ -184,6 +189,7 @@ describe("the providers module's descriptor", () => {
       "groups-backend",
       "deliverables-backend",
       "inspect-backend",
+      "diagnostics-backend",
     ]);
     expect(m.compositions[0]?.id).toBe(BACKEND_COMPOSITION_ID);
   });
@@ -311,6 +317,7 @@ describe("production mode over the real archive", () => {
     const report = await backend.dispose("test");
     expect(report).toMatchObject({ ok: true, stillLive: [], failed: [], unobserved: [] });
     expect(report.order).toEqual([
+      "diagnostics-backend",
       "inspect-backend",
       "deliverables-backend",
       "groups-backend",

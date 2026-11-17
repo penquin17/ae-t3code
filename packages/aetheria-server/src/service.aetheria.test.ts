@@ -287,6 +287,26 @@ describe("the state-root owner lock (user decision F1, step 29)", () => {
     expect(NodeFS.readFileSync(lockOf(root), "utf8")).toBe("{broken");
   });
 
+  it("a refused start creates no diagnostics folder and its module never starts; a started one opens the store under its owner lock", async () => {
+    const refusedRoot = rootOf();
+    NodeFS.writeFileSync(lockOf(refusedRoot), "{broken", { mode: 0o600 });
+    const refused = over(refusedRoot);
+    expect((await refused.start()).outcome).toBe("refused");
+    await refused.dispose("refused one stops");
+    expect(NodeFS.readdirSync(refusedRoot)).toEqual([OWNER_LOCK_FILE]);
+    expect(refused.diagnosticsHealth().state).toBe("not-started");
+
+    const w = await started();
+    const dir = NodePath.join(w.stateRoot, "aetheria-diagnostics");
+    expect(NodeFS.readFileSync(NodePath.join(dir, "format.json"), "utf8")).toBe(
+      '{"formatVersion":1}\n',
+    );
+    expect(NodeFS.existsSync(NodePath.join(dir, "writer.lock"))).toBe(true);
+    expect(w.service.diagnosticsHealth().state).toBe("ok");
+    await w.service.dispose("test");
+    expect(NodeFS.existsSync(NodePath.join(dir, "writer.lock"))).toBe(false);
+  });
+
   it("a clean dispose releases the lock, so the next Backend can start over the same root", async () => {
     const first = await started();
     expect((await first.service.dispose("switch")).ok).toBe(true);

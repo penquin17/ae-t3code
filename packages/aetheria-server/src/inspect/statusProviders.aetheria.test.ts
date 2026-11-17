@@ -15,6 +15,7 @@ import { prepareAetheriaBackend } from "../aetheriaBackend.ts";
 import { backendManifest } from "../composition.ts";
 import { BACKEND_COMPOSITION_ID } from "../compositionId.ts";
 import { createDeliverablesBackendRegistration } from "../deliverables/deliverables.ts";
+import { createDiagnosticsBackendRegistration } from "../diagnostics/registration.ts";
 import { createGoalsBackendRegistration } from "../goals/registration.ts";
 import { createGroupsBackendRegistration } from "../groups/groups.ts";
 import { createWorkflowsBackendRegistration } from "../workflows/registration.ts";
@@ -49,7 +50,7 @@ function world(over: Partial<InspectBackendOptions> = {}) {
     },
     ...over,
   });
-  // The other six production registrations, unconfigured exactly as `prepareAetheriaBackend` defaults them.
+  // The other production registrations (diagnostics last), unconfigured exactly as `prepareAetheriaBackend` defaults them.
   const prepared = prepareAetheriaBackend({
     registrations: [
       createAgentAwarenessBackendRegistration(),
@@ -61,6 +62,7 @@ function world(over: Partial<InspectBackendOptions> = {}) {
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       registration,
+      createDiagnosticsBackendRegistration({}),
     ],
   });
   if (prepared.outcome !== "prepared") throw new Error("the Backend did not prepare");

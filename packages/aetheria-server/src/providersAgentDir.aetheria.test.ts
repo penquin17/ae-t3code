@@ -23,6 +23,7 @@ import { createDeliverablesBackendRegistration } from "./deliverables/deliverabl
 import { createGoalsBackendRegistration } from "./goals/registration.ts";
 import { createGroupsBackendRegistration } from "./groups/groups.ts";
 import { createWorkflowsBackendRegistration } from "./workflows/registration.ts";
+import { createDiagnosticsBackendRegistration } from "./diagnostics/registration.ts";
 import { createInspectBackendRegistration } from "./inspect/inspectRegistration.ts";
 import { createOrchestrationBackendRegistration } from "./orchestration.ts";
 import { createProvidersBackendRegistration, type ProvidersMode } from "./providers.ts";
@@ -79,6 +80,7 @@ function prepare(providers: ProvidersMode) {
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       createInspectBackendRegistration(),
+      createDiagnosticsBackendRegistration({}),
     ],
   });
   if (result.outcome !== "prepared") throw new Error(`refused: ${JSON.stringify(result.faults)}`);

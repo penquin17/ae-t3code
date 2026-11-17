@@ -1541,6 +1541,9 @@ importers:
       '@aetheria/awareness':
         specifier: file:./artifacts/aetheria-awareness-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz
+      '@aetheria/diagnostics':
+        specifier: file:./artifacts/aetheria-diagnostics-0.1.0.tgz
+        version: file:packages/aetheria-server/artifacts/aetheria-diagnostics-0.1.0.tgz
       '@aetheria/evidence':
         specifier: file:./artifacts/aetheria-evidence-0.1.0.tgz
         version: file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz
@@ -2599,6 +2602,11 @@ packages:
 
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz':
     resolution: {integrity: sha512-8mJaHtHtNxlwu23tw/WRhAbs63axAwYvdwrx6rTRqWhLT/bEXlAVG5SSjm9lKoYSAqDqYarXg30ZASMw+fKpjA==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=22.19.0'}
+
+  '@aetheria/diagnostics@file:packages/aetheria-server/artifacts/aetheria-diagnostics-0.1.0.tgz':
+    resolution: {integrity: sha512-VDDlf/qx+P5LY0a+GPbIfep4qzZcV6ccXUhgI3nu/0Pewg/TIi+koSiPr2usdIkaxnDL6WW6DCEx8WWv7HyyrA==, tarball: file:packages/aetheria-server/artifacts/aetheria-diagnostics-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
@@ -12647,6 +12655,8 @@ snapshots:
       typescript: '@tsc-rs/typescript@0.8.0'
 
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz': {}
+
+  '@aetheria/diagnostics@file:packages/aetheria-server/artifacts/aetheria-diagnostics-0.1.0.tgz': {}
 
   '@aetheria/evidence@file:packages/aetheria-server/artifacts/aetheria-evidence-0.1.0.tgz': {}
 

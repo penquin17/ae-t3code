@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "package": "@aetheria/diagnostics",
+  "version": "0.1.0",
+  "archive": "aetheria-diagnostics-0.1.0.tgz",
+  "sha256": "8a248087a2e0b9d5a8bd516ec7191c75617e0f00e2f9d7cc0214a20d5b88d07c",
+  "stamp": "sha256:8a248087a2e0b9d5a8bd516ec7191c75617e0f00e2f9d7cc0214a20d5b88d07c"
+}

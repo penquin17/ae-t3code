@@ -2,7 +2,7 @@
 //
 // The outer build wrote each archive and its stamp (tools/lib/foundations/artifact.mjs); the manifest's `aetheriaArtifacts` entries are the
 // declaration the graphs check compares with the archive bytes. The Backend publishes these stamps as facts of its composition, so a
-// module whose row expects another stamp is refused as stale. Eight archives are accepted (M09 A15, M06, M05, M07, M11): awareness, providers, interaction, evidence, orchestration, goals, workflows and inspect.
+// module whose row expects another stamp is refused as stale. Nine archives are accepted (M09 A15, M06, M05, M07, M11, M12): awareness, providers, interaction, evidence, orchestration, goals, workflows, inspect and diagnostics.
 import manifest from "../package.json" with { type: "json" };
 
 const declaredArtifacts = manifest.aetheriaArtifacts as Record<
@@ -42,6 +42,9 @@ export const WORKFLOWS_PINNED_ARTIFACT = pinned("@aetheria/workflows");
 /** The inspect archive (M11 DV5): the read-only inspection core — the closed protocol, strict codecs, the projector and the provider registry. The `inspect-backend` row names it. */
 export const INSPECT_PINNED_ARTIFACT = pinned("@aetheria/inspect");
 
+/** The diagnostics archive (M12 step 8): the content-free event, the vocabulary, the recorder and the sink port. The `diagnostics-backend` row names it. */
+export const DIAGNOSTICS_PINNED_ARTIFACT = pinned("@aetheria/diagnostics");
+
 /** Every stamp the Backend gives the shared validator, by archive id. */
 export const PINNED_ARTIFACT_STAMPS: Readonly<Record<string, string>> = Object.freeze({
   [PINNED_ARTIFACT.package]: PINNED_ARTIFACT.stamp,
@@ -52,4 +55,5 @@ export const PINNED_ARTIFACT_STAMPS: Readonly<Record<string, string>> = Object.f
   [GOALS_PINNED_ARTIFACT.package]: GOALS_PINNED_ARTIFACT.stamp,
   [WORKFLOWS_PINNED_ARTIFACT.package]: WORKFLOWS_PINNED_ARTIFACT.stamp,
   [INSPECT_PINNED_ARTIFACT.package]: INSPECT_PINNED_ARTIFACT.stamp,
+  [DIAGNOSTICS_PINNED_ARTIFACT.package]: DIAGNOSTICS_PINNED_ARTIFACT.stamp,
 });

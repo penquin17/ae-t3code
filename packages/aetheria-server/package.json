@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@aetheria/awareness": "file:./artifacts/aetheria-awareness-0.1.0.tgz",
+    "@aetheria/diagnostics": "file:./artifacts/aetheria-diagnostics-0.1.0.tgz",
     "@aetheria/evidence": "file:./artifacts/aetheria-evidence-0.1.0.tgz",
     "@aetheria/goals": "file:./artifacts/aetheria-goals-0.1.0.tgz",
     "@aetheria/inspect": "file:./artifacts/aetheria-inspect-0.1.0.tgz",
@@ -32,6 +33,11 @@
       "archive": "artifacts/aetheria-awareness-0.1.0.tgz",
       "version": "0.1.0",
       "stamp": "sha256:ccd53cb6bc54e5767496d82dc18bf95cf82283560ea99a80d7c051884081610c"
+    },
+    "@aetheria/diagnostics": {
+      "archive": "artifacts/aetheria-diagnostics-0.1.0.tgz",
+      "version": "0.1.0",
+      "stamp": "sha256:8a248087a2e0b9d5a8bd516ec7191c75617e0f00e2f9d7cc0214a20d5b88d07c"
     },
     "@aetheria/evidence": {
       "archive": "artifacts/aetheria-evidence-0.1.0.tgz",

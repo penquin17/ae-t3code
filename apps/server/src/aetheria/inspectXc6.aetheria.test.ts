@@ -13,6 +13,7 @@ import {
   backendManifest,
   createAgentAwarenessBackendRegistration,
   createDeliverablesBackendRegistration,
+  createDiagnosticsBackendRegistration,
   createGoalsBackendRegistration,
   createGroupsBackendRegistration,
   createHumanControlBackendRegistration,
@@ -87,6 +88,7 @@ function world(options: { enabled?: boolean; access?: InspectAccessPort } = {}) 
       createGroupsBackendRegistration({}),
       createDeliverablesBackendRegistration({}),
       registration,
+      createDiagnosticsBackendRegistration({}),
     ],
   });
   if (prepared.outcome !== "prepared") throw new Error("the Backend did not prepare");

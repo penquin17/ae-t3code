@@ -22,6 +22,10 @@ import {
   createDeliverablesBackendRegistration,
   type DeliverablesService,
 } from "./deliverables/deliverables.ts";
+import {
+  createDiagnosticsBackendRegistration,
+  type DiagnosticsHealth,
+} from "./diagnostics/registration.ts";
 import { createGroupsBackendRegistration, type GroupsService } from "./groups/groups.ts";
 import { createGoalsRuntime, type GoalRoundState } from "./goals/factory.ts";
 import type { GoalService } from "./goals/goalsEntry.ts";
@@ -250,6 +254,11 @@ export interface AetheriaBackendService {
    * handlers and the download route; undefined before start and after drain. A caller that finds it undefined answers unavailable.
    */
   deliverables(): DeliverablesService | undefined;
+  /**
+   * The diagnostics module's health (M12 step 8): the recorder's state and counters, the store's code when it cannot be used, the Agent appends and the channel observation counts, and the effective
+   * telemetry setting. Always answers (`not-started`, `unconfigured`, `unavailable` and `released` are states, never an error); it never says `ok` because nothing arrived.
+   */
+  diagnosticsHealth(): DiagnosticsHealth;
   /**
    * The ONE goal service (M07), shared by the client handlers and the model's goal tools of later steps; undefined before start, after drain, and when managed work is not configured. A caller that
    * finds it undefined answers unavailable, never "no goal".
@@ -532,6 +541,19 @@ export function createAetheriaBackendService(
     openSnapshot: (sessionId, snapshotId) =>
       providersRegistration.openSnapshot(sessionId, snapshotId),
   });
+  // M12 step 8: the ONE content-free diagnostics store and recorder under the state root, behind `diagnostics.append`, `.list` and `.read`. Read and list ask this Backend's own access rule (a session and
+  // its root still bound to a thread) and serve only the caller's own session; writes are guarded by the same owner lock as the goal journal. The channel and the Backend are observed by wrapping them below.
+  const diagnosticsRegistration = createDiagnosticsBackendRegistration({
+    stateRoot: options.stateRoot,
+    access: {
+      canRead: (caller) => sessionAccess.canOperate(caller),
+    },
+    assertHeld: () => {
+      if (!holdingOwnerLock) throw new Error("the Backend owner lock is not held");
+    },
+    digest: () => backendNow().status().digest.value,
+    ...(options.now === undefined ? {} : { clock: options.now }),
+  });
   // M06 step 13: T3 attaching a bound thread to a provider session after the replay is a resume; the interaction service ends the waits no segment
   // holds and retries undelivered late answers for that Pi session. The horizon is the one the board uses; the signal never fires before it is known.
   let replayHorizon: number | undefined;
@@ -593,12 +615,18 @@ export function createAetheriaBackendService(
         clients: options.inspect?.clients,
         showValues: inspectShowValues,
       }),
+      // M12: last in the composition, so it drains first and its writer is released before the owner lock.
+      diagnosticsRegistration,
     ],
     ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
   });
   if (prepared.outcome === "refused") return { outcome: "refused", faults: prepared.faults };
   const { backend } = prepared;
   backendNow = () => backend;
+  // The accepted fallback for channel and Backend observation: wrap the operations channel (every operation but the diagnostics module's own is recorded from the carrier context and returned
+  // untouched) and listen to the Backend's lifecycle. Neither can change an answer; a recorder fault shows in `diagnosticsHealth()`.
+  const observedOperations = diagnosticsRegistration.observe(backend.operations());
+  diagnosticsRegistration.observeBackend(backend);
 
   const retention = createSnapshotRetention({
     index,
@@ -640,6 +668,8 @@ export function createAetheriaBackendService(
         }
         index.boot();
         const result = await backend.start();
+        // M12: the diagnostics store is opened only now — the start succeeded and this process holds the owner lock — so a refused or failed start writes nothing into the state root.
+        if (result.outcome === "started") await diagnosticsRegistration.open();
         // Sessions this Backend cannot show to be live are closed before any operation is answered for them (a failed board is retried at first use).
         if (result.outcome === "started") await board.reconcileAtStart();
         // A start that did not complete releases the lock only when nothing can still be writing: refused before any module was called, or rolled back with a clean disposal report. A
@@ -676,7 +706,7 @@ export function createAetheriaBackendService(
         });
       return resolver.resolve(caller, claimedSessionId);
     },
-    operations: () => backend.operations(),
+    operations: () => observedOperations,
     async ingest(stored) {
       try {
         const event = stored?.event;
@@ -739,6 +769,7 @@ export function createAetheriaBackendService(
     orchestration: () => orchestrationRegistration.service(),
     groups: () => groupsRegistration.groups(),
     deliverables: () => deliverablesRegistration.deliverables(),
+    diagnosticsHealth: () => diagnosticsRegistration.health(),
     goals: () => goalsRegistration.service(),
     workflows: () => workflowsRegistration.runs(),
     goalRoundOfThread: (threadId) => {

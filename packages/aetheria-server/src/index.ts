@@ -168,6 +168,14 @@ export {
   type GroupsRecord,
   type GroupsService,
 } from "./groups/groups.ts";
+// M12 step 8: the diagnostics module's registration, for hosts and tests that assemble the Backend's registrations themselves.
+export {
+  createDiagnosticsBackendRegistration,
+  type DiagnosticsAccess,
+  type DiagnosticsBackendRegistration,
+  type DiagnosticsHealth,
+  type DiagnosticsRegistrationOptions,
+} from "./diagnostics/registration.ts";
 // M11 steps 8–10: the inspection module's registration, its caller check and the read-only metadata port the app server supplies.
 export { createInspectAccess, type InspectAccessPort } from "./inspect/inspectAccess.ts";
 // M11 step 11: the client-region query port (one request to the viewing page per query) the app server binds to the inspection module.

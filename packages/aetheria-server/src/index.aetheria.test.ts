@@ -47,6 +47,7 @@ describe("the public entry", () => {
       "createClientQueries",
       "createDeliverablesBackendRegistration",
       "createDeliverablesStore",
+      "createDiagnosticsBackendRegistration",
       "createGoalRootResolver",
       "createGoalsBackendRegistration",
       "createGoalsRuntime",
