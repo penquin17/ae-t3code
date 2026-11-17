@@ -2601,7 +2601,7 @@ packages:
         optional: true
 
   '@aetheria/awareness@file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz':
-    resolution: {integrity: sha512-8mJaHtHtNxlwu23tw/WRhAbs63axAwYvdwrx6rTRqWhLT/bEXlAVG5SSjm9lKoYSAqDqYarXg30ZASMw+fKpjA==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
+    resolution: {integrity: sha512-74p+YiBycW0knsyeX3hG7JsxPzwhK6YOcaeMc76Jth9OiSYchixAW2T8CISM4DDp+hauvs1RvIV8OFu58UBxsw==, tarball: file:packages/aetheria-server/artifacts/aetheria-awareness-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 
