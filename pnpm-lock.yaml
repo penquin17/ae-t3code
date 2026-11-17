@@ -2606,7 +2606,7 @@ packages:
     engines: {node: '>=22.19.0'}
 
   '@aetheria/diagnostics@file:packages/aetheria-server/artifacts/aetheria-diagnostics-0.1.0.tgz':
-    resolution: {integrity: sha512-VDDlf/qx+P5LY0a+GPbIfep4qzZcV6ccXUhgI3nu/0Pewg/TIi+koSiPr2usdIkaxnDL6WW6DCEx8WWv7HyyrA==, tarball: file:packages/aetheria-server/artifacts/aetheria-diagnostics-0.1.0.tgz}
+    resolution: {integrity: sha512-HdraJSqdnahwvE41PPhFjEMe7JvDALMYkZE6vx8S/6Bauke2iD3hQic4mJpgY0umH0h4Ynp8l+ND3wnJ2stYjA==, tarball: file:packages/aetheria-server/artifacts/aetheria-diagnostics-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=22.19.0'}
 

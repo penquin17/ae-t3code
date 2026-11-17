@@ -37,7 +37,7 @@
     "@aetheria/diagnostics": {
       "archive": "artifacts/aetheria-diagnostics-0.1.0.tgz",
       "version": "0.1.0",
-      "stamp": "sha256:8a248087a2e0b9d5a8bd516ec7191c75617e0f00e2f9d7cc0214a20d5b88d07c"
+      "stamp": "sha256:527510a5590dd28e136f3a91c3fc6dd90b8040816eb776c1ca14cf89c6bbbf60"
     },
     "@aetheria/evidence": {
       "archive": "artifacts/aetheria-evidence-0.1.0.tgz",
