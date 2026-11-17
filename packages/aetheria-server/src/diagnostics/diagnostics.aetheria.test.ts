@@ -167,7 +167,7 @@ function flaky(real: DiagnosticsStore) {
  */
 function seamed() {
   const mode = {
-    current: "pass" as "pass" | "open" | "stat" | "partial" | "sync" | "size",
+    current: "pass" as "pass" | "open" | "stat" | "partial" | "sync" | "size" | "confirm",
   };
   const openAppend = async (file: string): Promise<AppendHandle> => {
     if (mode.current === "open") throw new Error("cannot open");
@@ -177,6 +177,7 @@ function seamed() {
       stat: async () => {
         stats += 1;
         if (mode.current === "stat") throw new Error("cannot stat");
+        if (mode.current === "confirm" && stats > 1) throw new Error("cannot stat after the write");
         const { size } = await real.stat();
         return { size: mode.current === "size" && stats > 1 ? size + 1 : size };
       },
@@ -483,16 +484,26 @@ describe("the filesystem sink", () => {
     expect(read).toMatchObject({ ok: true, events: [{ eventId: event.eventId }] });
   });
 
-  it("throws when the size after the write does not match the line", async () => {
-    const stateRoot = rootOf();
-    const { mode, openAppend } = seamed();
-    const opened = await createDiagnosticsStore({ stateRoot, openAppend }).openWriter();
-    if (!opened.ok) throw new Error(opened.code);
-    mode.current = "size";
-    await expect(opened.sink.append(agentEvent("s1", 1) as any)).rejects.toThrow(
-      /cannot be confirmed/,
-    );
-    expect(onDisk(stateRoot)).toBe(`${JSON.stringify(agentEvent("s1", 1))}\n`);
+  it("throws when the size after the write does not match the line or cannot be read, and then writes nothing more: no later receipt can name a stale position", async () => {
+    for (const stage of ["size", "confirm"] as const) {
+      const stateRoot = rootOf();
+      const { mode, openAppend } = seamed();
+      const opened = await createDiagnosticsStore({ stateRoot, openAppend }).openWriter();
+      if (!opened.ok) throw new Error(opened.code);
+      mode.current = stage;
+      await expect(opened.sink.append(agentEvent("s1", 1) as any), stage).rejects.toThrow(
+        /cannot be confirmed/,
+      );
+      const first = `${JSON.stringify(agentEvent("s1", 1))}\n`;
+      expect(onDisk(stateRoot), stage).toBe(first);
+      mode.current = "pass";
+      expect(await opened.sink.append(agentEvent("s1", 2) as any), stage).toEqual({
+        status: "failed",
+        code: "DIAGNOSTICS_STORE_UNUSABLE",
+      });
+      expect(onDisk(stateRoot), stage).toBe(first);
+      await opened.sink.release();
+    }
   });
 });
 

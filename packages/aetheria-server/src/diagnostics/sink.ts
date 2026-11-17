@@ -276,8 +276,11 @@ export function createDiagnosticsStore(options: DiagnosticsStoreOptions): Diagno
             } finally {
               await handle.close().catch(() => undefined);
             }
-            if (after < 0 || after - before !== bytes)
+            if (after < 0 || after - before !== bytes) {
+              // The line may be stored, so the position this process holds is no longer known: the same no-further-writes rule as a failed append or sync.
+              unsettled = true;
               throw new Error("the stored size cannot be confirmed against the appended line");
+            }
             seq += 1;
             return { status: "stored", eventId: event.eventId, seq } satisfies AppendReceipt;
           }),
