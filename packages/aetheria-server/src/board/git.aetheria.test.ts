@@ -36,6 +36,11 @@ describe("changedFiles with a scripted process", () => {
     const outside = [
       failure({ code: 128, stderr: "fatal: not a git repository" }),
       failure({ code: "ENOENT" }),
+      // A workspace folder that no longer exists (deleted before the drain).
+      failure({
+        code: 128,
+        stderr: "fatal: cannot change to '/w': No such file or directory\n",
+      }),
     ];
     for (const error of outside)
       expect(await createGit({ run: reject(error) }).changedFiles("/w")).toEqual({
@@ -79,6 +84,8 @@ describe("changedFiles with a real repository", () => {
     expect(await git.topLevel(repo)).toBe(repo);
     const plain = NodePath.join(root, "plain");
     NodeFS.mkdirSync(plain);
+    expect(await git.changedFiles(plain)).toEqual({ status: "outside-git" });
+    NodeFS.rmSync(plain, { recursive: true });
     expect(await git.changedFiles(plain)).toEqual({ status: "outside-git" });
   });
 });

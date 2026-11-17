@@ -53,10 +53,13 @@ export function createGit(options: { run?: GitRun; timeoutMs?: number } = {}): G
       try {
         root = await top(workspace);
       } catch (error) {
+        // A workspace folder deleted before the drain is no repository either: `git -C` says "cannot change to '<dir>': No such file or directory", and the session's edits keep their markers.
         const notRepository =
           field(error, "code") === "ENOENT" ||
           (field(error, "code") === 128 &&
-            /not a git repository/i.test(String(field(error, "stderr") ?? "")));
+            /not a git repository|cannot change to .*No such file or directory/i.test(
+              String(field(error, "stderr") ?? ""),
+            ));
         return notRepository
           ? { status: "outside-git" }
           : {

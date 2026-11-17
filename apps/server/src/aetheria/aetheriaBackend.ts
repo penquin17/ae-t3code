@@ -288,6 +288,12 @@ const makeBackendLayer = (
                     order: report.order,
                     failed: report.failed.length,
                     stillLive: report.stillLive.length,
+                    // The counts above keep their keys (the runner's drain check reads them); these name the parts, as module names and the resource names a drain reported, never a failure's message.
+                    failedModules: report.failed.map((entry) => entry.module),
+                    unobservedModules: report.unobserved.map((entry) => entry.module),
+                    stillLiveParts: report.stillLive.map(
+                      (entry) => `${entry.module}: ${entry.item}`,
+                    ),
                   }),
             ),
             Effect.ignoreCause,

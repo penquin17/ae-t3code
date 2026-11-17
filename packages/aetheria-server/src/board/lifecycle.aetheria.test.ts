@@ -301,6 +301,20 @@ describe("close on stop", () => {
     expect(Object.keys(board.markers)).toEqual([changed]);
   });
 
+  it("a workspace folder deleted before the drain does not leave the drain unclean: the open session closes and keeps its edit marker", async () => {
+    const ws = workspaceDir();
+    const w = await live([B], { git: createGit() }, ws);
+    const edit = NodePath.join(ws, "edited.txt");
+    await recordEdit(w, B, edit, "e1");
+    NodeFS.rmSync(ws, { recursive: true, force: true });
+    const report = await w.service.dispose("workspace-gone");
+    expect(report.stillLive).toEqual([]);
+    expect(report.ok).toBe(true);
+    const board = stored(w.file);
+    expect(board.sessions[SESSION_B]).toMatchObject({ state: "closed", edits: [edit] });
+    expect(board.markers[edit]).toMatchObject({ sessionId: SESSION_B });
+  });
+
   it("a crash closes the session with the reason crashed", async () => {
     const w = await live([B]);
     const edit = NodePath.join(w.ws, "e.txt");
