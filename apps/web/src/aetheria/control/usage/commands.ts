@@ -21,7 +21,10 @@ export function useT3UsageTransport(): UsageTransport {
   return {
     read: async ({ environmentId, rootThreadId }): Promise<Reply<unknown>> => {
       const sent = aetheriaSendResult(
-        await read({ environmentId: environmentId as EnvironmentId, input: { rootThreadId } }),
+        await read({
+          environmentId: environmentId as EnvironmentId,
+          input: rootThreadId === undefined ? { accountOnly: true } : { rootThreadId },
+        }),
       );
       if (sent.tag === "refused")
         return { ok: false, code: "USAGE_NOT_AUTHORIZED", detail: sent.message };

@@ -137,7 +137,7 @@ async function mount(ui: ReactNode = <Shell />) {
   return screen;
 }
 
-it("shows current, stale and Fable quotas without rendering unavailable windows", async () => {
+it("groups weekly quotas and shows each window's reset on provider hover", async () => {
   using _clock = vi.spyOn(minuteTick, "getSnapshot").mockReturnValue("2026-11-19T10:00");
   const reading = READINGS[0]!;
   const supplied: UsageTransport = {
@@ -149,7 +149,7 @@ it("shows current, stale and Fable quotas without rendering unavailable windows"
             ...reading,
             windows: [
               { id: "five-hour", usedPercent: 0 },
-              { id: "seven-day", usedPercent: "unknown" },
+              { id: "seven-day", usedPercent: 0, resetsAt: "2026-11-19T11:00:00Z" },
               { id: "provider:weekly-fable", usedPercent: 93, resetsAt: "2026-11-19T12:15:00Z" },
             ],
           },
@@ -159,23 +159,27 @@ it("shows current, stale and Fable quotas without rendering unavailable windows"
             status: "stale",
             ageSeconds: 600,
             failure: "timeout",
-            windows: [{ id: "five-hour", usedPercent: 42 }],
+            windows: [{ id: "seven-day", usedPercent: 42, resetsAt: "2026-11-19T13:00:00Z" }],
           },
         ],
       }),
   };
   await using screen = await render(
     <UsageTransportContext value={supplied}>
-      <ThreadDetailsSubscriptionUsage environmentId={ENV} threadId="root-1" />
+      <ThreadDetailsSubscriptionUsage environmentId={ENV} />
     </UsageTransportContext>,
   );
-  await expect.element(screen.getByLabelText("Claude · 5h: 0% used")).toBeVisible();
-  await expect.element(screen.getByLabelText("Codex · 5h: 42% used (stale)")).toBeVisible();
-  await expect.element(screen.getByLabelText("Claude Fable · 7d: 93% used")).toBeVisible();
-  expect(screen.getByLabelText(/^Claude · 7d:/).query()).toBeNull();
-  expect(screen.getByLabelText(/^Codex · 7d:/).query()).toBeNull();
-  await userEvent.hover(screen.getByLabelText("Claude Fable · 7d: 93% used"));
-  await expect.element(page.getByText(/Resets in 2h 15m · \d/)).toBeVisible();
+  const claude = screen.getByRole("group", { name: "Claude usage" });
+  const codex = screen.getByRole("group", { name: "Codex usage" });
+  await expect.element(claude.getByText("Fable 7d")).toBeVisible();
+  expect(claude.getByText("5h").query()).toBeNull();
+  await userEvent.hover(claude);
+  await expect.element(page.getByText("Resets in 1h 0m")).toBeVisible();
+  await expect.element(page.getByText("Resets in 2h 15m")).toBeVisible();
+  await expect.element(page.getByText("Fable 7d:", { exact: true })).toBeVisible();
+  await userEvent.hover(codex);
+  await expect.element(page.getByText("Resets in 3h 0m")).toBeVisible();
+  await expect.element(page.getByText("Fable 7d:", { exact: true })).not.toBeInTheDocument();
 });
 
 describe("with no connection", () => {

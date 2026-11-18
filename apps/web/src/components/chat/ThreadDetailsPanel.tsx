@@ -215,10 +215,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               ) : null}
 
               {visible.subscriptionUsage && props.showSubscriptionUsage ? (
-                <ThreadDetailsSubscriptionUsage
-                  environmentId={props.environmentId}
-                  threadId={props.threadId}
-                />
+                <ThreadDetailsSubscriptionUsage environmentId={props.environmentId} />
               ) : null}
 
               {props.gitCwd && (show.branch || show.git) ? (

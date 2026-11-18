@@ -1,5 +1,5 @@
 // AETHERIA M10 step 18 (D14, D20, XC-11) — `aetheria.usage.read`: the providers' usage readings and the route availability of one root's children, read from M09 through the Backend's running service.
-// The payload names a root thread only. Wherever a value can be missing the reply keeps the answers apart: read, could not be read (with a reason) and, for a route, none or unknown. A reading or state that
+// The payload names a root thread or explicitly requests only account quota. Wherever a value can be missing the reply keeps the answers apart: read, could not be read (with a reason) and, for a route, none or unknown. A reading or state that
 // failed is `unavailable`, never a window at 0 percent; the main thread's own route is `not-supplied` (the Backend does not supply it), never guessed. Imports nothing from `@t3tools/contracts` (see rpc.ts).
 import * as Schema from "effect/Schema";
 
@@ -21,7 +21,10 @@ const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
 const Text = Schema.String.check(Schema.isMinLength(1));
 const PositiveInt = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1));
 
-export const ClientUsageReadPayload = Schema.Struct({ rootThreadId: Id });
+export const ClientUsageReadPayload = Schema.Union([
+  Schema.Struct({ rootThreadId: Id }),
+  Schema.Struct({ accountOnly: Schema.Literal(true) }),
+]);
 export type ClientUsageReadPayload = typeof ClientUsageReadPayload.Type;
 
 /** The providers' readings (each `ok`, `stale` or `unavailable` as M09 supplies it), or why none could be read. An empty list is a known empty, not a failure. */
@@ -88,6 +91,10 @@ export const ClientUsageReadResult = Schema.Union([
       main: MainRoute,
       children: ChildrenSection,
     }),
+  }),
+  Schema.Struct({
+    ok: Schema.Literal(true),
+    value: Schema.Struct({ accountOnly: Schema.Literal(true), usage: UsageSection }),
   }),
   Failure,
 ]);

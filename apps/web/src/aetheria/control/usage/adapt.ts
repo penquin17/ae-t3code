@@ -13,7 +13,7 @@ interface Notes {
 }
 
 export function usageFromContract(value: unknown): unknown {
-  if (!isRecord(value) || !isRecord(value.usage) || !isRecord(value.children)) return value;
+  if (!isRecord(value) || !isRecord(value.usage)) return value;
   const { usage, children } = value;
   const notes: Notes = {};
   const readings: unknown[] = [];
@@ -23,6 +23,8 @@ export function usageFromContract(value: unknown): unknown {
   else return value;
 
   const routes: unknown[] = [];
+  if (value.accountOnly === true) return { readings, routes, notes };
+  if (!isRecord(children)) return value;
   if (children.status === "listed" && Array.isArray(children.rows)) {
     const lines: string[] = [];
     for (const row of children.rows as unknown[]) {

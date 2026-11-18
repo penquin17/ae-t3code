@@ -26,6 +26,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { standingOf } from "./humanControlRpc.ts";
 import { READ_SCOPE, guardedRoot, type GateCodes, type GateFailure } from "./rootGate.ts";
 
 type Service = Pick<
@@ -207,13 +208,27 @@ const readChildren = async (service: Service, rootThreadId: string): Promise<unk
   };
 };
 
+const readAccountUsage = Effect.fn("AetheriaUsage.readAccountUsage")(function* (
+  backend: Backend,
+  actor: ClientActor,
+): Effect.fn.Return<ClientUsageReadResult> {
+  const standing = yield* standingOf(actor);
+  if (standing === "revoked") return { ok: false, code: CODES.deviceRevoked };
+  if (standing === "unreadable") return { ok: false, code: CODES.unavailable };
+  if (!actor.grantedScopes.includes(READ_SCOPE)) return { ok: false, code: CODES.notAuthorized };
+  if (Option.isNone(backend)) return { ok: false, code: CODES.unavailable };
+  const usage = yield* Effect.promise(() => readUsage(backend.value));
+  return decodeReply({ ok: true, value: { accountOnly: true, usage } });
+});
+
 /** A root's usage: the providers' readings and its children's routes and availability, each section stating what it could not read. */
 export const usageRead = (
   backend: Backend,
   actor: ClientActor,
   payload: ClientUsageReadPayload,
-): Effect.Effect<ClientUsageReadResult> =>
-  guardedRoot<Service, UsageCode, ClientUsageReadResult>(
+): Effect.Effect<ClientUsageReadResult> => {
+  if ("accountOnly" in payload) return readAccountUsage(backend, actor);
+  return guardedRoot<Service, UsageCode, ClientUsageReadResult>(
     backend,
     actor,
     READ_SCOPE,
@@ -247,3 +262,4 @@ export const usageRead = (
       detail: "the usage call failed; nothing was read",
     }),
   ) as Effect.Effect<ClientUsageReadResult>;
+};

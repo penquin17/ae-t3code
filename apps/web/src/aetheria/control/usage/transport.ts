@@ -9,7 +9,7 @@ import { useT3UsageTransport } from "./commands";
 
 export interface UsageTarget {
   readonly environmentId: string;
-  readonly rootThreadId: string;
+  readonly rootThreadId?: string;
 }
 export interface UsageTransport {
   readonly read: (request: UsageTarget) => Promise<Reply<unknown>>;

@@ -3912,7 +3912,7 @@ export default function ChatView(props: ChatViewProps) {
                   onUpdateProjectScript={updateProjectScriptStable}
                   onDeleteProjectScript={deleteProjectScriptStable}
                   showSubscriptionUsage={
-                    isServerThread && !isSubagentThread && activeProviderThread?.driver === "pi"
+                    !isSubagentThread && (activeProviderThread?.driver ?? selectedProvider) === "pi"
                   }
                   usage={{
                     providerInstanceId: activeProviderInstanceId,

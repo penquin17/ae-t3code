@@ -199,6 +199,37 @@ const valueOf = (reply: unknown): Value => {
   return (reply as { value: Value }).value;
 };
 
+describe("account usage without a thread", () => {
+  it.effect("reads only account windows for an authorized live device", () =>
+    withDevice(
+      Effect.gen(function* () {
+        const fake = fakeBackend();
+        const reply = yield* usageRead(fake.backend, yield* actorOf(), { accountOnly: true });
+        expect(decodeResult(reply)).toEqual({
+          ok: true,
+          value: {
+            accountOnly: true,
+            usage: { status: "read", readings: [OK_READING, FAILED_READING] },
+          },
+        });
+        expect(fake.calls.map((call) => call.method)).toEqual(["usage"]);
+      }),
+    ),
+  );
+
+  it.effect("does not read account windows for a revoked device", () =>
+    withDevice(
+      Effect.gen(function* () {
+        const fake = fakeBackend();
+        const reply = yield* usageRead(fake.backend, yield* actorOf(), { accountOnly: true });
+        expect(reply).toMatchObject({ ok: false, code: "USAGE_DEVICE_REVOKED" });
+        expect(fake.calls).toEqual([]);
+      }),
+      () => Effect.succeedNone,
+    ),
+  );
+});
+
 describe("a root's usage is the providers' readings, the children's routes and each route's availability", () => {
   it.effect(
     "reads once in the contract's own shape, and asks M09 about each known child route in Pi's vocabulary with purpose display",

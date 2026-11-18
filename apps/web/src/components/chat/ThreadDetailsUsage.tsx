@@ -85,28 +85,26 @@ export function ThreadDetailsUsage({
   );
 }
 
+const WEEKLY_QUOTA = { id: "seven-day", label: "7d" };
 const SUBSCRIPTIONS = [
-  { id: "anthropic", label: "Claude" },
-  { id: "openai-codex", label: "Codex" },
-] as const;
-const QUOTA_WINDOWS = [
-  { id: "five-hour", label: "5h" },
-  { id: "seven-day", label: "7d" },
-  { id: "provider:weekly-fable", label: "Fable · 7d" },
+  {
+    id: "anthropic",
+    label: "Claude",
+    windows: [WEEKLY_QUOTA, { id: "provider:weekly-fable", label: "Fable 7d" }],
+  },
+  { id: "openai-codex", label: "Codex", windows: [WEEKLY_QUOTA] },
 ] as const;
 
 export function ThreadDetailsSubscriptionUsage({
   environmentId,
-  threadId,
 }: {
   readonly environmentId: string;
-  readonly threadId: string;
 }) {
   const transport = useUsageTransport();
   const { view, refreshing, refresh } = useSuppliedRead({
     environmentId,
-    resetKey: `${environmentId}\u0000${threadId}`,
-    read: () => transport.read({ environmentId, rootThreadId: threadId }),
+    resetKey: environmentId,
+    read: () => transport.read({ environmentId }),
     parse: parseUsage,
   });
   const nowMinute = useNowMinute();
@@ -129,47 +127,86 @@ export function ThreadDetailsSubscriptionUsage({
             view.tag === "read"
               ? view.value.readings.find((entry) => entry.provider === provider.id)
               : undefined;
-          const note = reading ? readingView(reading).note : null;
-          return QUOTA_WINDOWS.map(({ id, label }) => {
-            const window = reading?.windows.find((entry) => entry.id === id);
-            const resetsAt = window?.resetsAt;
-            const resetTime = resetsAt ? Date.parse(resetsAt) : Number.NaN;
-            const expired = resetTime <= now;
-            const used =
-              !expired && typeof window?.usedPercent === "number" ? window.usedPercent : null;
-            if (used === null || (id === "provider:weekly-fable" && provider.id !== "anthropic"))
-              return null;
-            const stale = reading?.status === "stale";
-            const value = `${used}% used${stale ? " · stale" : ""}`;
-            const rowLabel = `${provider.label}${id === "provider:weekly-fable" ? " " : " · "}${label}`;
-            return (
-              <UsageRow
-                key={`${provider.id}:${id}`}
-                label={rowLabel}
-                fill={Math.min(100, used)}
-                tone={used >= 90 ? "error" : used >= 80 ? "warning" : null}
-                value={value}
-                ariaValue={stale ? `${used}% used (stale)` : value}
-                tooltip={
-                  <>
-                    <span>
-                      {rowLabel}: {value}
-                    </span>
-                    {reading?.label === "fixture" ? <span>Fixture data</span> : null}
-                    {resetsAt && resetTime > now ? (
-                      <span className="text-muted-foreground">
-                        Resets in {formatDuration(resetTime - now)} ·{" "}
-                        {formatUpcomingTimestamp(resetsAt, timestampFormat, now)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">Reset time not reported</span>
-                    )}
-                    {note ? <span>{note}</span> : null}
-                  </>
-                }
-              />
-            );
+          if (!reading) return null;
+          const windows = provider.windows.flatMap(({ id, label }) => {
+            const window = reading.windows.find((entry) => entry.id === id);
+            if (typeof window?.usedPercent !== "number") return [];
+            const resetTime = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+            if (resetTime <= now) return [];
+            return [{ id, label, used: window.usedPercent, resetsAt: window.resetsAt, resetTime }];
           });
+          if (windows.length === 0) return null;
+          const note = readingView(reading).note;
+          return (
+            <Tooltip key={provider.id}>
+              <TooltipTrigger
+                render={
+                  <div
+                    role="group"
+                    aria-label={`${provider.label} usage`}
+                    tabIndex={0}
+                    className="col-span-3 grid cursor-default grid-cols-subgrid items-center gap-y-1.5 rounded-lg px-2.5 py-1.5 outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-foreground/5"
+                  />
+                }
+              >
+                <div className="col-span-3 flex items-center justify-between gap-2 font-medium">
+                  <span>{provider.label}</span>
+                  {reading.status === "stale" ? (
+                    <span className="text-muted-foreground">Stale</span>
+                  ) : null}
+                </div>
+                {windows.map(({ id, label, used }) => (
+                  <div key={id} className="col-span-3 grid grid-cols-subgrid items-center">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span
+                      aria-hidden
+                      className="h-[3px] overflow-hidden rounded-full bg-muted-foreground/30"
+                    >
+                      <span
+                        className={cn(
+                          "block h-full rounded-full",
+                          used >= 90 ? "bg-error" : used >= 80 ? "bg-warning" : "bg-foreground/80",
+                        )}
+                        style={{ width: `${Math.min(100, used)}%` }}
+                      />
+                    </span>
+                    <span className="text-end tabular-nums">
+                      {used}%<span className="sr-only"> used</span>
+                    </span>
+                  </div>
+                ))}
+              </TooltipTrigger>
+              <TooltipPopup side="left" sideOffset={16}>
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium">{provider.label} usage</span>
+                  <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-muted-foreground">
+                    {windows.map(({ id, label, resetsAt, resetTime }) => (
+                      <div key={id} className="col-span-3 grid grid-cols-subgrid">
+                        <span>{label}:</span>
+                        {resetsAt && resetTime > now ? (
+                          <>
+                            <span className="tabular-nums">
+                              Resets in {formatDuration(resetTime - now)}
+                            </span>
+                            <span className="tabular-nums">
+                              <span aria-hidden>· </span>
+                              <time dateTime={resetsAt}>
+                                {formatUpcomingTimestamp(resetsAt, timestampFormat, now)}
+                              </time>
+                            </span>
+                          </>
+                        ) : (
+                          <span className="col-span-2">Reset time not reported</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {reading.label === "fixture" ? <span>Fixture data</span> : null}
+                  {note ? <span>{note}</span> : null}
+                </div>
+              </TooltipPopup>
+            </Tooltip>
+          );
         })}
       </div>
     </ThreadDetailsSection>
