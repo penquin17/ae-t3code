@@ -137,6 +137,7 @@ const EnvServerConfig = Config.all({
   port: Config.Port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
   host: Config.String("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
   t3Home: Config.String("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  // AETHERIA-IP:IP-70 the working folder from the environment, for built-stack launches whose process cwd is the build
   cwd: Config.String("T3CODE_CWD").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devUrl: Config.URL("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devAllowedOrigins: Config.String("T3CODE_DEV_ALLOWED_ORIGINS").pipe(
@@ -340,6 +341,7 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
       resolveOptionPrecedence(explicitBaseDir, Option.fromUndefinedOr(bootstrap?.t3Home)),
     ),
   );
+  // AETHERIA-IP:IP-70 the --cwd flag, then T3CODE_CWD, then the process cwd
   const rawCwd = Option.getOrElse(
     resolveOptionPrecedence(normalizedFlags.cwd, Option.fromUndefinedOr(env.cwd)),
     () => process.cwd(),

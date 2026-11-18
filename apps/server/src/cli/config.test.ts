@@ -380,6 +380,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
       const baseDir = join(NodeOS.tmpdir(), "t3-cli-config-env-wins");
+      // AETHERIA-IP:IP-71 T3CODE_CWD is honoured, not the process cwd
       const cwd = join(baseDir, "Aetheria");
       const fd = yield* openBootstrapFd(
         makeDesktopBootstrap({
