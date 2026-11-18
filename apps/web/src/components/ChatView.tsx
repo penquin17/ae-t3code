@@ -1,3 +1,5 @@
+// AETHERIA-IP:IP-69 the Backend's open questions, plan reviews and authorizations, answerable in the chat
+import { ChatInteractions } from "../aetheria/control/ChatInteractions";
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -3541,6 +3543,14 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ChildThreadApprovals threadRef={activeThreadRef} />
+                    {/* AETHERIA-IP:IP-69 open Backend requests above the composer, read from the chat's own quiet projection */}
+                    {activeThreadRef ? (
+                      <ChatInteractions
+                        environmentId={activeThreadRef.environmentId}
+                        threadId={activeThreadRef.threadId}
+                        projection={serverProjection}
+                      />
+                    ) : null}
                     <ComposerSurface.Shell contextRow={showComposerContextStrip}>
                       <ComposerSurface.Host
                         inert={queuedRunEdit.isSaving}
