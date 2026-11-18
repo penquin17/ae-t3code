@@ -134,7 +134,7 @@ export function SuggestionItem(props: {
   const { a, b } = props.suggestion;
   return (
     <li data-suggestion="" className="flex items-center gap-1 pr-1">
-      <span className="min-w-0 flex-1 px-2 py-1 text-xs text-sidebar-muted-foreground">
+      <span className="min-w-0 flex-1 py-1 pr-2 pl-7 text-xs text-sidebar-muted-foreground">
         <span className="block truncate">
           Suggested: {a.title} + {b.title}
         </span>

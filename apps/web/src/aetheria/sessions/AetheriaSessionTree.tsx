@@ -33,6 +33,9 @@ const SECTION_TITLES: Record<TreeSection["id"], string> = {
   dormant: "Dormant",
 };
 
+// Thread rows have no fold chevron, so their list inset also covers the chevron and its gap.
+const THREAD_LIST_INSET = "ml-8";
+
 function browserStorage(): Storage | null {
   try {
     return typeof localStorage === "undefined" ? null : localStorage;
@@ -300,7 +303,9 @@ function GroupBlock(props: {
           ) : null
         }
       />
-      {open ? <ul className="ml-4">{props.group.members.map(props.renderRow)}</ul> : null}
+      {open ? (
+        <ul className={THREAD_LIST_INSET}>{props.group.members.map(props.renderRow)}</ul>
+      ) : null}
     </li>
   );
 }
@@ -403,7 +408,7 @@ export function AetheriaSessionTree(props: {
               }
             />
             {projectOpen ? (
-              <div className="ml-2">
+              <div className="ml-3">
                 {project.pinned.length > 0 ? (
                   <PinnedBlock
                     project={project}
@@ -424,7 +429,9 @@ export function AetheriaSessionTree(props: {
                         open={open}
                         onToggle={() => toggle(key, open)}
                       />
-                      {open ? <ul>{section.rows.map(renderRow)}</ul> : null}
+                      {open ? (
+                        <ul className={THREAD_LIST_INSET}>{section.rows.map(renderRow)}</ul>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -472,7 +479,9 @@ function PinnedBlock(props: {
         open={open}
         onToggle={() => props.toggle(key, open)}
       />
-      {open ? <ul>{props.project.pinned.map(props.renderRow)}</ul> : null}
+      {open ? (
+        <ul className={THREAD_LIST_INSET}>{props.project.pinned.map(props.renderRow)}</ul>
+      ) : null}
     </div>
   );
 }
@@ -514,7 +523,7 @@ function GroupsBlock(props: {
         onToggle={() => props.toggle(key, open)}
       />
       {open ? (
-        <ul>
+        <ul className="ml-3">
           {section.suggestions.map((suggestion) => (
             <SuggestionItem
               key={`${suggestion.a.id}|${suggestion.b.id}`}
