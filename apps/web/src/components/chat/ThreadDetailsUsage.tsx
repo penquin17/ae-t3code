@@ -14,11 +14,15 @@ import {
 } from "@t3tools/shared/usageLimits";
 import type { ReactNode } from "react";
 
+import { useSuppliedRead } from "../../aetheria/control/jobs/useSuppliedRead";
+import { parseUsage, readingView } from "../../aetheria/control/usage/model";
+import { useUsageTransport } from "../../aetheria/control/usage/transport";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { type ContextWindowSnapshot, formatContextWindowTokens } from "../../lib/contextWindow";
 import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
+import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./ContextWindowMeter.logic";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
@@ -76,6 +80,97 @@ export function ThreadDetailsUsage({
         ) : (
           limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
         )}
+      </div>
+    </ThreadDetailsSection>
+  );
+}
+
+const SUBSCRIPTIONS = [
+  { id: "anthropic", label: "Claude" },
+  { id: "openai-codex", label: "Codex" },
+] as const;
+const QUOTA_WINDOWS = [
+  { id: "five-hour", label: "5h" },
+  { id: "seven-day", label: "7d" },
+  { id: "provider:weekly-fable", label: "Fable · 7d" },
+] as const;
+
+export function ThreadDetailsSubscriptionUsage({
+  environmentId,
+  threadId,
+}: {
+  readonly environmentId: string;
+  readonly threadId: string;
+}) {
+  const transport = useUsageTransport();
+  const { view, refreshing, refresh } = useSuppliedRead({
+    environmentId,
+    resetKey: `${environmentId}\u0000${threadId}`,
+    read: () => transport.read({ environmentId, rootThreadId: threadId }),
+    parse: parseUsage,
+  });
+  const nowMinute = useNowMinute();
+  const now = Date.parse(`${nowMinute}:00Z`);
+  const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
+  return (
+    <ThreadDetailsSection
+      headingId="thread-details-subscription-heading"
+      title="Subscription usage"
+      separated={false}
+      actions={
+        <Button size="xs" variant="ghost" disabled={refreshing} onClick={() => void refresh()}>
+          Refresh<span className="sr-only"> subscription usage</span>
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-[minmax(0,max-content)_minmax(1rem,1fr)_auto] gap-x-3 text-xs">
+        {SUBSCRIPTIONS.map((provider) => {
+          const reading =
+            view.tag === "read"
+              ? view.value.readings.find((entry) => entry.provider === provider.id)
+              : undefined;
+          const note = reading ? readingView(reading).note : null;
+          return QUOTA_WINDOWS.map(({ id, label }) => {
+            const window = reading?.windows.find((entry) => entry.id === id);
+            const resetsAt = window?.resetsAt;
+            const resetTime = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+            const expired = resetTime <= now;
+            const used =
+              !expired && typeof window?.usedPercent === "number" ? window.usedPercent : null;
+            if (used === null || (id === "provider:weekly-fable" && provider.id !== "anthropic"))
+              return null;
+            const stale = reading?.status === "stale";
+            const value = `${used}% used${stale ? " · stale" : ""}`;
+            const rowLabel = `${provider.label}${id === "provider:weekly-fable" ? " " : " · "}${label}`;
+            return (
+              <UsageRow
+                key={`${provider.id}:${id}`}
+                label={rowLabel}
+                fill={Math.min(100, used)}
+                tone={used >= 90 ? "error" : used >= 80 ? "warning" : null}
+                value={value}
+                ariaValue={stale ? `${used}% used (stale)` : value}
+                tooltip={
+                  <>
+                    <span>
+                      {rowLabel}: {value}
+                    </span>
+                    {reading?.label === "fixture" ? <span>Fixture data</span> : null}
+                    {resetsAt && resetTime > now ? (
+                      <span className="text-muted-foreground">
+                        Resets in {formatDuration(resetTime - now)} ·{" "}
+                        {formatUpcomingTimestamp(resetsAt, timestampFormat, now)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Reset time not reported</span>
+                    )}
+                    {note ? <span>{note}</span> : null}
+                  </>
+                }
+              />
+            );
+          });
+        })}
       </div>
     </ThreadDetailsSection>
   );

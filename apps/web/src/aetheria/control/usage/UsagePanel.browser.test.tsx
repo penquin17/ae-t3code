@@ -1,9 +1,10 @@
 // The route availability and usage panel in a real browser with the real stylesheet (M10 Plan step 18, D14, D20, XC-11). Boundary: the public `UsagePanel` over a fake `UsageTransport` supplied
 // through its context (no T3 socket, no real Backend), so these show the panel's behaviour and words, not the wire. The images are evidence for a person to view; the assertions prove the words,
 // the call counts, the layout and the names.
+import { minuteTick } from "@t3tools/client-runtime/clock";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
-import { page } from "vite-plus/test/browser";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import "~/index.css";
 import "@t3tools/aetheria-design/aetheria.css";
@@ -12,6 +13,7 @@ import { act, render } from "../../../../test/render";
 import type { Reply } from "../jobs/reply";
 import { over, ratio, resolveColor, surfaceBehind } from "../../measure";
 import { UsagePanel } from "./UsagePanel";
+import { ThreadDetailsSubscriptionUsage } from "../../../components/chat/ThreadDetailsUsage";
 import { UNAVAILABLE_USAGE, UsageTransportContext, type UsageTransport } from "./transport";
 
 type Mode = "light" | "dark";
@@ -134,6 +136,47 @@ async function mount(ui: ReactNode = <Shell />) {
   await expect.poll(() => text()).toContain("Researcher");
   return screen;
 }
+
+it("shows current, stale and Fable quotas without rendering unavailable windows", async () => {
+  using _clock = vi.spyOn(minuteTick, "getSnapshot").mockReturnValue("2026-11-19T10:00");
+  const reading = READINGS[0]!;
+  const supplied: UsageTransport = {
+    read: () =>
+      ok({
+        routes: [],
+        readings: [
+          {
+            ...reading,
+            windows: [
+              { id: "five-hour", usedPercent: 0 },
+              { id: "seven-day", usedPercent: "unknown" },
+              { id: "provider:weekly-fable", usedPercent: 93, resetsAt: "2026-11-19T12:15:00Z" },
+            ],
+          },
+          {
+            ...reading,
+            provider: "openai-codex",
+            status: "stale",
+            ageSeconds: 600,
+            failure: "timeout",
+            windows: [{ id: "five-hour", usedPercent: 42 }],
+          },
+        ],
+      }),
+  };
+  await using screen = await render(
+    <UsageTransportContext value={supplied}>
+      <ThreadDetailsSubscriptionUsage environmentId={ENV} threadId="root-1" />
+    </UsageTransportContext>,
+  );
+  await expect.element(screen.getByLabelText("Claude · 5h: 0% used")).toBeVisible();
+  await expect.element(screen.getByLabelText("Codex · 5h: 42% used (stale)")).toBeVisible();
+  await expect.element(screen.getByLabelText("Claude Fable · 7d: 93% used")).toBeVisible();
+  expect(screen.getByLabelText(/^Claude · 7d:/).query()).toBeNull();
+  expect(screen.getByLabelText(/^Codex · 7d:/).query()).toBeNull();
+  await userEvent.hover(screen.getByLabelText("Claude Fable · 7d: 93% used"));
+  await expect.element(page.getByText(/Resets in 2h 15m · \d/)).toBeVisible();
+});
 
 describe("with no connection", () => {
   it("says usage is not connected; no route is out or available and no usage is shown", async () => {
