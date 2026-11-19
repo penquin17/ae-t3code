@@ -1992,15 +1992,42 @@ code {
   --list-gutter: max(1.25rem, 11ch);
 }
 
-.composer-tiptap ul {
-  padding-inline-start: max(1.25rem, 2ch);
+.composer-tiptap ul:not([data-type="taskList"]) {
+  --composer-bullet: "•";
+  --composer-bullet-gutter: max(1.25rem, 2ch, 1em);
+  padding-inline-start: var(--composer-bullet-gutter);
 }
 
-:is(.chat-markdown, .composer-tiptap) ul ul {
+.composer-tiptap ul ul:not([data-type="taskList"]) {
+  --composer-bullet: "◦";
+}
+
+.composer-tiptap ul ul ul:not([data-type="taskList"]) {
+  --composer-bullet: "▪";
+}
+
+.composer-tiptap ul:not([data-type="taskList"]) > li {
+  position: relative;
+  list-style-type: none;
+}
+
+/* Keep the bullet within the editor's scroll box without moving wrapped text. */
+.composer-tiptap ul:not([data-type="taskList"]) > li::before {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: calc(-1 * var(--composer-bullet-gutter));
+  inline-size: var(--composer-bullet-gutter);
+  content: var(--composer-bullet) / "";
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.chat-markdown ul ul {
   list-style-type: circle;
 }
 
-:is(.chat-markdown, .composer-tiptap) ul ul ul {
+.chat-markdown ul ul ul {
   list-style-type: square;
 }
 
