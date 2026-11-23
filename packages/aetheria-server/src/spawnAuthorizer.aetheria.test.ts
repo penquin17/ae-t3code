@@ -84,18 +84,18 @@ describe("a main session spawns a role or a generic child", () => {
       ok: true,
       parent: { sessionId: ROOT, rootSessionId: ROOT, parentChain: [] },
       child: { authoritySource: "role", role: "reviewer", roleOrigin: "checkout" },
-      // Step 24 (M05 decision): the child starts on the caller's own route (route 1, as before) and the role's own routes follow, so a role with another route can fall back to it.
+      // The child starts on its role's own route (route 1); the caller's route follows as the last fallback, so a child still starts when every role route is out.
       // Stored the way T3 names a selection (the instance pi and a Pi slug), like the caller's own route (native round 2).
       routes: [
-        ...FACTS.routes,
         { provider: "pi", model: "openai-codex/gpt-6.1-sol", effort: "high" },
+        ...FACTS.routes,
       ],
       runtimeMode: "full-access",
       interactionMode: "default",
     });
   });
 
-  it("does not repeat a route the caller already runs on, and gives a spawn-explicit child only the caller's route", async () => {
+  it("does not repeat a role route the caller already runs on (the role's effort wins), and gives a spawn-explicit child only the caller's route", async () => {
     const same = build({
       facts: {
         ...FACTS,
@@ -110,7 +110,7 @@ describe("a main session spawns a role or a generic child", () => {
     });
     expect(role).toMatchObject({
       ok: true,
-      routes: [{ provider: "pi", model: "openai-codex/gpt-6.1-sol", effort: "medium" }],
+      routes: [{ provider: "pi", model: "openai-codex/gpt-6.1-sol", effort: "high" }],
     });
     const { stateRoot, authorizer } = build();
     writeEnvelope(stateRoot, mainRecord(ROOT));

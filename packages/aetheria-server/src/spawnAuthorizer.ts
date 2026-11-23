@@ -33,25 +33,26 @@ export interface SpawnRoute {
 /** The most routes a child keeps (M05's record bound). */
 const MAX_CHILD_ROUTES = 16;
 /**
- * The routes of a role child: the caller's own route first (the child runs on the caller's model, as ever), then each of the role's routes that is not the same provider and model, in the role's
- * order. A role with no other route leaves the caller's single route, which never falls back.
+ * The routes of a role child: the role's own routes in its order (route 1 is where the child starts, so a reader runs on the reader's model, not its caller's), then the caller's
+ * route as the last fallback, so a child still starts when every role route is out. A route already listed is not repeated, so the role's effort wins over the caller's.
  */
 function withRoleRoutes(
   own: readonly SpawnRoute[],
   role: readonly SpawnRoute[] | undefined,
 ): readonly SpawnRoute[] {
-  const out: SpawnRoute[] = [...own];
-  for (const route of role ?? []) {
-    if (out.length >= MAX_CHILD_ROUTES) break;
-    // The role writes a Pi provider and a bare model; every stored route is in T3's form (the instance pi and a slug), like the caller's own, so T3 can create the thread from any of them.
-    const stored = t3RouteOfPi(route);
-    if (out.some((r) => r.provider === stored.provider && r.model === stored.model)) continue;
+  const out: SpawnRoute[] = [];
+  const add = (route: SpawnRoute) => {
+    if (out.length >= MAX_CHILD_ROUTES) return;
+    if (out.some((r) => r.provider === route.provider && r.model === route.model)) return;
     out.push({
-      provider: stored.provider,
-      model: stored.model,
-      ...(stored.effort === undefined ? {} : { effort: stored.effort }),
+      provider: route.provider,
+      model: route.model,
+      ...(route.effort === undefined ? {} : { effort: route.effort }),
     });
-  }
+  };
+  // The role writes a Pi provider and a bare model; every stored route is in T3's form (the instance pi and a slug), like the caller's own, so T3 can create the thread from any of them.
+  for (const route of role ?? []) add(t3RouteOfPi(route));
+  for (const route of own) add(route);
   return out;
 }
 /** What the Backend knows about how a child launches. It comes from T3's record of the caller's thread, not from the model. */
@@ -266,7 +267,7 @@ export function createSpawnAuthorizer(options: SpawnAuthorizerOptions): SpawnAut
         roleOrigin: definition.origin,
         roleDigest: definition.digest,
       },
-      // The child starts on the caller's own route (route 1, as ever); the role's own routes follow, so the child can fall back to one (M05 step 24, D12).
+      // The child starts on its role's first route, falls back down the role's list, and lastly to the caller's route (D12).
       routes: withRoleRoutes(facts.routes, definition.routes),
       runtimeMode: facts.runtimeMode,
       interactionMode: facts.interactionMode,
