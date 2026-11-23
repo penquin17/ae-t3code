@@ -1,94 +1,10 @@
-// AETHERIA M05 Plan step 6 (D13, D17, C2 resume) — the Backend's small seams around the children service: the production XC-10 `childStatus` and the resume barrier.
+// AETHERIA M05 Plan step 6 (D17, C2 resume) — the Backend's small seam around the children service: the resume barrier. (The production XC-10 `childStatus` adapter for the board's
+// `assign` was removed with `assign` in v1p2 step 4; `children.status` itself stays, in the children service.)
 //
-// Boundary. Both are pure logic over injected ports: the child-status adapter over a scripted thread index and a scripted service, the barrier over scripted
-// promises. They show the translation (XC-10 session ids to the service's, never equated to thread ids), the unavailable-not-guess rule and the ordering
-// (M06's reconcile then redeliver completes before the barrier opens). They do not show the real service or M06's real handling.
+// Boundary. Pure logic over scripted promises. It shows the ordering (M06's reconcile then redeliver completes before the barrier opens). It does not show the real service or M06's real handling.
 import { describe, expect, it } from "vite-plus/test";
 
-import { createChildStatus } from "./orchestrationChildStatus.ts";
-import type { OrchestrationService } from "./orchestration.ts";
 import { createResumeBarrier } from "./orchestrationResume.ts";
-
-const service = (reply: unknown): OrchestrationService & { calls: unknown[][] } => {
-  const calls: unknown[][] = [];
-  return {
-    calls,
-    start: async () => ({ ok: true }),
-    handle: (async (...args: unknown[]) => {
-      calls.push(args);
-      if (reply instanceof Error) throw reply;
-      return reply;
-    }) as OrchestrationService["handle"],
-    drain: async () => ({ stopped: [], stillLive: [] }),
-    direct: () => undefined,
-  };
-};
-const bound = new Set(["root-1", "child-1"]);
-const index = {
-  bindingOfSession: (id: string) => (bound.has(id) ? { threadId: `t-${id}` } : undefined),
-};
-
-describe("production childStatus (XC-10)", () => {
-  it("asks the service as the root session main, with the child's session id, and returns owned and state", async () => {
-    const fake = service({ ok: true, value: { owned: true, state: "idle" } });
-    const status = createChildStatus({ index, service: () => fake });
-    expect(await status("root-1", "child-1")).toEqual({ owned: true, state: "idle" });
-    expect(fake.calls).toEqual([
-      [
-        "children.status",
-        { sessionId: "root-1", rootSessionId: "root-1", kind: "main" },
-        { childSessionId: "child-1" },
-      ],
-    ]);
-  });
-
-  it("returns a closed child as closed and an unowned one as not owned", async () => {
-    expect(
-      await createChildStatus({
-        index,
-        service: () => service({ ok: true, value: { owned: true, state: "closed" } }),
-      })("root-1", "child-1"),
-    ).toEqual({ owned: true, state: "closed" });
-    expect(
-      await createChildStatus({
-        index,
-        service: () => service({ ok: true, value: { owned: false, state: "unknown" } }),
-      })("root-1", "child-1"),
-    ).toEqual({ owned: false, state: "unknown" });
-  });
-
-  it("is unavailable (a throw the board turns into UNAVAILABLE) when ownership or the service is unknown", async () => {
-    const cases: Array<[string, () => OrchestrationService | undefined, string, string]> = [
-      ["no service", () => undefined, "root-1", "child-1"],
-      [
-        "unknown ownership",
-        () => service({ ok: true, value: { owned: "unknown", state: "idle" } }),
-        "root-1",
-        "child-1",
-      ],
-      [
-        "service failure",
-        () => service({ ok: false, code: "ORCHESTRATION_UNAVAILABLE" }),
-        "root-1",
-        "child-1",
-      ],
-      ["lost reply", () => service(new Error("lost")), "root-1", "child-1"],
-      ["malformed reply", () => service({ ok: true, value: { owned: true } }), "root-1", "child-1"],
-      [
-        "unbound root",
-        () => service({ ok: true, value: { owned: true, state: "idle" } }),
-        "ghost",
-        "child-1",
-      ],
-    ];
-    for (const [label, make, root, child] of cases) {
-      await expect(
-        createChildStatus({ index, service: make })(root, child),
-        label,
-      ).rejects.toThrow();
-    }
-  });
-});
 
 describe("resume barrier (C2: M05 deliveries wait for M06's resume handling)", () => {
   const deferred = () => {

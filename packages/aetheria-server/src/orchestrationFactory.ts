@@ -331,6 +331,8 @@ export function createOrchestrationFactory(
         inboxDedupEstablished: true,
         clock: { now: deps.now },
         authorizer: deps.spawnAuthorizer,
+        // The board's scope operations, in process: a scoped spawn records its scope before the child is activated; a confirmed close releases it.
+        ...(deps.scopes === undefined ? {} : { scopes: deps.scopes }),
         availability: deps.availability ?? null,
         newAttemptId,
         newSessionId,
@@ -522,6 +524,7 @@ export function createOrchestrationFactory(
           lineage: lineageWithRouteGuard(store),
           store,
           identity,
+          ...(deps.scopes === undefined ? {} : { scopes: deps.scopes }),
         });
         // `m05-stray-main`: once per boot, M03's own narrow API retires the stray `main` identity of a rolled-back fork (only on M05's tombstone and T3's closed, idle fork thread); then the stale
         // `orchestration/main` records go. A thing boot cannot prove stays and is named in the report, never retried blindly.

@@ -1,13 +1,12 @@
-// AETHERIA — the XC-6 operations of the `awareness` tool and its summary: `awareness.action` (the nine DSH actions) and `awareness.summary`.
+// AETHERIA — the XC-6 operations of the `awareness` tool and its summary: `awareness.action` (the eight actions; v1p2 step 4 removed `assign`: a
+// subagent's write rights are its scope, recorded at its start by the in-process `scope.record`, see boardOperations.ts) and `awareness.summary`.
 // The caller is the bearer's identity; a key naming a session is an invalid argument, not a caller. Expected rejections are `done` values
-// `{ ok: false, code, message }`; unavailable replies name what is missing (the board, liveness, XC-10 for assign, XC-8 for resolve).
+// `{ ok: false, code, message }`; unavailable replies name what is missing (the board, liveness, XC-8 for resolve).
 import * as Schema from "effect/Schema";
 
 export const AWARENESS_ACTION_OPERATION = "awareness.action";
 export const AWARENESS_SUMMARY_OPERATION = "awareness.summary";
 
-/** Production `assign` needs the owned-child status of XC-10 (M05); unknown child status is unavailable too. */
-export const XC10_CHILD_STATUS_UNAVAILABLE_CODE = "XC10_CHILD_STATUS_UNAVAILABLE";
 /** Production `resolve` needs M06's durable verified-human evidence (XC-8). */
 export const XC8_DECISION_EVIDENCE_UNAVAILABLE_CODE = "XC8_DECISION_EVIDENCE_UNAVAILABLE";
 
@@ -15,7 +14,6 @@ export const AWARENESS_ACTIONS = [
   "status",
   "goal",
   "claim",
-  "assign",
   "release",
   "interface",
   "withdraw",
@@ -32,7 +30,6 @@ export const AwarenessActionArgs = Schema.Struct({
   kind: Text,
   idea: Text,
   claimId: Text,
-  agentId: Text,
   name: Text,
   signature: Text,
   notes: Text,

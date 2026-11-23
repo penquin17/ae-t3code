@@ -73,6 +73,90 @@ const jobRow = {
 
 const outputOk = { jobId: "job_1", state: "running", streams: [stream], waitElapsed: false };
 
+/** A scoped spawn with one `writeScope` replaced; one refusal per malformed scope, for both arms of the union. */
+const scoped = (writeScope: unknown, arm: "role" | "allow" = "role") => ({
+  ...(arm === "role" ? { role: "executor" } : { allow: ["read", "edit"] }),
+  prompt: "Build it.",
+  mode: "one-shot",
+  writeScope,
+});
+const scopeRefusals = (): OrchestrationVector[] => [
+  { name: "an empty write scope (omit it for unscoped)", value: scoped([]) },
+  { name: "a write scope that is not a list", value: scoped({ path: "src", kind: "folder" }) },
+  { name: "a null write scope", value: scoped(null) },
+  { name: "a scope entry without a kind", value: scoped([{ path: "src" }]) },
+  { name: "a scope entry without a path", value: scoped([{ kind: "folder" }]) },
+  { name: "a scope kind outside file and folder", value: scoped([{ path: "src", kind: "dir" }]) },
+  { name: "an empty scope path", value: scoped([{ path: "", kind: "folder" }]) },
+  { name: "a blank scope path", value: scoped([{ path: "   ", kind: "folder" }]) },
+  { name: "a scope path that is not a string", value: scoped([{ path: 3, kind: "file" }]) },
+  { name: "an absolute scope path", value: scoped([{ path: "/etc/passwd", kind: "file" }]) },
+  {
+    name: "a backslash-rooted scope path",
+    value: scoped([{ path: "\\\\host\\share", kind: "folder" }]),
+  },
+  { name: "a drive-letter scope path", value: scoped([{ path: "C:/work", kind: "folder" }]) },
+  { name: "a scope path that is a parent step", value: scoped([{ path: "..", kind: "folder" }]) },
+  {
+    name: "a scope path that starts with a parent step",
+    value: scoped([{ path: "../other", kind: "folder" }]),
+  },
+  {
+    name: "a scope path that climbs out in the middle",
+    value: scoped([{ path: "a/../../b", kind: "file" }]),
+  },
+  {
+    name: "a scope path that ends with a parent step",
+    value: scoped([{ path: "a/..", kind: "folder" }]),
+  },
+  {
+    name: "a scope path with a backslash parent step",
+    value: scoped([{ path: "a\\..\\b", kind: "file" }]),
+  },
+  {
+    name: "a scope path with a control character",
+    value: scoped([{ path: "a\nb", kind: "file" }]),
+  },
+  {
+    name: "a duplicate scope path",
+    value: scoped([
+      { path: "src", kind: "folder" },
+      { path: "src", kind: "folder" },
+    ]),
+  },
+  {
+    name: "one path as both a file and a folder",
+    value: scoped([
+      { path: "src", kind: "folder" },
+      { path: "src", kind: "file" },
+    ]),
+  },
+  {
+    name: "an owner inside a scope entry",
+    value: scoped([{ path: "src", kind: "folder", owner: "sess_x" }]),
+  },
+  {
+    name: "a session inside a scope entry",
+    value: scoped([{ path: "src", kind: "folder", sessionId: "sess_x" }]),
+  },
+  {
+    name: "a malformed scope on the generic arm",
+    value: scoped([{ path: "../x", kind: "file" }], "allow"),
+  },
+  {
+    name: "a scope on a fork-style prefix call",
+    value: { ...scoped([{ path: "src", kind: "folder" }]), prefix: "all" },
+  },
+  {
+    name: "a caller beside a valid scope",
+    value: { ...scoped([{ path: "src", kind: "folder" }]), sessionId: "sess_x" },
+  },
+  {
+    name: "a root beside a valid scope on the generic arm",
+    value: { ...scoped([{ path: "src", kind: "folder" }], "allow"), rootSessionId: "sess_r" },
+  },
+];
+
 export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSet>> = {
   childrenSpawnArgs: {
     accept: [
@@ -97,6 +181,47 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
       {
         name: "an explicit allow-list child",
         value: { allow: ["read", "grep"], prompt: "Look.", mode: "one-shot" },
+      },
+      {
+        name: "a scoped role child, continuable, with a folder and a file",
+        value: {
+          role: "executor",
+          prompt: "Build it.",
+          mode: "continuable",
+          writeScope: [
+            { path: "packages/aetheria-orchestration/src/operations", kind: "folder" },
+            { path: "tests/orchestration/contracts.test.mjs", kind: "file" },
+          ],
+        },
+      },
+      {
+        name: "a scoped role child, explicitly one-shot, record-only",
+        value: {
+          role: "executor",
+          prompt: "Build it.",
+          mode: "one-shot",
+          delivery: "record-only",
+          writeScope: [{ path: "src", kind: "folder" }],
+        },
+      },
+      {
+        name: "a scoped generic child with a label",
+        value: {
+          allow: ["read", "edit"],
+          prompt: "Edit.",
+          mode: "one-shot",
+          label: "edit",
+          writeScope: [{ path: "docs/a.md", kind: "file" }],
+        },
+      },
+      {
+        name: "a path that merely contains dots in a name",
+        value: {
+          role: "executor",
+          prompt: "x",
+          mode: "one-shot",
+          writeScope: [{ path: "a/..b/c..d", kind: "file" }],
+        },
       },
     ],
     refuse: [
@@ -125,6 +250,7 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
         value: { role: "reader", prompt: "x", mode: "one-shot", outputSchema: "string" },
       },
       { name: "a missing mode", value: { role: "reviewer", prompt: "x" } },
+      ...scopeRefusals(),
     ],
   },
   childrenSpawnResult: {
@@ -230,6 +356,15 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
       {
         name: "a role claim",
         value: { prefix: "all", prompt: "x", allow: ["read"], role: "reviewer" },
+      },
+      {
+        name: "a write scope (a fork takes none; the scope belongs to spawn)",
+        value: {
+          prefix: "all",
+          prompt: "x",
+          allow: ["read"],
+          writeScope: [{ path: "src", kind: "folder" }],
+        },
       },
     ],
   },

@@ -12,13 +12,19 @@ import {
   BOARD_CHECK_WRITE_OPERATION,
   BOARD_RECORD_EDIT_OPERATION,
   BOARD_RECORD_SHELL_OPERATION,
+  BOARD_SCOPE_MAX_ENTRIES,
+  BOARD_SCOPE_RECORD_OPERATION,
+  BOARD_SCOPE_RELEASE_OPERATION,
   BoardCheckWriteResult,
   BoardRecordEditArgs,
   BoardRecordEditResult,
   BoardRecordShellArgs,
   BoardRecordShellResult,
+  BoardScopeRecordArgs,
+  BoardScopeRecordResult,
+  BoardScopeReleaseArgs,
+  BoardScopeReleaseResult,
   BoardWriteArgs,
-  XC10_CHILD_STATUS_UNAVAILABLE_CODE,
   XC6_OPERATION_NAME_PATTERN,
   XC8_DECISION_EVIDENCE_UNAVAILABLE_CODE,
 } from "./index.ts";
@@ -31,6 +37,10 @@ const decodeCheck = Schema.decodeUnknownSync(BoardCheckWriteResult, strict);
 const decodeRecorded = Schema.decodeUnknownSync(BoardRecordEditResult, strict);
 const decodeShell = Schema.decodeUnknownSync(BoardRecordShellArgs, strict);
 const decodeShellResult = Schema.decodeUnknownSync(BoardRecordShellResult, strict);
+const decodeScope = Schema.decodeUnknownSync(BoardScopeRecordArgs, strict);
+const decodeScopeResult = Schema.decodeUnknownSync(BoardScopeRecordResult, strict);
+const decodeRelease = Schema.decodeUnknownSync(BoardScopeReleaseArgs, strict);
+const decodeReleaseResult = Schema.decodeUnknownSync(BoardScopeReleaseResult, strict);
 const decodeAction = Schema.decodeUnknownSync(AwarenessActionArgs, strict);
 const decodeSummary = Schema.decodeUnknownSync(AwarenessSummaryResult, strict);
 
@@ -43,7 +53,6 @@ const write = {
 
 describe("unavailable codes that name the missing owner", () => {
   it("are the frozen strings", () => {
-    expect(XC10_CHILD_STATUS_UNAVAILABLE_CODE).toBe("XC10_CHILD_STATUS_UNAVAILABLE");
     expect(XC8_DECISION_EVIDENCE_UNAVAILABLE_CODE).toBe("XC8_DECISION_EVIDENCE_UNAVAILABLE");
   });
 });
@@ -128,8 +137,11 @@ describe("board.record-shell", () => {
 });
 
 describe("awareness.action and awareness.summary", () => {
-  it("name the nine DSH actions and take the model's fields only", () => {
-    expect(AWARENESS_ACTIONS).toHaveLength(9);
+  it("name the eight actions (assign is gone) and take the model's fields only", () => {
+    expect(AWARENESS_ACTIONS).toHaveLength(8);
+    expect(AWARENESS_ACTIONS).not.toContain("assign");
+    expect(() => decodeAction({ action: "assign", claimId: "c" })).toThrow();
+    expect(() => decodeAction({ action: "release", claimId: "c", agentId: "child-1" })).toThrow();
     expect(decodeAction({ action: "claim", path: "src/a.ts", idea: "lexing" }).action).toBe(
       "claim",
     );
@@ -140,5 +152,71 @@ describe("awareness.action and awareness.summary", () => {
   it("return the summary text or null with its revision and byte size", () => {
     expect(decodeSummary({ text: null, revision: 3, bytes: 0 }).text).toBeNull();
     expect(() => decodeSummary({ text: "x", revision: 3 })).toThrow();
+  });
+});
+
+describe("scope.record and scope.release (in-process Backend operations)", () => {
+  it("are valid XC-6-shaped names but no awareness action", () => {
+    expect(BOARD_SCOPE_RECORD_OPERATION).toBe("scope.record");
+    expect(BOARD_SCOPE_RELEASE_OPERATION).toBe("scope.release");
+    for (const name of [BOARD_SCOPE_RECORD_OPERATION, BOARD_SCOPE_RELEASE_OPERATION])
+      expect(XC6_OPERATION_NAME_PATTERN.test(name)).toBe(true);
+    expect(AWARENESS_ACTIONS as readonly string[]).not.toContain("scope.record");
+    expect(BOARD_SCOPE_MAX_ENTRIES).toBe(64);
+  });
+
+  it("decodes every accepted vector unchanged", () => {
+    for (const vector of boardShellVectors.recordScopeArgs!.accept)
+      expect(decodeScope(vector.value), vector.name).toEqual(vector.value);
+  });
+
+  it("refuses every refused vector, including a caller or root field", () => {
+    for (const vector of boardShellVectors.recordScopeArgs!.refuse)
+      expect(() => decodeScope(vector.value), vector.name).toThrow();
+  });
+
+  it("refuses a path past 4096 characters and a drive letter, which the vectors leave to the schema", () => {
+    const entry = (path: string) => ({ childSessionId: "k", writeScope: [{ path, kind: "file" }] });
+    expect(() => decodeScope(entry("a".repeat(4097)))).toThrow();
+    expect(() => decodeScope(entry("C:\\x"))).toThrow();
+    expect(decodeScope(entry("a".repeat(4096))).writeScope).toHaveLength(1);
+  });
+
+  it("answers recorded, refused with a registry code, or unavailable — and nothing else", () => {
+    const recorded = {
+      status: "recorded",
+      existing: false,
+      ranges: [{ path: "/w/src", kind: "folder" }],
+      claimed: 1,
+      takenOver: 0,
+    };
+    expect(decodeScopeResult(recorded)).toEqual(recorded);
+    expect(
+      decodeScopeResult({
+        status: "refused",
+        code: "AWARENESS_OVERLAP",
+        detail: "x",
+        field: "writeScope",
+      }).status,
+    ).toBe("refused");
+    expect(
+      decodeScopeResult({ status: "unavailable", reason: "liveness", detail: "x" }).status,
+    ).toBe("unavailable");
+    expect(() =>
+      decodeScopeResult({ status: "refused", code: "AWARENESS_HELD", detail: "x" }),
+    ).toThrow();
+    expect(() => decodeScopeResult({ ...recorded, claimed: -1 })).toThrow();
+    expect(() => decodeScopeResult({ ...recorded, scope: [] })).toThrow();
+    expect(() =>
+      decodeScopeResult({ status: "unavailable", reason: "decision-evidence", detail: "x" }),
+    ).toThrow();
+  });
+
+  it("releases by the child's session id only", () => {
+    expect(decodeRelease({ childSessionId: "k" })).toEqual({ childSessionId: "k" });
+    expect(() => decodeRelease({ childSessionId: "k", sessionId: "me" })).toThrow();
+    expect(() => decodeRelease({})).toThrow();
+    expect(decodeReleaseResult({ status: "released", existed: false }).status).toBe("released");
+    expect(() => decodeReleaseResult({ status: "released" })).toThrow();
   });
 });

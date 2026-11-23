@@ -40,6 +40,7 @@ import type {
   ResumeBarrierPort,
 } from "./orchestrationPorts.ts";
 import type { SpawnAuthorizerPort } from "./spawnAuthorizer.ts";
+import type { BoardScopes } from "./board/runtime.ts";
 import { ORCHESTRATION_BACKEND_ENTRY } from "./orchestrationRow.ts";
 
 export type { OrchestrationOperation };
@@ -131,6 +132,8 @@ export interface OrchestrationServiceDeps {
   readonly lineageSessionOf: (threadId: string) => string | null | "unknown";
   /** M03's verdict on a spawn (identity, role catalog, depth, project layer), from the carrier-verified caller. */
   readonly spawnAuthorizer: SpawnAuthorizerPort;
+  /** v1p2 step 3: the Backend board's write-scope operations, in process. Absent: a spawn that carries a `writeScope` is refused (never started unguarded). */
+  readonly scopes?: BoardScopes;
   /** Boot's lineage listing; `unavailable` when T3's shells cannot be read, never an empty list. */
   readonly lineage: ChildLineageReader;
   /** M09's route availability for the launch route and fallback (steps 21 and 22). Absent: every route is unknown and no failure is classified, so nothing switches. */

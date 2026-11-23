@@ -247,6 +247,36 @@ describe("children.* and jobs.* XC-6 operations", () => {
     }
   });
 
+  it("admit no forbidden key beside a write scope or inside a scope entry, on either spawn arm, and no scope on a fork", () => {
+    const scope = [
+      { path: "src", kind: "folder" },
+      { path: "a.md", kind: "file" },
+    ];
+    const decode = decoder(SCHEMAS.childrenSpawnArgs);
+    const bases = [
+      { role: "executor", prompt: "x", mode: "continuable", writeScope: scope },
+      { allow: ["read"], prompt: "x", mode: "one-shot", writeScope: scope },
+    ];
+    for (const base of bases) {
+      expect(() => decode(structuredClone(base)), "the scoped base decodes").not.toThrow();
+      for (const key of orchestrationForbiddenAgentKeys) {
+        expect(() => decode({ ...base, [key]: "x" }), `a scoped spawn admitted ${key}`).toThrow();
+        expect(
+          () => decode({ ...base, writeScope: [{ ...scope[0], [key]: "x" }] }),
+          `a scope entry admitted ${key}`,
+        ).toThrow();
+      }
+    }
+    expect(() =>
+      decoder(SCHEMAS.childrenForkArgs)({
+        prefix: "all",
+        prompt: "x",
+        allow: ["read"],
+        writeScope: scope,
+      }),
+    ).toThrow();
+  });
+
   it("carry neither the unavailable code nor an AUTH code in a done result", () => {
     for (const [name, schema] of Object.entries(SCHEMAS)) {
       if (!name.endsWith("Result")) continue;

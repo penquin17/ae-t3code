@@ -167,12 +167,42 @@ const reply = <S extends Schema.Top>(value: S, codes: readonly OrchestrationCode
   return Schema.Union(variants as [Schema.Top, ...Schema.Top[]]);
 };
 
+/**
+ * A write scope is shape-checked here: a non-empty relative path with no `..` step, a kind, and no path twice. Resolving a path against the workspace belongs to the
+ * board owner, which holds the workspace; it is never resolved from a caller-supplied claim. The outer codec checks the same rules against the same vectors.
+ */
+const ScopePath = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(4096),
+  Schema.makeFilter<string>((path) => {
+    if (path.trim() === "") return "a scope path must not be blank";
+    if (/[\u0000-\u001f\u007f]/.test(path))
+      return "a scope path must not contain a control character";
+    if (path.startsWith("/") || path.startsWith("\\") || /^[A-Za-z]:/.test(path)) {
+      return "a scope path must be relative to the workspace, not absolute";
+    }
+    return !path.split(/[\\/]/).includes("..") || 'a scope path must not contain a ".." step';
+  }),
+);
+export const WriteScopeEntry = Schema.Struct({
+  path: ScopePath,
+  kind: Schema.Literals(["file", "folder"]),
+});
+export type WriteScopeEntry = typeof WriteScopeEntry.Type;
+/** The paths a child may change, for its whole life; missing on a spawn means unscoped. */
+export const WriteScope = Schema.Array(WriteScopeEntry).check(
+  Schema.isMinLength(1),
+  uniqueBy((entry: WriteScopeEntry) => entry.path, "scope paths must be unique"),
+);
+export type WriteScope = typeof WriteScope.Type;
+
 const spawnBase = {
   prompt: Text,
   mode: Mode,
   label: Schema.optionalKey(Text),
   outputSchema: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
   delivery: Schema.optionalKey(Schema.Literal("record-only")),
+  writeScope: Schema.optionalKey(WriteScope),
 } as const;
 const recordOnlyIsOneShot = Schema.makeFilter<{ mode: string; delivery?: string | undefined }>(
   (args) =>

@@ -2,7 +2,7 @@
 // AETHERIA M04 Plan step 20 — the Backend connects the board: named XC-6 operations over one board per workspace, with the caller taken from
 // the thread binding and the real liveness service. Boundary: the real assembled service (thread index, liveness, file board under a real
 // state root) and hand-fed stored events; Git is a named double answering "outside git". It shows cross-session collision with the holder named,
-// a fresh read per check, assignee compared by id, main-only, outage and recovery, bounded summaries, stale pre-start evidence as unknown and
+// a fresh read per check, the writer's recorded scope compared by id (v1p2), main-only, outage and recovery, bounded summaries, stale pre-start evidence as unknown and
 // reconciliation at start. It does not show identity resolution (steps 13, 16), the HTTP route or the Agent's tools.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -184,32 +184,115 @@ describe("collision across sessions", () => {
   });
 });
 
-describe("assignment by identity, and main authority", () => {
-  it("compares the assignee by XC-1 id: the assigned child and the main pass, a sibling is refused; production assign is unavailable naming XC-10", async () => {
-    const w = await live([A, B, C], { childStatus: async () => ({ owned: true, state: "idle" }) });
-    const claimed = await act(w, A, { action: "claim", path: "a.txt", idea: "x" });
-    const claimId = (claimed as { result: { claim: { claimId: string } } }).result.claim.claimId;
-    expect(await act(w, A, { action: "assign", claimId, agentId: SESSION_B })).toMatchObject({
-      result: { ok: true },
+describe("write scope by identity, and main authority", () => {
+  const folder = (path: string) => ({ path, kind: "folder" as const });
+  const child = (who: Who) => ({ ...who, kind: "child" as const, root: SESSION });
+
+  it("compares the writer's scope by XC-1 id: the scoped child and the main pass, a sibling and an unscoped child are refused, and assign is gone", async () => {
+    const w = await live([A, B, C]);
+    const scopes = w.service.board.scopes();
+    const first = await scopes.record({
+      rootSessionId: SESSION,
+      parentSessionId: SESSION,
+      kind: "main",
+      workingFolder: w.ws,
+      childSessionId: SESSION_B,
+      writeScope: [{ path: "a.txt", kind: "file" }, folder("src")],
     });
+    expect(first).toEqual({ status: "recorded", existing: false });
     const target = NodePath.join(w.ws, "a.txt");
-    expect(await check(w, { ...B, kind: "child", root: SESSION }, target)).toMatchObject({
+    expect(await check(w, child(B), target)).toMatchObject({ result: { verdict: "allowed" } });
+    expect(await check(w, child(B), NodePath.join(w.ws, "src", "x.ts"))).toMatchObject({
       result: { verdict: "allowed" },
     });
     expect(await check(w, A, target)).toMatchObject({ result: { verdict: "allowed" } });
-    const sibling = await check(w, { ...C, kind: "child", root: SESSION }, target);
+    const sibling = await check(w, child(C), target);
     expect(sibling).toMatchObject({ result: { verdict: "refused", code: "AWARENESS_ASSIGNED" } });
-    expect(String((sibling as { result: { detail: string } }).result.detail)).toContain(SESSION_B);
+    const detail = String((sibling as { result: { detail: string } }).result.detail);
+    expect(detail).toContain("outside your write scope");
+    expect(detail).not.toContain(SESSION_B);
+    // The claim was made for the root by the start: another main session meets it as a holder, and sees no scope.
+    expect(await check(w, { ...C, kind: "main", root: SESSION_C }, target)).toMatchObject({
+      result: { verdict: "refused", code: "AWARENESS_HELD" },
+    });
+    const summary = await w.run("awareness.summary", { ...C, kind: "main", root: SESSION_C }, {});
+    expect(JSON.stringify(summary)).not.toContain(SESSION_B);
+    // assign is no longer an action and agentId no longer an argument.
+    expect(await act(w, A, { action: "assign", claimId: "x", agentId: SESSION_B })).toMatchObject({
+      result: { ok: false, code: "AWARENESS_INVALID", field: "agentId" },
+    });
+  });
 
-    const production = await live([A, B]);
-    const mine = await act(production, A, { action: "claim", path: "a.txt", idea: "x" });
-    const id = (mine as { result: { claim: { claimId: string } } }).result.claim.claimId;
-    expect(await act(production, A, { action: "assign", claimId: id, agentId: SESSION_B })).toEqual(
-      {
-        status: "unavailable",
-        code: "XC10_CHILD_STATUS_UNAVAILABLE",
-      },
-    );
+  it("refuses an overlapping or outside scope in the board's own words, records nothing, and frees the ground when the scope is released", async () => {
+    const w = await live([A, B, C]);
+    const scopes = w.service.board.scopes();
+    const record = (
+      childSessionId: string,
+      writeScope: ReturnType<typeof folder>[],
+      parent = SESSION,
+    ) =>
+      scopes.record({
+        rootSessionId: SESSION,
+        parentSessionId: parent,
+        kind: parent === SESSION ? "main" : "child",
+        workingFolder: w.ws,
+        childSessionId,
+        writeScope,
+      });
+    expect(await record(SESSION_B, [folder("src")])).toMatchObject({ status: "recorded" });
+    expect(await record(SESSION_C, [folder("src/deep")])).toMatchObject({
+      status: "refused",
+      code: "AWARENESS_OVERLAP",
+    });
+    expect(await record(SESSION_C, [folder(".")])).toMatchObject({
+      status: "refused",
+      code: "AWARENESS_INVALID",
+    });
+    expect(await record(SESSION_C, [folder("lib")], SESSION_B)).toMatchObject({
+      status: "refused",
+      code: "AWARENESS_INVALID",
+    });
+    expect(await check(w, child(C), NodePath.join(w.ws, "lib", "x.ts"))).toMatchObject({
+      result: { verdict: "allowed", governed: true },
+    });
+    expect(await scopes.release({ rootSessionId: SESSION, childSessionId: SESSION_B })).toEqual({
+      status: "released",
+    });
+    expect(await check(w, child(B), NodePath.join(w.ws, "src", "x.ts"))).toMatchObject({
+      result: { verdict: "refused", code: "AWARENESS_ASSIGNED" },
+    });
+    expect(await record(SESSION_C, [folder("src/deep")])).toMatchObject({ status: "recorded" });
+  });
+
+  it("answers unavailable, never recorded, for a folder with no workspace, an unreadable board and a stopped runtime", async () => {
+    const w = await live([A, B]);
+    const scopes = w.service.board.scopes();
+    const input = {
+      rootSessionId: SESSION,
+      parentSessionId: SESSION,
+      kind: "main" as const,
+      childSessionId: SESSION_B,
+      writeScope: [folder("src")],
+    };
+    expect(
+      await scopes.record({ ...input, workingFolder: NodePath.join(w.ws, "no", "such", "dir") }),
+    ).toMatchObject({ status: "unavailable" });
+    expect(
+      await scopes.release({ rootSessionId: "unbound-root", childSessionId: "unbound-child" }),
+    ).toMatchObject({ status: "unavailable" });
+    NodeFS.mkdirSync(NodePath.dirname(boardFileFor(w.stateRoot, w.ws)), { recursive: true });
+    NodeFS.writeFileSync(boardFileFor(w.stateRoot, w.ws), "{ not json");
+    expect(await scopes.record({ ...input, workingFolder: w.ws })).toMatchObject({
+      status: "unavailable",
+    });
+    expect(NodeFS.readFileSync(boardFileFor(w.stateRoot, w.ws), "utf8")).toBe("{ not json");
+    await w.service.dispose("test");
+    expect(await scopes.record({ ...input, workingFolder: w.ws })).toMatchObject({
+      status: "unavailable",
+    });
+    expect(
+      await scopes.release({ rootSessionId: SESSION, childSessionId: SESSION_B }),
+    ).toMatchObject({ status: "unavailable" });
   });
 
   it("refuses a child at execution, refuses a named caller key, and changes nothing", async () => {

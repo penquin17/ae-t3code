@@ -511,15 +511,16 @@ describe("children.spawn through the real children service", () => {
   it("parallel attempts see each other: the admission limit is exact and nothing queues", async () => {
     const w = world();
     const { service } = await started(w);
+    // Two attempts past the shipped maxActiveChildren (32).
     const outcomes = await Promise.all(
-      Array.from({ length: 6 }, () => service.handle("children.spawn", who, SPAWN)),
+      Array.from({ length: 34 }, () => service.handle("children.spawn", who, SPAWN)),
     );
     const accepted = outcomes.filter((outcome) => outcome.ok);
     const limited = outcomes.filter((outcome) => !outcome.ok && outcome.code === "CHILD_LIMIT");
-    expect(accepted).toHaveLength(4);
+    expect(accepted).toHaveLength(32);
     expect(limited).toHaveLength(2);
-    expect(w.fake.releases).toHaveLength(4);
-    expect(new Set(w.fake.created.map((input) => input.threadId)).size).toBe(4);
+    expect(w.fake.releases).toHaveLength(32);
+    expect(new Set(w.fake.created.map((input) => input.threadId)).size).toBe(32);
   });
 
   it("settles a child from T3's terminal run once, whatever the number of deliveries", async () => {

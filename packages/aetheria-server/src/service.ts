@@ -59,7 +59,6 @@ import {
   type OrchestrationServiceFactory,
 } from "./orchestration.ts";
 import type { CallerContextPort } from "./orchestrationFactory.ts";
-import { createChildStatus } from "./orchestrationChildStatus.ts";
 import type { ChildLineageReader, ChildThreadPort } from "./orchestrationPorts.ts";
 import { createSpawnAuthorizer, type SpawnAuthorizerOptions } from "./spawnAuthorizer.ts";
 import { createResumeBarrier } from "./orchestrationResume.ts";
@@ -97,7 +96,6 @@ import { parseAwarenessConfig } from "./library.ts";
 import {
   createBoardRuntime,
   type BoardRuntime,
-  type BoardRuntimeOptions,
   type QuestionEvidenceProvider,
 } from "./board/runtime.ts";
 
@@ -137,11 +135,6 @@ export interface AetheriaBackendServiceOptions {
   readonly git?: GitPort;
   /** Test seam for the state-root owner lock: the process probe, this process's identity, the takeover bound. Absent in production. */
   readonly ownerLock?: Pick<OwnerLockOptions, "probe" | "self" | "staleAfterMs">;
-  /**
-   * Test seam: another owned-child status for XC-10. Absent in production, which asks the running children service (orchestrationChildStatus.ts): `assign` is
-   * unavailable while that service is not running or the ownership is unknown.
-   */
-  readonly childStatus?: BoardRuntimeOptions["childStatus"];
   /**
    * T3 as the children service sees it, adapted by the host that assembles the Backend (M05 step 6; the apps/server wrapper, with the captured Effect runtime).
    * Absent, or without `orchestrationFactory`: the orchestration module is registered and answers unavailable for every operation.
@@ -210,8 +203,8 @@ export interface AetheriaBackendService {
   ingest(stored: StoredEventLike): Promise<void>;
   /** The highest event sequence that existed before the feed was subscribed: liveness from older events is unknown for the board. */
   setReplayHorizon(sequence: number): void;
-  /** The board of each workspace and what restart reconciliation did to it; `settled` waits for the close-on-stop in flight; `editsOf` is the in-process read of one root's recorded edit paths (M10 step 14). */
-  readonly board: Pick<BoardRuntime, "reconciled" | "settled" | "editsOf">;
+  /** The board of each workspace and what restart reconciliation did to it; `settled` waits for the close-on-stop in flight; `editsOf` is the in-process read of one root's recorded edit paths (M10 step 14); `scopes` are the in-process write-scope operations the children service calls (v1p2 step 3; no operation, no model reaches them). */
+  readonly board: Pick<BoardRuntime, "reconciled" | "settled" | "editsOf" | "scopes">;
   /** The stream ended or failed: every holder becomes unknown until observed again. */
   noteFeed(reason: Extract<UnknownReason, "feed-ended" | "feed-failed">): void;
   readonly liveness: LivenessService;
@@ -339,8 +332,6 @@ export function createAetheriaBackendService(
       };
     return service.questionEvidence(args);
   };
-  // M05 step 6 (D13): the production XC-10 child status asks the running children service, looked up at each call (the module starts later than the board).
-  let orchestrationNow: () => OrchestrationService | undefined = () => undefined;
   const board = createBoardRuntime({
     stateRoot: options.stateRoot,
     index,
@@ -348,8 +339,6 @@ export function createAetheriaBackendService(
     config: config.config,
     now: options.now ?? Date.now,
     git: options.git ?? createGit(),
-    childStatus:
-      options.childStatus ?? createChildStatus({ index, service: () => orchestrationNow() }),
     questionEvidence,
   });
 
@@ -469,12 +458,13 @@ export function createAetheriaBackendService(
               threadOfSession,
               lineageSessionOf,
               spawnAuthorizer,
+              // v1p2 step 3: the board's scope operations, in process (the children service records a spawn's write scope through them; not an XC-6 operation).
+              scopes: board.scopes(),
               lineage: options.childLineage ?? {
                 listChildThreads: async () => ({ ok: false, reason: "unavailable" }),
               },
             }),
   });
-  orchestrationNow = () => orchestrationRegistration.service();
   // M07 step 14: the ONE goal service over the real ports. Configured only when the children service is (its direct calls and T3's receipt are the goals' admission); it starts after M06 and M05
   // (its row requires them) and drains before them. The owner capability its store asks before every write is this service's own lock: held between acquire and release.
   let holdingOwnerLock = false;

@@ -3,7 +3,9 @@
 // identity and the thread binding, liveness read only from this Backend's own run, and the XC-6 operations that use them (M09 step 17 adds
 // `board.record-shell`, a shell change shown to peers as not guarded).
 // Evidence from before this Backend started is unknown: an observation counts only if its producing event is newer than the replay horizon.
-// Unreadable board or liveness is `unavailable`; `assign` asks the owned-child status of XC-10 (M05, `orchestrationChildStatus.ts`) and answers unavailable naming XC-10 when that cannot be read.
+// Unreadable board or liveness is `unavailable`. v1p2 step 3-4: `assign` and its XC-10 child-status port are gone; a subagent's write scope is recorded by the children service at its start
+// through `scopes()` below - the board service's `recordScope` and `releaseScope`, IN PROCESS: not an XC-6 operation, not an awareness action, no model can call them. The caller of a
+// scope record is the trusted lineage the spawn authorizer resolved (session, root, kind) and the working folder of the spawning thread, never a request field.
 // M06 step 26: `resolve` decides on the interaction service's `questionEvidence` (XC-8), called in process with the root, the cited call id and the
 // caller as asker; an absent, stopped or unreadable provider is unavailable naming XC-8, and advice that points at `resolve` is told only with a provider.
 // Step 22: when liveness reports a bound main session stopped or crashed, its board session is closed by the one close policy (`reconcileBoard`
@@ -22,7 +24,6 @@ import {
   decodeBoardRecordEditArgs,
   decodeBoardRecordShellArgs,
   decodeBoardWriteArgs,
-  XC10_CHILD_STATUS_UNAVAILABLE_CODE,
   XC8_DECISION_EVIDENCE_UNAVAILABLE_CODE,
   type Xc6Operation,
   type Xc6OperationContext,
@@ -42,13 +43,14 @@ import {
   nodePathFs,
   reconcileBoard,
   recordEdit,
+  recordScope,
   recordShell,
+  releaseScope,
   resolveWorkspace,
   summarize,
   type ActionCaller,
   type AwarenessConfig,
   type BoardService,
-  type ChildStatus,
   type HolderObservation,
   type ReconcileResult,
   type SessionEvidence,
@@ -72,10 +74,6 @@ export interface BoardRuntimeOptions {
   readonly config: AwarenessConfig;
   readonly now: () => number;
   readonly git: GitPort;
-  /** The owned-child status of XC-10. The service supplies M05's production reader (`orchestrationChildStatus.ts`); absent, `assign` answers unavailable. A test supplies its own. */
-  readonly childStatus?:
-    | ((rootId: string, childId: string) => ChildStatus | Promise<ChildStatus>)
-    | undefined;
   /**
    * The durable verified-human evidence of XC-8 (M06): the running interaction service's `questionEvidence`. Absent: `resolve` answers unavailable naming
    * XC-8 and no refusal advice points at it. Present: `resolve` is offered, and the provider answers unavailable itself while the service is not running.
@@ -98,9 +96,36 @@ export type EditsRead =
   | { readonly status: "unknown"; readonly reason: "no-workspace" | "no-record" }
   | { readonly status: "unavailable"; readonly detail: string };
 
+/**
+ * The write-scope operations the children service calls in process (the shape of the orchestration package's `ScopePort`). A reply is a value: `recorded`, `refused` with the board's registry
+ * code, or `unavailable`; a stopped runtime, a thread with no workspace and an unreadable board are unavailable, never a recorded scope.
+ */
+export interface BoardScopes {
+  record(input: {
+    readonly rootSessionId: string;
+    readonly parentSessionId: string;
+    readonly kind: "main" | "child";
+    readonly workingFolder: string;
+    readonly childSessionId: string;
+    readonly writeScope: readonly { readonly path: string; readonly kind: "file" | "folder" }[];
+  }): Promise<
+    | { readonly status: "recorded"; readonly existing: boolean }
+    | { readonly status: "refused"; readonly code: string; readonly detail: string }
+    | { readonly status: "unavailable"; readonly detail: string }
+  >;
+  release(input: {
+    readonly rootSessionId: string;
+    readonly childSessionId: string;
+  }): Promise<
+    { readonly status: "released" } | { readonly status: "unavailable"; readonly detail: string }
+  >;
+}
+
 export interface BoardRuntime {
   /** The XC-6 operations: check-write, record-edit, record-shell, the awareness actions and the summary. */
   operations(): Readonly<Record<string, Xc6Operation>>;
+  /** The in-process write-scope operations for the children service (`scope.record`, `scope.release`); never an XC-6 operation. */
+  scopes(): BoardScopes;
   /** The edit paths recorded for one root session, read in process and never written (M10 step 14). Never throws. */
   editsOf(rootSessionId: string): Promise<EditsRead>;
   /** The highest event sequence that existed before this Backend subscribed; only newer liveness events count as evidence. */
@@ -129,7 +154,6 @@ const unavailable = (code: string): Xc6Settled => ({ status: "unavailable", code
 const REASON_CODES = {
   board: AWARENESS_UNAVAILABLE_CODE,
   liveness: AWARENESS_LIVENESS_UNAVAILABLE_CODE,
-  "child-status": XC10_CHILD_STATUS_UNAVAILABLE_CODE,
   "decision-evidence": XC8_DECISION_EVIDENCE_UNAVAILABLE_CODE,
 } as const;
 const reasonCode = (reason: keyof typeof REASON_CODES): string => REASON_CODES[reason];
@@ -233,7 +257,6 @@ export function createBoardRuntime(options: BoardRuntimeOptions): BoardRuntime {
     idleMs: config.idleMs,
     summaryMaxBytes: config.summaryMaxBytes,
     newId: () => NodeCrypto.randomUUID(),
-    childStatus: options.childStatus,
     questionEvidence: options.questionEvidence,
     // Advice names `resolve` only where a provider can answer it (one word from one place: no provider, no pointer).
     resolveAvailable: options.questionEvidence !== undefined,
@@ -399,7 +422,83 @@ export function createBoardRuntime(options: BoardRuntimeOptions): BoardRuntime {
     return done({ text: outcome.text, revision: outcome.revision, bytes: outcome.bytes });
   };
 
+  /** Scope operations run tracked like the XC-6 ones, so the drain waits for them; once draining they answer unavailable. */
+  const trackedScope = async <T>(work: () => Promise<T>): Promise<T> => {
+    const running = work();
+    const forget = (): void => void inflight.delete(running);
+    inflight.add(running);
+    running.then(forget, forget);
+    return running;
+  };
+  const detailOf = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+
+  const scopeOps: BoardScopes = {
+    async record(input) {
+      if (stopping) return { status: "unavailable", detail: "the board runtime has stopped" };
+      try {
+        return await trackedScope(async () => {
+          const workspace = await workspaceOf(input.workingFolder);
+          if (workspace === undefined)
+            return {
+              status: "unavailable" as const,
+              detail: "the spawning thread has no workspace, so it has no board",
+            };
+          const board = await boardFor(workspace);
+          await reconcileOnce(board).catch(() => undefined);
+          const caller: ActionCaller = {
+            sessionId: input.parentSessionId,
+            kind: input.kind,
+            rootId: input.rootSessionId,
+            workspace,
+            cwd: input.workingFolder,
+          };
+          const outcome = await recordScope(
+            caller,
+            { childSessionId: input.childSessionId, writeScope: input.writeScope },
+            ports(board),
+          );
+          if (outcome.status === "recorded")
+            return { status: "recorded" as const, existing: outcome.existing };
+          if (outcome.status === "refused")
+            return { status: "refused" as const, code: outcome.code, detail: outcome.detail };
+          return { status: "unavailable" as const, detail: outcome.detail };
+        });
+      } catch (error) {
+        return { status: "unavailable", detail: detailOf(error) };
+      }
+    },
+    async release(input) {
+      if (stopping) return { status: "unavailable", detail: "the board runtime has stopped" };
+      try {
+        return await trackedScope(async () => {
+          // The workspace of the root's board: the root's own thread, else the child's. A record is never guessed absent without a board that could hold it.
+          const folder =
+            index.bindingOfSession(input.rootSessionId)?.workingFolder ??
+            index.bindingOfSession(input.childSessionId)?.workingFolder;
+          const workspace = folder === undefined ? undefined : await workspaceOf(folder);
+          if (workspace === undefined)
+            return {
+              status: "unavailable" as const,
+              detail: "no workspace is known for the root, so its board cannot be read",
+            };
+          const board = await boardFor(workspace);
+          const outcome = await releaseScope(
+            { rootId: input.rootSessionId, childSessionId: input.childSessionId },
+            { service: board.service },
+          );
+          return outcome.status === "released"
+            ? { status: "released" as const }
+            : { status: "unavailable" as const, detail: outcome.detail };
+        });
+      } catch (error) {
+        return { status: "unavailable", detail: detailOf(error) };
+      }
+    },
+  };
+
   return {
+    scopes: () => scopeOps,
     operations: () => ({
       [BOARD_CHECK_WRITE_OPERATION]: tracked(checkWriteOp),
       [BOARD_RECORD_EDIT_OPERATION]: tracked(recordEditOp),

@@ -34,6 +34,7 @@ export const BoardCheckWriteResult = Schema.Union([
   }),
   Schema.Struct({
     verdict: Schema.Literal("refused"),
+    // AWARENESS_ASSIGNED: the path is claimed by the writer's tree and lies outside the writer's own write scope (an unscoped subagent has none).
     code: Schema.Literals(["AWARENESS_HELD", "AWARENESS_LEFTOVER", "AWARENESS_ASSIGNED"]),
     detail: Schema.String,
   }),
@@ -103,3 +104,70 @@ export const BoardRecordShellResult = Schema.Union([
   }),
 ]);
 export type BoardRecordShellResult = typeof BoardRecordShellResult.Type;
+
+// In-process Backend operations only: not XC-6 and not model-reachable, so they carry no caller field; the Backend supplies the resolved identity.
+// Paths are workspace-relative; the board canonicalizes them and refuses the workspace itself and anything outside it.
+export const BOARD_SCOPE_RECORD_OPERATION = "scope.record";
+export const BOARD_SCOPE_RELEASE_OPERATION = "scope.release";
+
+/** The most entries one scope carries; the board's own limit. */
+export const BOARD_SCOPE_MAX_ENTRIES = 64;
+
+const ScopePath = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(4096),
+  // Not absolute (a leading `/` or `\`) and no `..` step: the spawn codecs refuse both before a request gets here.
+  Schema.isPattern(/^(?![/\\])(?![A-Za-z]:)(?!.*(?:^|[/\\])\.\.(?:[/\\]|$))/),
+);
+const ScopeSession = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200));
+
+export const BoardScopeRecordArgs = Schema.Struct({
+  childSessionId: ScopeSession,
+  writeScope: Schema.Array(
+    Schema.Struct({ path: ScopePath, kind: Schema.Literals(["file", "folder"]) }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(BOARD_SCOPE_MAX_ENTRIES)),
+});
+export type BoardScopeRecordArgs = typeof BoardScopeRecordArgs.Type;
+
+/**
+ * `recorded`: the scope is on the board (`existing`: the same scope was already there, a retry). `refused`: nothing was written; an invalid scope
+ * (malformed, outside the caller's own scope, the whole workspace) is AWARENESS_INVALID, a sibling or active foreign holding AWARENESS_OVERLAP.
+ * `unavailable`: the board or liveness could not answer, so the child must not start.
+ */
+export const BoardScopeRecordResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("recorded"),
+    existing: Schema.Boolean,
+    ranges: Schema.Array(
+      Schema.Struct({ path: AbsolutePath, kind: Schema.Literals(["file", "folder"]) }),
+    ),
+    claimed: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+    takenOver: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    code: Schema.Literals(["AWARENESS_INVALID", "AWARENESS_OVERLAP"]),
+    detail: Schema.String,
+    field: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: Schema.Literals(["board", "liveness"]),
+    detail: Schema.String,
+  }),
+]);
+export type BoardScopeRecordResult = typeof BoardScopeRecordResult.Type;
+
+export const BoardScopeReleaseArgs = Schema.Struct({ childSessionId: ScopeSession });
+export type BoardScopeReleaseArgs = typeof BoardScopeReleaseArgs.Type;
+
+/** A released record (`existed` false: none was there, so a repeat is a success) or the board could not answer. */
+export const BoardScopeReleaseResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("released"), existed: Schema.Boolean }),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: Schema.Literal("board"),
+    detail: Schema.String,
+  }),
+]);
+export type BoardScopeReleaseResult = typeof BoardScopeReleaseResult.Type;
