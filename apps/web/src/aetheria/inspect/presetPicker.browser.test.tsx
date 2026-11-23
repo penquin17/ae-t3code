@@ -1,4 +1,4 @@
-// M11 step 12: T3's own picker lists "Aetheria" before "Aetheria Builder" and dispatches to the instance picked (default `pi`, then `pi-builder`).
+// M11 step 12: T3's own picker lists the one Aetheria preset, the default instance `pi`, and dispatches to the instance picked.
 // Not shown: a real server building these snapshots, a session loading the picked bundle (steps 15-16), reduced motion.
 
 import {
@@ -34,13 +34,11 @@ const snapshot = (instanceId: string, displayName: string): ServerProvider => ({
   skills: [],
 });
 
-// The server lists the instances in settings order, which a rewrite by T3 may change: Builder first here, on purpose.
-const providers = [snapshot("pi-builder", "Aetheria Builder"), snapshot("pi", "Aetheria")];
-// The settings the candidate writes (t3-settings.mjs): both Pi instances enabled, each with its own display name.
+const providers = [snapshot("pi", "Aetheria")];
+// The settings the candidate writes (t3-settings.mjs): the one Pi instance enabled, with its display name.
 const settings = {
   providerInstances: {
     pi: { driver: "pi", displayName: "Aetheria", enabled: true },
-    "pi-builder": { driver: "pi", displayName: "Aetheria Builder", enabled: true },
   },
   projectSettingsOverrides: {},
 } as unknown as Parameters<typeof providerInstanceEntriesFor>[1];
@@ -73,19 +71,14 @@ const ordinary: ModelSelection = {
   instanceId: ProviderInstanceId.make("pi"),
   model: "pi/scripted",
 };
-const builder: ModelSelection = {
-  instanceId: ProviderInstanceId.make("pi-builder"),
-  model: "pi-builder/scripted",
-};
 
-it("derives the entries in manifest order from a snapshot that lists Builder first, keeping each display name and instance id", () => {
+it("derives the one entry from the snapshot, keeping its display name and instance id", () => {
   expect(entries.map((entry) => [entry.instanceId, entry.displayName, entry.isDefault])).toEqual([
     ["pi", "Aetheria", true],
-    ["pi-builder", "Aetheria Builder", false],
   ]);
 });
 
-it("lists both presets in order and dispatches a pick to the instance it was made under", async () => {
+it("lists the Aetheria preset and dispatches a pick to the instance it was made under", async () => {
   const picks: Array<[string, string]> = [];
   await using screen = await render(
     <Picker initial={ordinary} onPick={(instanceId, model) => picks.push([instanceId, model])} />,
@@ -94,16 +87,14 @@ it("lists both presets in order and dispatches a pick to the instance it was mad
   const names = Array.from(document.querySelectorAll<HTMLElement>("button")).map(
     (button) => button.getAttribute("aria-label") ?? button.textContent ?? "",
   );
-  const aetheria = names.findIndex((name) => name.trim() === "Aetheria");
-  const builderAt = names.findIndex((name) => name.trim() === "Aetheria Builder");
-  expect(aetheria).toBeGreaterThanOrEqual(0);
-  expect(builderAt).toBeGreaterThan(aetheria);
-  await page.getByRole("button", { name: "Aetheria Builder", exact: true }).click();
+  expect(names.some((name) => name.trim() === "Aetheria")).toBe(true);
+  expect(names.some((name) => name.includes("Builder"))).toBe(false);
+  await page.getByRole("button", { name: "Aetheria", exact: true }).click();
   await page.getByRole("option", { name: /Scripted model/ }).click();
-  await vi.waitFor(() => expect(picks).toEqual([["pi-builder", "pi-builder/scripted"]]));
+  await vi.waitFor(() => expect(picks).toEqual([["pi", "pi/scripted"]]));
 });
 
-it("reaches the Builder preset by keyboard alone", async () => {
+it("reaches the Aetheria preset by keyboard alone", async () => {
   const picks: Array<[string, string]> = [];
   await using screen = await render(
     <Picker initial={ordinary} onPick={(instanceId, model) => picks.push([instanceId, model])} />,
@@ -111,27 +102,25 @@ it("reaches the Builder preset by keyboard alone", async () => {
   const trigger = screen.getByRole("button", { name: "Choose preset and model" });
   (trigger.element() as HTMLElement).focus();
   await userEvent.keyboard("{Enter}");
-  const builderButton = page.getByRole("button", { name: "Aetheria Builder", exact: true });
-  await expect.element(builderButton).toBeVisible();
-  (builderButton.element() as HTMLElement).focus();
+  const presetButton = page.getByRole("button", { name: "Aetheria", exact: true });
+  await expect.element(presetButton).toBeVisible();
+  (presetButton.element() as HTMLElement).focus();
   await userEvent.keyboard("{Enter}");
   const option = page.getByRole("option", { name: /Scripted model/ });
   await expect.element(option).toBeVisible();
   (option.element() as HTMLElement).focus();
   await userEvent.keyboard("{Enter}");
-  await vi.waitFor(() => expect(picks).toEqual([["pi-builder", "pi-builder/scripted"]]));
+  await vi.waitFor(() => expect(picks).toEqual([["pi", "pi/scripted"]]));
 });
 
-it("a stored selection keeps naming its own instance, so a resumed Builder session is still Builder", async () => {
-  await using screen = await render(<Picker initial={builder} />);
+it("a stored selection keeps naming its own instance, so a resumed session is still Aetheria", async () => {
+  await using screen = await render(<Picker initial={ordinary} />);
   const trigger = screen.getByRole("button", { name: "Choose preset and model" });
   await expect.element(trigger).toBeVisible();
   const text = (trigger.element() as HTMLElement).textContent ?? "";
   expect(text).toContain("Scripted model");
   await trigger.click();
-  await expect
-    .element(page.getByRole("button", { name: "Aetheria Builder", exact: true }))
-    .toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Aetheria", exact: true })).toBeVisible();
 });
 
 it.each([
@@ -139,16 +128,13 @@ it.each([
   [390, "dark"],
   [1280, "light"],
   [1280, "dark"],
-] as const)("shows both preset names at %ipx in %s", async (width, theme) => {
+] as const)("shows the preset name at %ipx in %s", async (width, theme) => {
   await page.viewport(width, 800);
   document.documentElement.classList.toggle("dark", theme === "dark");
   try {
     await using screen = await render(<Picker initial={ordinary} />);
     await screen.getByRole("button", { name: "Choose preset and model" }).click();
     await expect.element(page.getByRole("button", { name: "Aetheria", exact: true })).toBeVisible();
-    await expect
-      .element(page.getByRole("button", { name: "Aetheria Builder", exact: true }))
-      .toBeVisible();
   } finally {
     document.documentElement.classList.remove("dark");
   }

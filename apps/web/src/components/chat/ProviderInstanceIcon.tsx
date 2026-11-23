@@ -86,7 +86,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   const badgeContent = props.badgeContent ?? "initials";
   const iconClassName = cn(props.size === "compact" && "size-3.5", props.iconClassName);
   const isAcpRegistry = props.driverKind === "acpRegistry";
-  // AETHERIA-IP:IP-68 every Pi instance (driver kind "pi", so `pi` and `pi-builder`) is the Aetheria agent: its icon is the Aetheria mark
+  // AETHERIA-IP:IP-68 every Pi instance (driver kind "pi") is the Aetheria agent: its icon is the Aetheria mark
   const showsAetheriaMark = props.driverKind === "pi";
   const acpRegistryIconUrl = resolveProviderInstanceAcpRegistryIconUrl({
     driverKind: props.driverKind,
