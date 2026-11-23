@@ -732,7 +732,7 @@ export function createOrchestrationFactory(
         case "children.message":
           return (await state.children.messageChild({
             caller,
-            args: args as { target: string; content: string },
+            args: args as { target: string; content: string; kind?: "message" | "decision" },
           })) as OrchestrationOutcome;
         case "children.list":
           return (await state.children.listChildren({

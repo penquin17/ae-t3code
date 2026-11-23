@@ -131,6 +131,28 @@ const detailOf = (error: unknown): string => {
 };
 const isNotFound = (error: unknown): boolean => /NotFound/.test(tagOf(error));
 
+/**
+ * A child's notice to its caller as T3's own subagent notification (the shape DelegatedTaskQuestionReactor sends). T3 requires a trimmed, non-blank summary;
+ * a blank one sends no notice rather than a command T3 would refuse.
+ */
+export const notificationOf = (
+  notification: Parameters<ChildThreadPort["startTurn"]>[0]["notification"],
+) => {
+  const summary = notification?.summary.trim();
+  if (notification === undefined || summary === undefined || summary.length === 0) return {};
+  return {
+    notification: {
+      source: {
+        kind: "subagent" as const,
+        childThreadId: ThreadId.make(notification.childThreadId),
+      },
+      outcome: "updated" as const,
+      summary,
+      ...(notification.detail ? { detail: notification.detail } : {}),
+    },
+  };
+};
+
 const fail = <R extends string>(
   reason: R,
   detail?: string,
@@ -378,8 +400,9 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
       return Promise.resolve({ ok: true as const, released: true as const });
     },
 
-    startTurn: ({ threadId, content, delivery, messageId }) =>
-      runPromise(
+    startTurn: ({ threadId, content, delivery, messageId, senderThreadId, notification }) => {
+      const notice = notificationOf(notification);
+      return runPromise(
         threads
           .dispatch({
             type: "message.dispatch",
@@ -390,9 +413,21 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             text: content,
             attachments: [],
             dispatchMode: { type: "queue_after_active" },
-            deliveryIntent: delivery === "steer" ? "steer" : "auto",
+            // T3 takes a notice only as a queued message, so it carries no delivery intent (as DelegatedTaskQuestionReactor sends it); `auto` starts an idle thread at once.
+            ...(notice.notification === undefined
+              ? { deliveryIntent: delivery === "steer" ? ("steer" as const) : ("auto" as const) }
+              : {}),
             createdBy: "agent",
-            creationSource: "server",
+            // The web names the sender only for a non-server agent message, so a plain message from a child is "provider". A notice stays "server":
+            // T3 treats a provider-created notice as the provider's own buffered notification and never hands its text to the model.
+            creationSource:
+              senderThreadId === undefined || notice.notification !== undefined
+                ? ("server" as const)
+                : ("provider" as const),
+            ...(senderThreadId === undefined
+              ? {}
+              : { senderThreadId: ThreadId.make(senderThreadId) }),
+            ...notice,
           })
           .pipe(
             Effect.as({ ok: true as const, accepted: true as const, messageId }),
@@ -405,7 +440,8 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
               );
             }),
           ),
-      ),
+      );
+    },
 
     interrupt: ({ threadId }) =>
       runPromise(

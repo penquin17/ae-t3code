@@ -208,7 +208,11 @@ export const ChildrenForkResult = reply(Schema.Struct({ childId: Id }), [
 ]);
 export type ChildrenForkResult = typeof ChildrenForkResult.Type;
 
-export const ChildrenMessageArgs = Schema.Struct({ target: Id, content: Text });
+export const ChildrenMessageArgs = Schema.Struct({
+  target: Id,
+  content: Text,
+  kind: Schema.optional(Schema.Literals(["message", "decision"])),
+});
 export type ChildrenMessageArgs = typeof ChildrenMessageArgs.Type;
 export const ChildrenMessageResult = reply(Schema.Struct({ messageId: Id }), [
   "CHILD_NOT_OWNED",

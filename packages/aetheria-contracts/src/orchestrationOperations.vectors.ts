@@ -287,9 +287,16 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
   childrenMessageArgs: {
     accept: [
       { name: "message a child", value: { target: "thr_c1", content: "also check the tests" } },
+      { name: "a plain message", value: { target: "parent", content: "done", kind: "message" } },
+      {
+        name: "a decision request",
+        value: { target: "parent", content: "A or B?", kind: "decision" },
+      },
     ],
     refuse: [
       { name: "empty content", value: { target: "thr_c1", content: "" } },
+      { name: "an unknown kind", value: { target: "parent", content: "x", kind: "question" } },
+      { name: "an unknown key", value: { target: "parent", content: "x", urgent: true } },
       { name: "no target", value: { content: "x" } },
       { name: "a target of the wrong type", value: { target: 7, content: "x" } },
     ],

@@ -146,6 +146,14 @@ export interface ChildThreadPort {
     readonly content: string;
     readonly delivery: "queue" | "steer";
     readonly messageId: string;
+    /** The child thread that sent the message to its caller, so the caller's chat names the sender. */
+    readonly senderThreadId?: string;
+    /** Shows the message as a notice from that child (a decision request), as T3's own delegated-task question notice does. */
+    readonly notification?: {
+      readonly summary: string;
+      readonly detail?: string;
+      readonly childThreadId: string;
+    };
   }): Promise<
     PortResult<
       { readonly accepted: true; readonly messageId: string },

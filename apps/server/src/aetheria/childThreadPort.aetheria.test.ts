@@ -47,7 +47,12 @@ import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderRepl
 import * as DocumentText from "../provider/DocumentText.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { makeChildThreadPort, piSessionIdOf, terminalOutcomeOf } from "./threadPort.ts";
+import {
+  makeChildThreadPort,
+  notificationOf,
+  piSessionIdOf,
+  terminalOutcomeOf,
+} from "./threadPort.ts";
 import { forkSlotKey, requestPiSessionId } from "./piSessionIdSeam.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -900,6 +905,90 @@ it.effect(
       }),
     ),
 );
+
+// A child's message to its caller carries the child's thread, so the caller's chat names the sender; a decision request carries T3's subagent notice (the shape
+// DelegatedTaskQuestionReactor sends, which T3 turns into a notification row); a message with neither is dispatched as before. Read back from T3's real projection.
+it.effect(
+  "a message to the caller carries its sender, a decision request carries a subagent notice, and a plain message carries neither",
+  () =>
+    scenario("sender-and-notice", (script) =>
+      Effect.gen(function* () {
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const port = yield* portOver;
+        const parent = yield* startParent(script.cwd);
+        const created = yield* Effect.promise(() =>
+          port.createChildThread(spawnInput(parent, script.cwd)),
+        );
+        if (!created.ok) return assert.fail(JSON.stringify(created));
+        const parentId = String(parent.parent);
+        const send = (input: Omit<Parameters<typeof port.startTurn>[0], "threadId" | "delivery">) =>
+          Effect.promise(() => port.startTurn({ threadId: parentId, delivery: "queue", ...input }));
+
+        assert.isTrue(
+          (yield* send({
+            content: "found it",
+            messageId: "to-parent-message",
+            senderThreadId: created.threadId,
+          })).ok,
+        );
+        const decisionResult = yield* send({
+          content: "A or B?",
+          messageId: "to-parent-decision",
+          senderThreadId: created.threadId,
+          notification: {
+            summary: 'Subagent "reviewer" needs a decision',
+            detail: "A or B?",
+            childThreadId: created.threadId,
+          },
+        });
+        assert.isTrue(decisionResult.ok, JSON.stringify(decisionResult));
+        assert.isTrue((yield* send({ content: "plain", messageId: "to-parent-plain" })).ok);
+        yield* worker.drain();
+
+        const projection = yield* orchestrator.getThreadProjection(ThreadId.make(parentId));
+        const messages = projection.messages;
+        // T3 makes the notice's `notification` turn item only when its queued run starts (the parent's scripted run never ends here), so the message itself is checked.
+        const byId = (id: string) => messages.find((message) => message.id === id);
+        const plainMessage = byId("to-parent-message");
+        assert.equal(plainMessage?.senderThreadId, created.threadId);
+        // With a sender the message is a provider-created agent message, the attribution under which the web shows the sender's name.
+        assert.equal(plainMessage?.creationSource, "provider");
+        assert.isUndefined(plainMessage?.notification);
+        const decision = byId("to-parent-decision");
+        assert.equal(decision?.senderThreadId, created.threadId);
+        // A notice stays server-created: a provider-created notice is one T3 buffers as the provider's own and never hands to the model.
+        assert.equal(decision?.creationSource, "server");
+        assert.deepEqual(decision?.notification, {
+          source: { kind: "subagent", childThreadId: ThreadId.make(created.threadId) },
+          outcome: "updated",
+          summary: 'Subagent "reviewer" needs a decision',
+          detail: "A or B?",
+        });
+        const plain = byId("to-parent-plain");
+        assert.isDefined(plain);
+        assert.isUndefined(plain?.senderThreadId);
+        assert.isUndefined(plain?.notification);
+        assert.equal(plain?.createdBy, "agent");
+        assert.equal(plain?.creationSource, "server");
+      }),
+    ),
+);
+
+it("notificationOf trims the summary, drops an empty detail, and sends no notice for a blank summary", () => {
+  assert.deepEqual(notificationOf(undefined), {});
+  assert.deepEqual(notificationOf({ summary: "  ", childThreadId: "thread:c" }), {});
+  assert.deepEqual(
+    notificationOf({ summary: " needs a decision ", detail: "", childThreadId: "thread:c" }),
+    {
+      notification: {
+        source: { kind: "subagent", childThreadId: ThreadId.make("thread:c") },
+        outcome: "updated",
+        summary: "needs a decision",
+      },
+    },
+  );
+});
 
 // Step 17 (the wake bound): `readLastHumanMessage` reads the thread projection for the newest message a HUMAN created. The outbox's own messages are agent-created and must never
 // move it; a message created with `createdBy: "user"` (the shape M06's human delivery uses) must; an unknown thread is unavailable, never "no human message".
