@@ -275,7 +275,7 @@ const roleFile = `---
 name: worker
 description: A scratch role.
 metadata:
-  dsh:
+  aetheria:
     tool: worker
     routes:
       - { provider: openai-codex, model: gpt-6.1-sol, effort: high }

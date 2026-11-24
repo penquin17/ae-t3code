@@ -245,6 +245,7 @@ export const ChildrenMessageArgs = Schema.Struct({
 });
 export type ChildrenMessageArgs = typeof ChildrenMessageArgs.Type;
 export const ChildrenMessageResult = reply(Schema.Struct({ messageId: Id }), [
+  "CHILD_LIMIT",
   "CHILD_NOT_OWNED",
   "CHILD_NOT_ADJACENT",
   "CHILD_NOT_RESUMABLE",

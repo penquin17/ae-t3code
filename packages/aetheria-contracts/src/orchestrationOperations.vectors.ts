@@ -439,6 +439,7 @@ export const orchestrationVectors: Readonly<Record<string, OrchestrationVectorSe
   childrenMessageResult: {
     accept: [
       { name: "accepted", value: ok({ messageId: "msg_2" }) },
+      { name: "an idle child woken at the active limit", value: fail("CHILD_LIMIT") },
       { name: "not owned", value: fail("CHILD_NOT_OWNED") },
       { name: "not adjacent", value: fail("CHILD_NOT_ADJACENT") },
       { name: "not resumable", value: fail("CHILD_NOT_RESUMABLE") },

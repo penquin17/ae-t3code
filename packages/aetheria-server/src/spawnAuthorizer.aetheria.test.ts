@@ -20,7 +20,7 @@ const roleFile = (tool: string, tools: string, maxDepth: number) => `---
 name: ${tool}
 description: A scratch role.
 metadata:
-  dsh:
+  aetheria:
     tool: ${tool}
     routes:
       - { provider: openai-codex, model: gpt-6.1-sol, effort: high }
