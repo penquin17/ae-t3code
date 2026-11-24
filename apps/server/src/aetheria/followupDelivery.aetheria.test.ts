@@ -3,14 +3,15 @@
 //
 // Question. T3 re-arms a delegated task for a follow-up run only when the message is `mcp`-sourced from the parent (`mayStartSubagentFollowup`, `recordSubagentFollowup`).
 // The Backend adapter's `startTurn` sends a parent-to-child message so (`fromParent`). After a child's first completion was delivered, does a second `startTurn` bring the
-// child's second answer to the parent as a second delivery message bound to the follow-up's task, exactly once, and a busy parent only when it settles?
+// child's second answer to the parent as a second delivery message bound to the follow-up's task, exactly once, and a busy parent inside its live run?
 //
 // Boundary. The real ThreadManagementService, Orchestrator, EventSink, ProviderSessionManager and T3's continuation worker on one in-memory SQLite database
 // (as piChildDelivery.aetheria.test.ts) with the REAL Pi adapter for both threads on installed Pi 1.5.0 and Pi's faux provider as a test extension. No model, no credential. The
 // child is made by T3's own `delegated_task.request` (`completionWake: "always"`); the follow-up goes through the Backend adapter's own `startTurn`.
 //
 // Shows: a second delivery message with its own task, once; a replay of the same message id adds nothing; a follow-up WITHOUT `fromParent` (the old shape) brings no task and no
-// delivery, so the test can fail; a busy parent gets the second delivery only after its own run settles; `readDelegatedCompletion` answers for the latest task.
+// delivery, so the test can fail; a busy parent gets the second delivery inside its live run (wake `always`), with no extra run and no duplicate after it settles;
+// `readDelegatedCompletion` answers for the latest task.
 // Does NOT show: a Backend restart between the follow-up and its completion, or the Aetheria extension inside either thread.
 /* oxlint-disable t3code/no-real-time-wait-in-tests, t3code/no-test-timeout-or-unreasoned-skip -- Real Pi subprocesses; no background worker, so drain() repeats. */
 import * as NodeServices from "@effect/platform-node/NodeServices";
