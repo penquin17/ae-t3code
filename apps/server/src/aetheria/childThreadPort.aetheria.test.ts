@@ -944,6 +944,18 @@ it.effect(
         });
         assert.isTrue(decisionResult.ok, JSON.stringify(decisionResult));
         assert.isTrue((yield* send({ content: "plain", messageId: "to-parent-plain" })).ok);
+        // A parent's message to its direct child names the parent and is marked `fromParent`: T3 takes it as the parent's follow-up (`mcp`, the shape of its own `t3_thread_send`).
+        const down = yield* Effect.promise(() =>
+          port.startTurn({
+            threadId: created.threadId,
+            delivery: "queue",
+            content: "next job",
+            messageId: "to-child-followup",
+            senderThreadId: parentId,
+            fromParent: true,
+          }),
+        );
+        assert.isTrue(down.ok, JSON.stringify(down));
         yield* worker.drain();
 
         const projection = yield* orchestrator.getThreadProjection(ThreadId.make(parentId));
@@ -971,6 +983,13 @@ it.effect(
         assert.isUndefined(plain?.notification);
         assert.equal(plain?.createdBy, "agent");
         assert.equal(plain?.creationSource, "server");
+        const followup = (yield* orchestrator.getThreadProjection(
+          ThreadId.make(created.threadId),
+        )).messages.find((message) => message.id === "to-child-followup");
+        assert.equal(followup?.senderThreadId, parentId);
+        assert.equal(followup?.createdBy, "agent");
+        assert.equal(followup?.creationSource, "mcp");
+        assert.isUndefined(followup?.notification);
       }),
     ),
 );

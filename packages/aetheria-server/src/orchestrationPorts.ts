@@ -146,8 +146,10 @@ export interface ChildThreadPort {
     readonly content: string;
     readonly delivery: "queue" | "steer";
     readonly messageId: string;
-    /** The child thread that sent the message to its caller, so the caller's chat names the sender. */
+    /** The thread that sent the message, so the receiving chat names the sender: the child for a message to its caller, the caller for a message to its direct child. */
     readonly senderThreadId?: string;
+    /** Set with `senderThreadId` on a parent's message to its direct child: T3 treats the turn as the parent's follow-up and delivers the child's reply back to the parent. */
+    readonly fromParent?: true;
     /** Shows the message as a notice from that child (a decision request), as T3's own delegated-task question notice does. */
     readonly notification?: {
       readonly summary: string;

@@ -400,7 +400,15 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
       return Promise.resolve({ ok: true as const, released: true as const });
     },
 
-    startTurn: ({ threadId, content, delivery, messageId, senderThreadId, notification }) => {
+    startTurn: ({
+      threadId,
+      content,
+      delivery,
+      messageId,
+      senderThreadId,
+      fromParent,
+      notification,
+    }) => {
       const notice = notificationOf(notification);
       return runPromise(
         threads
@@ -420,10 +428,14 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
             createdBy: "agent",
             // The web names the sender only for a non-server agent message, so a plain message from a child is "provider". A notice stays "server":
             // T3 treats a provider-created notice as the provider's own buffered notification and never hands its text to the model.
+            // A parent's message to its own child is the exception: T3 opens a delegated task for a follow-up only when it is `mcp`-sourced from the parent (`mayStartSubagentFollowup`,
+            // `recordSubagentFollowup`), the shape of its own `t3_thread_send`, and that task is how the child's reply is delivered back. Its web label is the same as a provider message's.
             creationSource:
               senderThreadId === undefined || notice.notification !== undefined
                 ? ("server" as const)
-                : ("provider" as const),
+                : fromParent === true
+                  ? ("mcp" as const)
+                  : ("provider" as const),
             ...(senderThreadId === undefined
               ? {}
               : { senderThreadId: ThreadId.make(senderThreadId) }),
@@ -557,9 +569,17 @@ export const makeChildThreadPort = Effect.fn("makeChildThreadPort")(function* (
           if (parentId === undefined || parentId === null)
             return fail("unavailable" as const, "the thread has no parent");
           const parent = yield* projectionOf(parentId);
-          const task = parent.subagents.find(
-            (subagent) => String(subagent.childThreadId) === threadId,
-          );
+          // A child holds one task for its spawn and one more for each follow-up run T3 re-armed; the answer is about the latest, the run most recently started.
+          const task = parent.subagents
+            .filter((subagent) => String(subagent.childThreadId) === threadId)
+            .reduce<(typeof parent.subagents)[number] | undefined>(
+              (latest, subagent) =>
+                latest === undefined ||
+                String(subagent.startedAt ?? "") >= String(latest.startedAt ?? "")
+                  ? subagent
+                  : latest,
+              undefined,
+            );
           const state = task?.completionDelivery?.state;
           if (task === undefined || state === undefined)
             return fail("unavailable" as const, "no delegated-completion state is recorded");

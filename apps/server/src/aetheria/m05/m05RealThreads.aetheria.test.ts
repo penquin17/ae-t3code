@@ -320,7 +320,7 @@ const layerRuntime = (name: string, adapter: ProviderAdapter.ProviderAdapterV2["
 
 // ----------------------------------------------------------------------------------------------------------------------------------- scratch material
 const GIT_FREE_ROLE = (tool: string, tools: string) =>
-  `---\nname: ${tool}\ndescription: A scratch role.\nmetadata:\n  dsh:\n    tool: ${tool}\n    routes:\n      - { provider: pi, model: test-model, effort: high }\n    tools: [${tools}]\n    maxDepth: 2\n    background: continuable\n---\n\nThe job: do the scratch work.\n`;
+  `---\nname: ${tool}\ndescription: A scratch role.\nmetadata:\n  aetheria:\n    tool: ${tool}\n    routes:\n      - { provider: pi, model: test-model, effort: high }\n    tools: [${tools}]\n    maxDepth: 2\n    background: continuable\n---\n\nThe job: do the scratch work.\n`;
 
 const makeCheckout = (dir: string) => {
   NodeFS.mkdirSync(NodePath.join(dir, ".agents", "agents", "ae"), { recursive: true });

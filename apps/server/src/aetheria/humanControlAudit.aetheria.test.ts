@@ -111,7 +111,7 @@ const settings = (dir: string, cycles: string) => {
 };
 
 const roleFile = (tool: string, tools: string) =>
-  `---\nname: ${tool}\ndescription: A scratch role.\nmetadata:\n  dsh:\n    tool: ${tool}\n    routes:\n      - { provider: openai-codex, model: gpt-6.1-sol, effort: high }\n    tools: [${tools}]\n    maxDepth: 1\n    background: one-shot\n---\n\nThe job: do the scratch work.\n`;
+  `---\nname: ${tool}\ndescription: A scratch role.\nmetadata:\n  aetheria:\n    tool: ${tool}\n    routes:\n      - { provider: openai-codex, model: gpt-6.1-sol, effort: high }\n    tools: [${tools}]\n    maxDepth: 1\n    background: one-shot\n---\n\nThe job: do the scratch work.\n`;
 
 /** The Aetheria checkout: a real repository with the demo cycle, authored roles, and no home sets (the scratch home is empty). */
 const checkoutRepository = () => {
